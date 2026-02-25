@@ -1,0 +1,78 @@
+#pragma once
+
+#include <cstdint>
+#include <cmath>
+#include <functional>
+
+// ─── Coordinate types ────────────────────────────────────────────────────────
+
+struct TilePos {
+    int x, y;
+
+    bool operator==(const TilePos&) const = default;
+    bool operator!=(const TilePos&) const = default;
+
+    TilePos operator+(const TilePos& o) const { return {x + o.x, y + o.y}; }
+    TilePos operator-(const TilePos& o) const { return {x - o.x, y - o.y}; }
+    TilePos operator*(int s)            const { return {x * s,   y * s};   }
+};
+
+struct Vec2f {
+    float x, y;
+};
+
+struct Bounds {
+    Vec2f min, max;   // in tile units
+};
+
+// ─── ID types ────────────────────────────────────────────────────────────────
+
+using EntityID    = uint32_t;
+using GridID      = uint32_t;
+using RecordingID = uint32_t;
+using Tick        = uint64_t;
+
+constexpr EntityID INVALID_ENTITY = 0;
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum class EntityType { Player, Goblin, Mushroom, Poop };
+enum class Direction  { N, NE, E, SE, S, SW, W, NW };
+enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
+enum class EventType  { Arrived, Collided, Despawned };
+enum class TileType   { Grass, BareEarth };
+
+// ─── Math helpers ────────────────────────────────────────────────────────────
+
+inline Vec2f lerp(Vec2f a, Vec2f b, float t) {
+    return { a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t };
+}
+
+inline Vec2f toVec(TilePos p) {
+    return { static_cast<float>(p.x), static_cast<float>(p.y) };
+}
+
+// ─── Direction helpers ───────────────────────────────────────────────────────
+
+inline Direction toDirection(TilePos delta) {
+    if (delta.x ==  0 && delta.y == -1) return Direction::N;
+    if (delta.x ==  1 && delta.y == -1) return Direction::NE;
+    if (delta.x ==  1 && delta.y ==  0) return Direction::E;
+    if (delta.x ==  1 && delta.y ==  1) return Direction::SE;
+    if (delta.x ==  0 && delta.y ==  1) return Direction::S;
+    if (delta.x == -1 && delta.y ==  1) return Direction::SW;
+    if (delta.x == -1 && delta.y ==  0) return Direction::W;
+    if (delta.x == -1 && delta.y == -1) return Direction::NW;
+    return Direction::N;
+}
+
+// ─── Hash for TilePos (for use in unordered_map) ─────────────────────────────
+
+struct TilePosHash {
+    size_t operator()(const TilePos& p) const {
+        size_t seed = 0;
+        seed ^= std::hash<int>{}(p.x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed ^= std::hash<int>{}(p.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        return seed;
+    }
+};
