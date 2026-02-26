@@ -1,8 +1,37 @@
 # Grid Game — Design Document
 
+## Vision
+
+A simulation of thousands to millions of autonomous agents, each following routines
+and reacting to stimulus from their environment and from other agents. The long-term
+goal is a 2.5D game in the style of Pokémon — a rich, living world that feels
+populated and alive.
+
+Agents perceive and react to environmental stimuli — fire, water, freezing, being
+pushed or pulled, and others to be defined. Stimuli are first-class simulation
+objects: they propagate through the world (fire spreads, cold radiates, force
+transfers), and agents respond based on their type and state. The same stimulus
+system drives both environmental hazards and agent-to-agent interactions.
+
+The simulation is designed to run in parallel on the GPU or integrated graphics —
+the agent count target (millions) makes CPU-serial execution infeasible. The
+architecture should be as system-agnostic as possible: no vendor-specific GPU APIs,
+no assumptions about dedicated hardware. The compute backend (GPU parallelism,
+spatial queries, scheduling) must remain decoupled from both the simulation logic
+and the renderer so it can be swapped or extended without rewriting either.
+
+Development proceeds in two initial phases:
+
+- **2D graphical version** — tile-based SDL2 renderer, the primary development target.
+- **Terminal version** — a lightweight ASCII/ANSI renderer for the same simulation,
+  useful for rapid iteration and running on headless machines.
+
+The core simulation (agents, scheduling, spatial queries, collision, events) is
+renderer-agnostic and shared between both frontends.
+
 ## Overview
 
-A 2D tile-based action game with smooth visual movement, a multi-world system, and a
+A 2D tile-based game with smooth visual movement, a multi-world system, and a
 movement recording/playback mechanic. Written in C++ with SDL2.
 
 ---
