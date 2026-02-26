@@ -8,10 +8,11 @@ goal is a 2.5D game in the style of Pokémon — a rich, living world that feels
 populated and alive.
 
 Agents perceive and react to environmental stimuli — fire, water, freezing, being
-pushed or pulled, and others to be defined. Stimuli are first-class simulation
-objects: they propagate through the world (fire spreads, cold radiates, force
-transfers), and agents respond based on their type and state. The same stimulus
-system drives both environmental hazards and agent-to-agent interactions.
+pushed or pulled, and others to be defined. Stimuli are per-tile float fields: fire
+intensity, cold, water level, force vector, and so on. They propagate across the
+tile grid each tick (fire spreads, cold radiates, force transfers) and agents sample
+the tile they occupy to determine their reaction. Stimuli are not entities — they
+are properties of space, updated in parallel by the compute backend.
 
 The simulation is designed to run in parallel on the GPU or integrated graphics —
 the agent count target (millions) makes CPU-serial execution infeasible. The
@@ -46,6 +47,11 @@ movement recording/playback mechanic. Written in C++ with SDL2.
   Rendering runs as fast as possible and interpolates between ticks.
 - **One grid per world.** Entities exist in exactly one `Grid` at a time. Grids are
   independent simulations (main world, studio, interiors, parallel universes).
+- **Tile hard cap.** A maximum of 8 entities may occupy the same tile simultaneously.
+  A move that would exceed this cap is blocked.
+- **Three occupancy layers, independently managed.** Terrain type and stimulus fields
+  are properties of tiles (flat arrays). Entities are a separate system. All three
+  coexist freely — an entity standing on a fire tile does not displace the fire.
 
 ---
 
@@ -66,6 +72,19 @@ enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
 enum class TileType   { Grass, BareEarth };
+
+constexpr int TILE_ENTITY_CAP = 8;   // max entities per tile
+
+// Per-tile field data (flat arrays in TileGrid, indexed by TilePos)
+struct TileFields {
+    TileType type;       // terrain type
+    float    height;     // Perlin height, render only
+    float    fire;       // stimulus: fire intensity  (0.0 = none)
+    float    cold;       // stimulus: cold intensity  (0.0 = none)
+    float    water;      // stimulus: water level     (0.0 = none)
+    float    forceX;     // stimulus: push/pull force (tile units/tick)
+    float    forceY;
+};
 ```
 
 ---
@@ -172,9 +191,13 @@ transferEntity(id, fromGrid, toGrid, TilePos destination)
 
 ### SpatialGrid
 
-Hash map from `TilePos` to a list of `EntityID`s. Entities in motion are registered
-in **both** their `pos` and `destination` cells simultaneously. This prevents any
-entity from entering a cell that another entity has only partially vacated.
+Hash map from `TilePos` to a fixed-size array of up to `TILE_ENTITY_CAP` (8)
+`EntityID`s. Entities in motion are registered in **both** their `pos` and
+`destination` cells simultaneously. This prevents any entity from entering a cell
+that another entity has only partially vacated.
+
+A move is blocked before it starts if the destination tile already holds 8 entities
+(after accounting for any that are departing this tick).
 
 **Multi-tile entities** (e.g. 2×1, 3×3) register in every cell their bounds overlap:
 ```
@@ -189,6 +212,9 @@ remain covered are untouched.
 **Querying** (broad phase): given an AABB, return all unique `EntityID`s registered
 in any overlapping cell. Duplicates (from multi-cell registration) are deduplicated
 before the narrow phase.
+
+The `SpatialGrid` manages entities only. Stimulus fields and terrain are stored
+separately in `TileGrid` and are not affected by entity occupancy.
 
 ---
 
@@ -264,26 +290,40 @@ tick and flushed at the end, so handlers always run on a consistent game state.
 
 ---
 
-### Terrain
+### Tile Fields
 
-Separate from entities. Not in the spatial grid.
+Terrain and stimuli are properties of tiles, not entities. They are stored in
+`TileGrid` as flat arrays of `TileFields` structs indexed by `TilePos`. The
+`SpatialGrid` is entirely separate.
 
 ```cpp
-class Terrain {
-    FastNoiseLite noise;
-    unordered_map<TilePos, float>    heightCache;   // Perlin, computed on demand
-    unordered_map<TilePos, TileType> overrides;     // Dig/Plant results
+class TileGrid {
+    FastNoiseLite                        noise;
+    unordered_map<TilePos, TileFields>   tiles;   // sparse; default-constructed on miss
 public:
-    float    heightAt(TilePos);   // cached Perlin noise
-    TileType typeAt(TilePos);     // checks overrides first, defaults to Grass
-    void     dig(TilePos);        // overrides[pos] = BareEarth
-    void     restore(TilePos);    // removes override, returns to Grass
+    TileFields&       at(TilePos);        // returns default if not yet set
+    const TileFields& at(TilePos) const;
+
+    // Terrain
+    void  dig(TilePos);                   // sets type = BareEarth
+    void  restore(TilePos);              // sets type = Grass
+
+    // Stimulus update — called once per tick
+    void  stepStimuli();                  // propagate/decay all stimulus fields
 };
 ```
 
-`dig()` sets terrain state. Planting spawns a `Mushroom` entity on `BareEarth` and
-calls `restore()`. The renderer queries terrain per tile independently of entity
-rendering.
+**Terrain type** (`Grass`, `BareEarth`, ...) is a field on `TileFields`. Perlin
+height is computed on demand and cached. `dig()` and `restore()` mutate the type
+field directly.
+
+**Stimulus fields** (`fire`, `cold`, `water`, `forceX/Y`) are floats on `TileFields`.
+`stepStimuli()` runs each tick: fire spreads to adjacent tiles and decays, cold
+radiates, water flows downhill, force dissipates. Terrain type can modulate
+propagation (fire spreads faster on `BareEarth`).
+
+Agents sample `TileGrid::at(pos)` each tick and react to stimulus values above
+their per-type thresholds. Stimuli do not interact with the `SpatialGrid`.
 
 ---
 
@@ -332,14 +372,22 @@ its ID is known, and actions are scheduled directly against it.
 
 ### Renderer
 
-Owns all SDL2 resources. Receives game state and `alpha` (sub-tick interpolation
-factor). Has no write access to game state.
+Rendering is abstracted behind `IRenderer`. The simulation has no dependency on any
+specific frontend. Two implementations are planned:
+
+- **`SDLRenderer`** — SDL2 window, sprite blitting, tile shading. Primary target.
+- **`TerminalRenderer`** — ANSI/ASCII output. No SDL dependency. Useful for rapid
+  iteration and headless machines.
+
+`IRenderer` receives game state and `alpha` (sub-tick interpolation factor). It has
+no write access to game state.
 
 **Per frame:**
 1. Clear screen
-2. For each tile in viewport: query `terrain.heightAt()`, compute colour, draw rect
+2. For each tile in viewport: read `TileGrid::at()` for terrain type, height, and
+   stimulus values; compute colour/character; draw
 3. Sort entities in active grid by `layer` (ascending)
-4. For each entity: compute render position, blit sprite
+4. For each entity: compute render position, blit sprite or character
 
 **Render position** (smooth movement):
 ```
@@ -349,8 +397,8 @@ Vec2f renderPos = lerp(toVec(entity.pos), toVec(entity.destination), entity.move
 `moveT` is the tick-level progress (updated by the movement system). `alpha` can be
 applied on top for sub-tick smoothness if needed.
 
-**SpriteCache**: loads and caches textures by `EntityType` at startup. Entities hold
-no rendering data.
+**SpriteCache** (`SDLRenderer` only): loads and caches textures by `EntityType` at
+startup. Entities hold no rendering data.
 
 ---
 
@@ -405,17 +453,19 @@ grid_game/
 │   └── FastNoiseLite.hpp
 └── src/
     ├── main.cpp
-    ├── types.hpp              ← TilePos, Vec2f, Bounds, EntityID, all enums
-    ├── game.cpp / game.hpp    ← Game, game loop, top-level tick
-    ├── entity.cpp / entity.hpp   ← Entity struct, EntityRegistry
-    ├── grid.cpp / grid.hpp    ← Grid, multi-grid world management
-    ├── spatial.cpp / spatial.hpp ← SpatialGrid
+    ├── types.hpp                   ← TilePos, Vec2f, Bounds, TileFields, enums, constants
+    ├── game.cpp / game.hpp         ← Game, game loop, top-level tick
+    ├── entity.cpp / entity.hpp     ← Entity struct, EntityRegistry
+    ├── grid.cpp / grid.hpp         ← Grid, multi-grid world management
+    ├── spatial.cpp / spatial.hpp   ← SpatialGrid (entity occupancy, hard cap 8)
+    ├── tilegrid.cpp / tilegrid.hpp ← TileGrid (terrain type, height, stimulus fields)
     ├── scheduler.cpp / scheduler.hpp ← ScheduledAction, Scheduler (min-heap)
-    ├── events.cpp / events.hpp   ← Event, EventBus
-    ├── terrain.cpp / terrain.hpp ← Terrain, Perlin via FastNoiseLite
+    ├── events.cpp / events.hpp     ← Event, EventBus
     ├── recorder.cpp / recorder.hpp ← Recording, RecordingFrame, Recorder
-    ├── input.cpp / input.hpp  ← Input snapshot
-    └── renderer.cpp / renderer.hpp ← SDL2 rendering, SpriteCache
+    ├── input.cpp / input.hpp       ← Input snapshot
+    ├── renderer.hpp                ← IRenderer interface
+    ├── sdl_renderer.cpp / .hpp     ← SDLRenderer (SDL2, SpriteCache)
+    └── terminal_renderer.cpp / .hpp ← TerminalRenderer (ANSI/ASCII)
 ```
 
 ---
