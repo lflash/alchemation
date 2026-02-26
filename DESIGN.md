@@ -30,6 +30,14 @@ Development proceeds in two initial phases:
 The core simulation (agents, scheduling, spatial queries, collision, events) is
 renderer-agnostic and shared between both frontends.
 
+Agent behaviour is driven by **routines** — authored programs that agents execute
+instruction by instruction. A routine is not a high-level goal ("find food") but a
+precise sequence of actions ("go right, go forward, if fire > 0.5 go back, loop").
+The player records routines by playing, then assigns them to agents. Thousands of
+agents run the same routine in parallel on the GPU, each with their own program
+counter and local state. Routines can call subroutines, enabling complex behaviour
+to be built from reusable components.
+
 ## Overview
 
 A 2D tile-based game with smooth visual movement, a multi-world system, and a
@@ -72,6 +80,43 @@ enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
 enum class TileType   { Grass, BareEarth };
+
+using RoutineID = uint32_t;
+
+enum class OpCode : uint8_t {
+    MOVE_REL,      // move one tile relative to facing (forward/back/left/right)
+    MOVE_ABS,      // move one tile in absolute direction (N/S/E/W)
+    FACE,          // set facing without moving
+    WAIT,          // pause for arg0 ticks
+    JUMP,          // unconditional jump to addr
+    JUMP_IF,       // jump to addr if stimulus[condition] > threshold
+    JUMP_IF_NOT,   // jump to addr if stimulus[condition] <= threshold
+    CALL,          // push return address, jump to subroutine
+    RET,           // pop call stack, return to caller
+    HALT,          // stop executing (agent becomes idle)
+};
+
+enum class Condition : uint8_t {
+    FIRE, COLD, WATER, FORCE_X, FORCE_Y, ENTITY_AHEAD, AT_EDGE
+};
+
+struct Instruction {
+    OpCode    op;
+    uint8_t   dir;        // Direction (for MOVE_REL, MOVE_ABS, FACE)
+    Condition condition;  // stimulus to test (for JUMP_IF / JUMP_IF_NOT)
+    float     threshold;  // stimulus threshold
+    uint32_t  addr;       // jump target or subroutine RoutineID (for CALL)
+};
+
+constexpr int CALL_STACK_DEPTH = 8;   // max subroutine nesting — fixed for GPU
+
+struct AgentExecState {
+    RoutineID routineID;                    // which routine to execute
+    uint32_t  pc;                           // program counter
+    uint32_t  waitTicks;                    // remaining ticks on a WAIT
+    uint32_t  callStack[CALL_STACK_DEPTH];  // return addresses for CALL/RET
+    uint8_t   callDepth;                    // current call stack depth
+};
 
 constexpr int TILE_ENTITY_CAP = 8;   // max entities per tile
 
@@ -327,46 +372,86 @@ their per-type thresholds. Stimuli do not interact with the `SpatialGrid`.
 
 ---
 
-### Recorder
+### Routine VM
 
-Records player movement as **relative tile deltas**, not absolute positions. This
-makes instantiation trivial: no coordinate normalisation, no prototype ID remapping.
+Routines are programs. Agents are threads. The GPU kernel is the interpreter.
 
-```cpp
-struct RecordingFrame {
-    int      dx, dy;        // -1, 0, or 1
-    uint32_t delayTicks;    // ticks since previous frame
-};
+Each routine is a flat array of `Instruction`s stored in a GPU-resident buffer. Each
+agent holds an `AgentExecState` — a program counter, a wait counter, and a fixed-
+depth call stack. One GPU thread per agent executes one instruction per tick.
 
-struct Recording {
-    RecordingID         id;
-    vector<RecordingFrame> frames;
-};
+**GPU kernel (per tick, one thread per agent):**
+```
+if agent.waitTicks > 0:
+    agent.waitTicks--
+    return
+
+instr = routines[agent.routineID][agent.pc]
+
+switch instr.op:
+    MOVE_REL:    intendedMove = resolve(instr.dir, agent.facing)
+    MOVE_ABS:    intendedMove = instr.dir
+    FACE:        agent.facing = instr.dir
+    WAIT:        agent.waitTicks = instr.addr; agent.pc++; return
+    JUMP:        agent.pc = instr.addr; return
+    JUMP_IF:     if stimuli[agent.pos][instr.condition] > instr.threshold:
+                     agent.pc = instr.addr; return
+    JUMP_IF_NOT: if stimuli[agent.pos][instr.condition] <= instr.threshold:
+                     agent.pc = instr.addr; return
+    CALL:        callStack[callDepth++] = agent.pc + 1
+                 agent.routineID = instr.addr
+                 agent.pc = 0; return
+    RET:         if callDepth == 0: halt
+                 agent.pc = callStack[--callDepth]; return
+    HALT:        return
+
+agent.pc++
 ```
 
-**Recording**: on each player move, append `{dest - src, currentTick - lastTick}`.
+A second pass collects all `intendedMove`s, resolves conflicts (tile cap, swaps), and
+commits. The VM and the collision pass are independent GPU kernels.
 
-**Cycling**: `recordings` is a `deque<Recording>`. `q` advances `selectedRecording`
-cyclically.
+---
 
-**Instantiation** — converting a recording into scheduled actions for a projectile:
+**Subroutines**
+
+`CALL routineID` pushes the return address onto the agent's fixed-size call stack and
+jumps to the start of the named routine. `RET` returns to the caller. Maximum nesting
+depth is `CALL_STACK_DEPTH` (8) — fixed at compile time so agent state remains a
+constant-size GPU struct.
+
+This lets complex behaviours be built from named components:
 
 ```
-toAngle(fireDirection) → angle
-cursor = spawnPos
-t = spawnTick
-
-for each frame in recording.frames:
-    t += frame.delayTicks
-    delta = rotate({frame.dx, frame.dy}, angle)  // rotate relative to North
-    cursor += round(delta)
-    push ScheduledAction{ tick=t, entity=projectileID, Move{cursor} }
-
-push ScheduledAction{ tick=t + travelTime, entity=projectileID, Despawn{} }
+routine "patrol":           routine "flee_from_fire":
+  CALL  flee_from_fire        JUMP_IF_NOT  FIRE 0.3  done
+  MOVE_REL  E                 MOVE_REL     BACK
+  CALL  flee_from_fire        RET
+  MOVE_REL  N               done:
+  JUMP  0                     RET
 ```
 
-No prototype ID. No post-insertion mutation. The projectile entity is spawned first,
-its ID is known, and actions are scheduled directly against it.
+Subroutines are just routines — they live in the same buffer and are referenced by
+`RoutineID`. There is no distinction between a top-level routine and a subroutine.
+
+---
+
+**Recording**
+
+The player records a routine by playing. Each action emits one or more instructions:
+
+| Player action | Emitted instruction |
+|---|---|
+| Move key | `MOVE_REL <dir>` |
+| Pause between moves | `WAIT <ticks>` |
+| Branch trigger + condition pick | `JUMP_IF <condition> <threshold> <addr>` |
+| Subroutine trigger + routine pick | `CALL <routineID>` |
+| End of loop | `JUMP 0` |
+
+Conditional branches and subroutine calls are inserted via the **Routine Editor**
+(see below) rather than recorded live, since they require the player to specify a
+target address or condition. The recorder captures movement and timing; the editor
+handles control flow.
 
 ---
 
@@ -399,6 +484,36 @@ applied on top for sub-tick smoothness if needed.
 
 **SpriteCache** (`SDLRenderer` only): loads and caches textures by `EntityType` at
 startup. Entities hold no rendering data.
+
+---
+
+### Routine Editor
+
+The routine editor is an in-game UI for authoring, naming, and assigning routines.
+It is a future phase — the simulation and VM must be in place first — but its
+requirements shape the VM design.
+
+**What the editor must support:**
+- View the current routine as a list of numbered instructions
+- Insert, delete, and reorder instructions
+- Set `JUMP_IF` conditions and thresholds interactively
+- Name and save routines to a persistent library
+- Pick a subroutine by name when inserting a `CALL` instruction
+- Assign a routine to a selected agent type or individual agent
+- Run the routine on a single test agent in the studio grid for preview
+
+**Relationship to recording:**
+Recording and editing are complementary. The player records the movement skeleton
+(a linear sequence of `MOVE_REL` and `WAIT` instructions), then opens the editor to
+add branches, loops, and subroutine calls. Neither tool alone is sufficient; both are
+required for authoring non-trivial routines.
+
+**UI requirements:**
+The editor requires a basic immediate-mode UI system: text rendering, a selectable
+list, directional navigation, and modal input (for naming routines, entering
+thresholds). This implies a font/glyph rendering system and a minimal widget layer
+on top of `IRenderer`. SDL2's built-in capabilities are insufficient; a font library
+(e.g. SDL_ttf) or a baked bitmap font will be needed.
 
 ---
 
@@ -457,15 +572,17 @@ grid_game/
     ├── game.cpp / game.hpp         ← Game, game loop, top-level tick
     ├── entity.cpp / entity.hpp     ← Entity struct, EntityRegistry
     ├── grid.cpp / grid.hpp         ← Grid, multi-grid world management
-    ├── spatial.cpp / spatial.hpp   ← SpatialGrid (entity occupancy, hard cap 8)
-    ├── tilegrid.cpp / tilegrid.hpp ← TileGrid (terrain type, height, stimulus fields)
+    ├── spatial.cpp / spatial.hpp     ← SpatialGrid (entity occupancy, hard cap 8)
+    ├── tilegrid.cpp / tilegrid.hpp   ← TileGrid (terrain type, height, stimulus fields)
     ├── scheduler.cpp / scheduler.hpp ← ScheduledAction, Scheduler (min-heap)
-    ├── events.cpp / events.hpp     ← Event, EventBus
-    ├── recorder.cpp / recorder.hpp ← Recording, RecordingFrame, Recorder
-    ├── input.cpp / input.hpp       ← Input snapshot
-    ├── renderer.hpp                ← IRenderer interface
-    ├── sdl_renderer.cpp / .hpp     ← SDLRenderer (SDL2, SpriteCache)
-    └── terminal_renderer.cpp / .hpp ← TerminalRenderer (ANSI/ASCII)
+    ├── events.cpp / events.hpp       ← Event, EventBus
+    ├── routine.hpp                   ← Instruction, OpCode, Condition, AgentExecState
+    ├── routine_vm.cpp / .hpp         ← RoutineVM: GPU kernel, routine buffer, step()
+    ├── recorder.cpp / recorder.hpp   ← records player actions → Instruction stream
+    ├── input.cpp / input.hpp         ← Input snapshot
+    ├── irenderer.hpp                 ← IRenderer interface
+    ├── renderer.cpp / renderer.hpp   ← SDLRenderer (SDL2, SpriteCache)
+    └── terminal_renderer.cpp / .hpp  ← TerminalRenderer (ANSI/ASCII)
 ```
 
 ---
