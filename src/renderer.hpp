@@ -1,6 +1,6 @@
 #pragma once
 
-#include "types.hpp"
+#include "irenderer.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <unordered_map>
@@ -28,7 +28,7 @@ private:
 
 // ─── Renderer ────────────────────────────────────────────────────────────────
 
-class Renderer {
+class Renderer : public IRenderer {
 public:
     static constexpr int TILE_SIZE   = 32;
     static constexpr int GRID_WIDTH  = 20;
