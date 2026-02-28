@@ -93,7 +93,7 @@ CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
 
     switch (mover) {
         case ET::Player:
-            if (occupant == ET::Goblin)   return CR::Combat;
+            if (occupant == ET::Goblin)   return CR::Block;   // bump combat
             if (occupant == ET::Mushroom) return CR::Collect;
             return CR::Pass;
 

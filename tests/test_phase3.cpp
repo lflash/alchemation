@@ -136,8 +136,8 @@ TEST_CASE("resolveCollision: player + mushroom → Collect") {
     CHECK(resolveCollision(EntityType::Player, EntityType::Mushroom) == CollisionResult::Collect);
 }
 
-TEST_CASE("resolveCollision: player + goblin → Combat") {
-    CHECK(resolveCollision(EntityType::Player, EntityType::Goblin) == CollisionResult::Combat);
+TEST_CASE("resolveCollision: player + goblin → Block (bump combat)") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Goblin) == CollisionResult::Block);
 }
 
 TEST_CASE("resolveCollision: goblin + goblin → Block") {

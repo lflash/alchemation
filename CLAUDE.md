@@ -55,7 +55,7 @@ far in conversation, but the user may revise any of them.
 - **Single spatial grid per `Grid`** — not split by collision layer.
 - **Multiple `Grid` instances** are independent simulation spaces (main world, studio,
   interiors, parallel universes). Not collision layers.
-- **Recordings are `Instruction` streams** (`MOVE_REL`, `WAIT`, etc.) for the Routine VM, not raw tile deltas.
+- **Recordings are `Instruction` streams** (`MOVE_REL`, `WAIT`, `DIG`, `PLANT`, etc.) executed by the Routine VM. A deployed Poop is a routine agent — an autonomous robot — not a projectile. All agent types share the same VM.
 - **Terrain type and stimuli** are fields on `TileGrid` tiles, not entities.
 - **Scheduler is a min-heap** ordered by tick.
 

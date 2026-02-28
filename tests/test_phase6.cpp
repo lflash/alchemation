@@ -1,6 +1,7 @@
 #include "doctest.h"
 #include "entity.hpp"
 #include "spatial.hpp"
+#include <algorithm>
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -14,17 +15,39 @@ static void doCombat(EntityID playerID, EntityID goblinID,
     goblin->health -= player->mana;
     if (goblin->health <= 0) {
         spatial.remove(goblinID, goblin->pos, goblin->size);
+        if (goblin->isMoving())
+            spatial.remove(goblinID, goblin->destination, goblin->size);
         registry.destroy(goblinID);
         return;
     }
 
-    TilePos pushDest = goblin->pos + dirToDelta(player->facing);
-    std::vector<MoveIntention> intentions = {{
-        goblinID, goblin->pos, pushDest, goblin->type, goblin->size
-    }};
-    auto allowed = resolveMoves(intentions, spatial, registry);
-    if (allowed.count(goblinID))
-        goblin->destination = pushDest;
+    TilePos pushBase = goblin->isMoving() ? goblin->destination : goblin->pos;
+    TilePos pushDest = pushBase + dirToDelta(player->facing);
+    if (goblin->isMoving()) {
+        Bounds pushBounds = boundsAt(pushDest, goblin->size);
+        bool pushBlocked = false;
+        for (EntityID oid : spatial.query(pushBounds)) {
+            if (oid == goblinID) continue;
+            const Entity* occ = registry.get(oid);
+            if (!occ || !overlaps(pushBounds, boundsAt(occ->pos, occ->size))) continue;
+            if (resolveCollision(goblin->type, occ->type) == CollisionResult::Block) {
+                pushBlocked = true;
+                break;
+            }
+        }
+        if (!pushBlocked) {
+            spatial.remove(goblinID, goblin->destination, goblin->size);
+            spatial.add(goblinID, pushDest, goblin->size);
+            goblin->destination = pushDest;
+        }
+    } else {
+        std::vector<MoveIntention> intentions = {{
+            goblinID, goblin->pos, pushDest, goblin->type, goblin->size
+        }};
+        auto allowed = resolveMoves(intentions, spatial, registry);
+        if (allowed.count(goblinID))
+            goblin->destination = pushDest;
+    }
 }
 
 // ─── Health defaults ─────────────────────────────────────────────────────────
@@ -174,4 +197,34 @@ TEST_CASE("goblin pushed south when player faces south") {
 
     REQUIRE(registry.get(gid) != nullptr);
     CHECK(g->destination == TilePos{0, 2});
+}
+
+TEST_CASE("moving goblin push redirects destination, not pos") {
+    EntityRegistry registry;
+    SpatialGrid    spatial;
+
+    EntityID pid = registry.spawn(EntityType::Player, {0, 0});
+    EntityID gid = registry.spawn(EntityType::Goblin, {1, 0});
+    Entity*  p   = registry.get(pid);
+    Entity*  g   = registry.get(gid);
+
+    spatial.add(pid, p->pos, p->size);
+    spatial.add(gid, g->pos, g->size);
+
+    // Goblin mid-move: heading east from {1,0} to {2,0}
+    g->destination = {2, 0};
+    g->moveT       = 0.5f;
+    spatial.add(gid, g->destination, g->size);  // dual-register
+
+    p->mana   = 1;   // small damage, goblin survives
+    p->facing = Direction::E;
+
+    doCombat(pid, gid, registry, spatial);
+
+    REQUIRE(registry.get(gid) != nullptr);
+    // Push base is old destination {2,0}, so new destination = {3,0}
+    CHECK(g->destination == TilePos{3, 0});
+    // Old destination {2,0} should be cleared; new {3,0} registered
+    CHECK(spatial.at({2, 0}).empty());
+    CHECK(spatial.at({3, 0}).size() == 1);
 }

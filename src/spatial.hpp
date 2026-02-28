@@ -62,7 +62,7 @@ enum class CollisionResult { Pass, Block, Collect, Combat, Hit };
 //
 //         │ Player   Goblin   Mushroom  Poop
 // ────────┼──────────────────────────────────
-// Player  │  —       Combat   Collect   Pass
+// Player  │  —       Block*   Collect   Pass     *bump combat: push fires on block
 // Goblin  │ Combat   Block    Pass      Pass
 // Poop    │  Pass    Hit      Pass      Pass
 CollisionResult resolveCollision(EntityType mover, EntityType occupant);

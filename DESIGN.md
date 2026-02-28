@@ -88,6 +88,8 @@ enum class OpCode : uint8_t {
     MOVE_ABS,      // move one tile in absolute direction (N/S/E/W)
     FACE,          // set facing without moving
     WAIT,          // pause for arg0 ticks
+    DIG,           // dig tile in facing direction
+    PLANT,         // plant mushroom in facing direction (costs 1 mana)
     JUMP,          // unconditional jump to addr
     JUMP_IF,       // jump to addr if stimulus[condition] > threshold
     JUMP_IF_NOT,   // jump to addr if stimulus[condition] <= threshold
@@ -279,7 +281,7 @@ when tile boundaries touch. This correctly handles sprites smaller than a tile.
 ```
           │ Player   Goblin   Mushroom  Poop
 ──────────┼──────────────────────────────────
-Player    │  —       Combat   Collect   Pass
+Player    │  —       Block*   Collect   Pass   *bump combat: push fires on block
 Goblin    │ Combat   Block    Pass      Pass
 Poop      │  Pass    Hit      Pass      Pass
 ```
@@ -376,6 +378,11 @@ their per-type thresholds. Stimuli do not interact with the `SpatialGrid`.
 
 Routines are programs. Agents are threads. The GPU kernel is the interpreter.
 
+Agents are not projectiles — they are autonomous robots. A Poop entity executing a
+routine can move, dig, plant, and react to stimuli exactly as a player can. The only
+difference is that its actions are driven by a `Recording` rather than live input.
+Future agent types will share the same VM.
+
 Each routine is a flat array of `Instruction`s stored in a GPU-resident buffer. Each
 agent holds an `AgentExecState` — a program counter, a wait counter, and a fixed-
 depth call stack. One GPU thread per agent executes one instruction per tick.
@@ -444,6 +451,8 @@ The player records a routine by playing. Each action emits one or more instructi
 |---|---|
 | Move key | `MOVE_REL <dir>` |
 | Pause between moves | `WAIT <ticks>` |
+| `f` (dig) | `DIG` |
+| `c` (plant) | `PLANT` |
 | Branch trigger + condition pick | `JUMP_IF <condition> <threshold> <addr>` |
 | Subroutine trigger + routine pick | `CALL <routineID>` |
 | End of loop | `JUMP 0` |
@@ -539,15 +548,15 @@ Loaded from `assets/entities.json` at startup. Defines per-type properties:
 | `WASD` | Move player one tile in direction. Updates `facing`. |
 | `r` | Toggle recording. On stop, saves `Recording` to `recordings` deque. |
 | `q` | Cycle `selectedRecording`. |
-| `e` | Instantiate `selectedRecording` as a `Poop` projectile from player's `facing` direction. |
+| `e` | Deploy `selectedRecording` as a `Poop` routine agent spawned in front of the player, inheriting player `facing`. |
 | `f` | Dig tile in front of player (`terrain.dig()`). |
 | `c` | If tile in front is `BareEarth` and player `mana >= 1`: spawn `Mushroom`, restore terrain, deduct 1 mana. |
 
 | Collision | Result |
 |---|---|
 | Player + Mushroom | Player gains 3 mana. Mushroom despawns. |
-| Player + Goblin | Combat (mana = damage). |
-| Poop + Goblin | Goblin takes hit with poop's damage value. |
+| Player + Goblin | Bump combat: player mana as damage, goblin pushed back. |
+| Poop + Goblin | Goblin takes hit. |
 
 ---
 

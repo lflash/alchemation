@@ -35,34 +35,6 @@ int main() {
 
     std::srand(static_cast<unsigned>(SDL_GetTicks64()));
 
-    // ── Combat/push on arrival ───────────────────────────────────────────────
-    events.subscribe(EventType::Arrived, [&](const Event& ev) {
-        if (ev.subject != playerID) return;
-        Entity* player = registry.get(playerID);
-        if (!player) return;
-
-        for (EntityID cid : spatial.at(player->pos)) {
-            if (cid == playerID) continue;
-            Entity* cand = registry.get(cid);
-            if (!cand || cand->type != EntityType::Goblin) continue;
-
-            cand->health -= player->mana;
-            if (cand->health <= 0) {
-                spatial.remove(cid, cand->pos, cand->size);
-                registry.destroy(cid);
-            } else {
-                TilePos pushDest = cand->pos + dirToDelta(player->facing);
-                std::vector<MoveIntention> intentions = {{
-                    cid, cand->pos, pushDest, cand->type, cand->size
-                }};
-                auto allowed = resolveMoves(intentions, spatial, registry);
-                if (allowed.count(cid))
-                    cand->destination = pushDest;
-            }
-            break;
-        }
-    });
-
     // ── Mushroom collection on arrival ───────────────────────────────────────
     events.subscribe(EventType::Arrived, [&](const Event& ev) {
         if (ev.subject != playerID) return;
@@ -135,8 +107,55 @@ int main() {
                         playerID, player->pos, newDest, player->type, player->size
                     }};
                     auto allowed = resolveMoves(intentions, spatial, registry);
-                    if (allowed.count(playerID))
+                    if (allowed.count(playerID)) {
                         player->destination = newDest;
+                    } else {
+                        // Bump combat: move blocked — check for goblin and push it.
+                        Bounds destBounds = boundsAt(newDest, player->size);
+                        for (EntityID cid : spatial.query(destBounds)) {
+                            Entity* cand = registry.get(cid);
+                            if (!cand || cand->type != EntityType::Goblin) continue;
+                            if (!overlaps(destBounds, boundsAt(cand->pos, cand->size))) continue;
+
+                            cand->health -= player->mana;
+                            if (cand->health <= 0) {
+                                spatial.remove(cid, cand->pos, cand->size);
+                                if (cand->isMoving())
+                                    spatial.remove(cid, cand->destination, cand->size);
+                                registry.destroy(cid);
+                            } else {
+                                TilePos pushBase = cand->isMoving() ? cand->destination : cand->pos;
+                                TilePos pushDest = pushBase + dirToDelta(player->facing);
+                                if (cand->isMoving()) {
+                                    // Mid-move: check pushDest and swap destination registration.
+                                    Bounds pushBounds = boundsAt(pushDest, cand->size);
+                                    bool pushBlocked = false;
+                                    for (EntityID oid : spatial.query(pushBounds)) {
+                                        if (oid == cid) continue;
+                                        const Entity* occ = registry.get(oid);
+                                        if (!occ || !overlaps(pushBounds, boundsAt(occ->pos, occ->size))) continue;
+                                        if (resolveCollision(cand->type, occ->type) == CollisionResult::Block) {
+                                            pushBlocked = true;
+                                            break;
+                                        }
+                                    }
+                                    if (!pushBlocked) {
+                                        spatial.remove(cid, cand->destination, cand->size);
+                                        spatial.add(cid, pushDest, cand->size);
+                                        cand->destination = pushDest;
+                                    }
+                                } else {
+                                    std::vector<MoveIntention> push = {{
+                                        cid, cand->pos, pushDest, cand->type, cand->size
+                                    }};
+                                    auto pushAllowed = resolveMoves(push, spatial, registry);
+                                    if (pushAllowed.count(cid))
+                                        cand->destination = pushDest;
+                                }
+                            }
+                            break;
+                        }
+                    }
                 }
             }
 

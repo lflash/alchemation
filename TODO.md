@@ -124,18 +124,24 @@ Entities have agency and can be harmed.
 
 ---
 
-## Phase 7 — Recorder & Projectiles
+## Phase 7 — Recorder & Routine Agents
 
-Player movement is recorded as a `Recording` — a flat `Instruction` stream executed by the Routine VM. This requires `RoutineVM` to exist; implement the minimal VM needed here if Phase 4 hasn't already done so.
+Player actions are recorded as a `Recording` — a flat `Instruction` stream executed by
+the `RoutineVM`. A deployed Poop entity is a routine agent: an autonomous robot that
+replays the recorded actions (movement, digging, planting) independently of the player.
+It is not a projectile. Future agent types will share the same VM.
+
+This requires `RoutineVM` to exist; implement the minimal VM needed here.
 
 - [ ] `Recording` struct wrapping a `vector<Instruction>`
 - [ ] `Recorder` — `start()`, `record(key)`, `stop()` → saves `Recording` to `recordings` deque
 - [ ] Player moves emit `MOVE_REL <dir>` (relative to player `facing`); pauses between moves emit `WAIT <ticks>`; recording ends with `HALT`
 - [ ] `r` key toggles recording
 - [ ] `q` key cycles `selectedRecording`
-- [ ] `e` key spawns `Poop` entity with `selectedRecording`; Poop's `facing` is set from player's `facing` at launch
+- [ ] `e` key deploys `selectedRecording` as a `Poop` routine agent spawned in front of the player, inheriting player `facing`
 - [ ] `RoutineVM::step(AgentExecState&, Recording&, Grid&)` — advances one instruction per tick; `MOVE_REL` resolves direction relative to agent `facing`
 - [ ] Poop despawns when VM reaches `HALT`
+- [ ] *(future)* `DIG` and `PLANT` instructions recorded and executed by agent
 
 **Tests**
 - [ ] `record()` emits `MOVE_REL` for each move key with correct relative direction
