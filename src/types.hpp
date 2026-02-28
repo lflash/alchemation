@@ -54,6 +54,20 @@ inline Vec2f toVec(TilePos p) {
 
 // ─── Direction helpers ───────────────────────────────────────────────────────
 
+inline TilePos dirToDelta(Direction d) {
+    switch (d) {
+        case Direction::N:  return { 0, -1};
+        case Direction::NE: return { 1, -1};
+        case Direction::E:  return { 1,  0};
+        case Direction::SE: return { 1,  1};
+        case Direction::S:  return { 0,  1};
+        case Direction::SW: return {-1,  1};
+        case Direction::W:  return {-1,  0};
+        case Direction::NW: return {-1, -1};
+    }
+    return {0, 0};
+}
+
 inline Direction toDirection(TilePos delta) {
     if (delta.x ==  0 && delta.y == -1) return Direction::N;
     if (delta.x ==  1 && delta.y == -1) return Direction::NE;

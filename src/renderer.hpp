@@ -42,6 +42,7 @@ public:
     Renderer& operator=(const Renderer&) = delete;
 
     void beginFrame();
+    void setTitle(const std::string& title);
     void drawTerrain(const Terrain& terrain);
 
     // Draws a sprite at a tile position.

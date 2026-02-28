@@ -32,6 +32,24 @@ int main() {
         spatial.add(goblinID, e->pos, e->size);
     }
 
+    // ── Mushroom collection on arrival ───────────────────────────────────────
+    events.subscribe(EventType::Arrived, [&](const Event& ev) {
+        if (ev.subject != playerID) return;
+        Entity* player = registry.get(playerID);
+        if (!player) return;
+
+        for (EntityID cid : spatial.at(player->pos)) {
+            if (cid == playerID) continue;
+            Entity* cand = registry.get(cid);
+            if (!cand || cand->type != EntityType::Mushroom) continue;
+
+            player->mana += 3;
+            spatial.remove(cid, cand->pos, cand->size);
+            registry.destroy(cid);
+            break;
+        }
+    });
+
     const double TICK_DT    = 1.0 / 50.0;
     double       accumulator = 0.0;
     uint64_t     lastTime    = SDL_GetTicks64();
@@ -91,6 +109,25 @@ int main() {
                 }
             }
 
+            // ── Terrain interaction ──────────────────────────────────────────
+            if (player && player->isIdle()) {
+                TilePos ahead = player->pos + dirToDelta(player->facing);
+
+                if (input.pressed(Key::F)) {
+                    terrain.dig(ahead);
+                }
+
+                if (input.pressed(Key::C)) {
+                    if (terrain.typeAt(ahead) == TileType::BareEarth && player->mana >= 1) {
+                        EntityID mid = registry.spawn(EntityType::Mushroom, ahead);
+                        Entity*  m   = registry.get(mid);
+                        spatial.add(mid, m->pos, m->size);
+                        terrain.restore(ahead);
+                        player->mana--;
+                    }
+                }
+            }
+
             // ── Step movement ────────────────────────────────────────────────
             for (Entity* ent : registry.all()) {
                 TilePos oldPos  = ent->pos;
@@ -102,6 +139,10 @@ int main() {
             }
 
             events.flush();
+
+            if (Entity* p = registry.get(playerID))
+                renderer.setTitle("Grid Game  |  mana: " + std::to_string(p->mana));
+
             accumulator -= TICK_DT;
             ++currentTick;
         }

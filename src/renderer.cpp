@@ -73,6 +73,10 @@ Renderer::~Renderer() {
     SDL_Quit();
 }
 
+void Renderer::setTitle(const std::string& title) {
+    SDL_SetWindowTitle(window, title.c_str());
+}
+
 void Renderer::beginFrame() {
     SDL_SetRenderDrawColor(sdl, 0, 0, 0, 255);
     SDL_RenderClear(sdl);

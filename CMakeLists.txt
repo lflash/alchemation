@@ -54,6 +54,7 @@ add_executable(tests
     tests/test_phase2.cpp
     tests/test_phase3.cpp
     tests/test_phase4.cpp
+    tests/test_phase5.cpp
     tests/test_terminal_renderer.cpp
     ${LOGIC_SOURCES}
 )
