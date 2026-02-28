@@ -7,6 +7,8 @@
 #include "entity.hpp"
 #include "input.hpp"
 #include "spatial.hpp"
+#include "scheduler.hpp"
+#include "events.hpp"
 #include "renderer.hpp"
 
 int main() {
@@ -14,6 +16,8 @@ int main() {
     Terrain        terrain;
     EntityRegistry registry;
     SpatialGrid    spatial;
+    Scheduler      scheduler;
+    EventBus       events;
     Input          input;
 
     EntityID playerID = registry.spawn(EntityType::Player, {0, 0});
@@ -31,6 +35,7 @@ int main() {
     const double TICK_DT    = 1.0 / 50.0;
     double       accumulator = 0.0;
     uint64_t     lastTime    = SDL_GetTicks64();
+    Tick         currentTick = 0;
     bool         quit        = false;
 
     while (!quit) {
@@ -50,6 +55,19 @@ int main() {
         accumulator += std::min(dt, 0.1);
 
         while (accumulator >= TICK_DT) {
+
+            // ── Execute scheduled actions ────────────────────────────────────
+            for (auto& action : scheduler.popDue(currentTick)) {
+                if (action.type == ActionType::Despawn) {
+                    Entity* target = registry.get(action.entity);
+                    if (target) spatial.remove(target->id, target->pos, target->size);
+                    registry.destroy(action.entity);
+                } else if (action.type == ActionType::ChangeMana) {
+                    Entity* target = registry.get(action.entity);
+                    if (target)
+                        target->mana += std::get<ChangeManaPayload>(action.payload).delta;
+                }
+            }
 
             // ── Player input ─────────────────────────────────────────────────
             Entity* player = registry.get(playerID);
@@ -77,11 +95,15 @@ int main() {
             for (Entity* ent : registry.all()) {
                 TilePos oldPos  = ent->pos;
                 bool    arrived = stepMovement(*ent);
-                if (arrived)
+                if (arrived) {
                     spatial.move(ent->id, oldPos, ent->pos, ent->size);
+                    events.emit({ EventType::Arrived, ent->id });
+                }
             }
 
+            events.flush();
             accumulator -= TICK_DT;
+            ++currentTick;
         }
 
         // ── Render ───────────────────────────────────────────────────────────
