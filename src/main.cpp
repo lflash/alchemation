@@ -101,7 +101,8 @@ int main() {
 
                 if (delta != TilePos{0, 0}) {
                     TilePos newDest = player->pos + delta;
-                    player->facing  = toDirection(delta);
+                    if (!input.held(Key::Shift))
+                        player->facing = toDirection(delta);
 
                     std::vector<MoveIntention> intentions = {{
                         playerID, player->pos, newDest, player->type, player->size

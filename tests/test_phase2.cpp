@@ -256,3 +256,46 @@ TEST_CASE("toDirection maps diagonal deltas correctly") {
     CHECK(toDirection({-1, 1})  == Direction::SW);
     CHECK(toDirection({-1, -1}) == Direction::NW);
 }
+
+// ─── Shift / strafe ──────────────────────────────────────────────────────────
+
+static SDL_Event makeKeyDown(SDL_Keycode key);  // defined above
+
+TEST_CASE("held(Key::Shift) is true when left shift is down") {
+    Input input;
+    input.beginFrame();
+    input.handleEvent(makeKeyDown(SDLK_LSHIFT));
+    CHECK(input.held(Key::Shift));
+}
+
+TEST_CASE("held(Key::Shift) is true when right shift is down") {
+    Input input;
+    input.beginFrame();
+    input.handleEvent(makeKeyDown(SDLK_RSHIFT));
+    CHECK(input.held(Key::Shift));
+}
+
+// Mirrors the strafe logic from main.cpp: facing only updates when shift is not held.
+static Direction applyFacing(Direction current, TilePos delta, bool shiftHeld) {
+    if (!shiftHeld) return toDirection(delta);
+    return current;
+}
+
+TEST_CASE("facing updates to match movement direction without shift") {
+    CHECK(applyFacing(Direction::N, {1,  0}, false) == Direction::E);
+    CHECK(applyFacing(Direction::N, {-1, 0}, false) == Direction::W);
+    CHECK(applyFacing(Direction::N, {0,  1}, false) == Direction::S);
+    CHECK(applyFacing(Direction::N, {0, -1}, false) == Direction::N);
+}
+
+TEST_CASE("facing unchanged when strafing with shift held") {
+    static const TilePos dirs[] = {{1,0},{-1,0},{0,1},{0,-1}};
+    for (auto& d : dirs)
+        CHECK(applyFacing(Direction::N, d, true) == Direction::N);
+}
+
+TEST_CASE("strafe preserves any initial facing, not just north") {
+    CHECK(applyFacing(Direction::E, {0, 1}, true) == Direction::E);
+    CHECK(applyFacing(Direction::W, {1, 0}, true) == Direction::W);
+    CHECK(applyFacing(Direction::S, {-1, 0}, true) == Direction::S);
+}
