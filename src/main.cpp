@@ -126,7 +126,7 @@ int main() {
                                 registry.destroy(cid);
                             } else {
                                 TilePos pushBase = cand->isMoving() ? cand->destination : cand->pos;
-                                TilePos pushDest = pushBase + dirToDelta(player->facing);
+                                TilePos pushDest = pushBase + delta;
                                 if (cand->isMoving()) {
                                     // Mid-move: check pushDest and swap destination registration.
                                     Bounds pushBounds = boundsAt(pushDest, cand->size);
