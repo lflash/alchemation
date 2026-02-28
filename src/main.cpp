@@ -1,6 +1,7 @@
 #include <SDL2/SDL.h>
 #include <algorithm>
 #include <cstdint>
+#include <cstdlib>
 
 #include "types.hpp"
 #include "terrain.hpp"
@@ -31,6 +32,36 @@ int main() {
         Entity* e = registry.get(goblinID);
         spatial.add(goblinID, e->pos, e->size);
     }
+
+    std::srand(static_cast<unsigned>(SDL_GetTicks64()));
+
+    // ── Combat/push on arrival ───────────────────────────────────────────────
+    events.subscribe(EventType::Arrived, [&](const Event& ev) {
+        if (ev.subject != playerID) return;
+        Entity* player = registry.get(playerID);
+        if (!player) return;
+
+        for (EntityID cid : spatial.at(player->pos)) {
+            if (cid == playerID) continue;
+            Entity* cand = registry.get(cid);
+            if (!cand || cand->type != EntityType::Goblin) continue;
+
+            cand->health -= player->mana;
+            if (cand->health <= 0) {
+                spatial.remove(cid, cand->pos, cand->size);
+                registry.destroy(cid);
+            } else {
+                TilePos pushDest = cand->pos + dirToDelta(player->facing);
+                std::vector<MoveIntention> intentions = {{
+                    cid, cand->pos, pushDest, cand->type, cand->size
+                }};
+                auto allowed = resolveMoves(intentions, spatial, registry);
+                if (allowed.count(cid))
+                    cand->destination = pushDest;
+            }
+            break;
+        }
+    });
 
     // ── Mushroom collection on arrival ───────────────────────────────────────
     events.subscribe(EventType::Arrived, [&](const Event& ev) {
@@ -125,6 +156,24 @@ int main() {
                         terrain.restore(ahead);
                         player->mana--;
                     }
+                }
+            }
+
+            // ── Goblin wander ────────────────────────────────────────────────
+            static const TilePos wanderDirs[] = {{1,0},{-1,0},{0,1},{0,-1}};
+            for (Entity* ent : registry.all()) {
+                if (ent->type != EntityType::Goblin || !ent->isIdle()) continue;
+                if (std::rand() % 80 != 0) continue;
+
+                TilePos delta   = wanderDirs[std::rand() % 4];
+                TilePos newDest = ent->pos + delta;
+                std::vector<MoveIntention> intentions = {{
+                    ent->id, ent->pos, newDest, ent->type, ent->size
+                }};
+                auto allowed = resolveMoves(intentions, spatial, registry);
+                if (allowed.count(ent->id)) {
+                    ent->destination = newDest;
+                    ent->facing = toDirection(delta);
                 }
             }
 

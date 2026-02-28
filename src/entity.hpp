@@ -19,6 +19,7 @@ struct Entity {
     Direction  facing;
     int        layer;        // draw order (lower drawn first)
     int        mana;
+    int        health;
 
     bool isMoving() const { return pos != destination; }
     bool isIdle()   const { return pos == destination; }
@@ -30,6 +31,7 @@ struct EntityConfig {
     float speed;
     Vec2f size;
     int   layer;
+    int   health;
 };
 
 EntityConfig defaultConfig(EntityType type);

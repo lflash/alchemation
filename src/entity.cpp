@@ -5,12 +5,12 @@
 
 EntityConfig defaultConfig(EntityType type) {
     switch (type) {
-        case EntityType::Player:   return { 0.1f, {0.8f, 0.8f}, 0 };
-        case EntityType::Goblin:   return { 0.1f, {0.8f, 0.8f}, 1 };
-        case EntityType::Mushroom: return { 0.0f, {0.6f, 0.6f}, 2 };
-        case EntityType::Poop:     return { 0.2f, {0.5f, 0.5f}, 1 };
+        case EntityType::Player:   return { 0.1f, {0.8f, 0.8f}, 0,  0 };
+        case EntityType::Goblin:   return { 0.1f, {0.8f, 0.8f}, 1,  5 };
+        case EntityType::Mushroom: return { 0.0f, {0.6f, 0.6f}, 2,  0 };
+        case EntityType::Poop:     return { 0.2f, {0.5f, 0.5f}, 1,  0 };
     }
-    return { 0.1f, {0.8f, 0.8f}, 0 };
+    return { 0.1f, {0.8f, 0.8f}, 0, 0 };
 }
 
 // ─── Movement ────────────────────────────────────────────────────────────────
@@ -43,7 +43,8 @@ EntityID EntityRegistry::spawn(EntityType type, TilePos pos) {
         .speed       = cfg.speed,
         .facing      = Direction::N,
         .layer       = cfg.layer,
-        .mana        = 0,
+        .mana        = (type == EntityType::Player ? 3 : 0),
+        .health      = cfg.health,
     };
     return id;
 }
