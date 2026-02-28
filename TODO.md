@@ -71,13 +71,14 @@ Entities can block each other. The world becomes solid.
 
 ## Phase 4 — Scheduler & Events
 
-Actions can be scheduled. Systems communicate through events.
+World events can be scheduled. Systems communicate through events. Note: per-agent
+movement timing is handled by the Routine VM (`WAIT` instructions + `AgentExecState`),
+not by this scheduler. The Scheduler is for low-frequency world events only.
 
 - [ ] `ScheduledAction` with `variant` payload
 - [ ] `Scheduler` as a min-heap — `push()`, `popDue(tick)` returns all actions due this tick
 - [ ] `EventBus` — `subscribe()`, `emit()`, `flush()` at end of tick
 - [ ] `Arrived` event fires when `moveT` reaches 1.0
-- [ ] Non-player entities (goblin, poop) consume their next scheduled `Move` action on `Arrived`
 - [ ] `Despawn` action removes entity from registry and spatial grid
 - [ ] `ChangeMana` action modifies entity mana
 
@@ -125,24 +126,25 @@ Entities have agency and can be harmed.
 
 ## Phase 7 — Recorder & Projectiles
 
-The recording/playback system.
+Player movement is recorded as a `Recording` — a flat `Instruction` stream executed by the Routine VM. This requires `RoutineVM` to exist; implement the minimal VM needed here if Phase 4 hasn't already done so.
 
-- [ ] `Recording` and `RecordingFrame` structs
-- [ ] `Recorder` — `start()`, `recordMove()`, `stop()` → saves to `recordings` deque
-- [ ] `r` key toggles recording; player moves are captured as relative deltas
+- [ ] `Recording` struct wrapping a `vector<Instruction>`
+- [ ] `Recorder` — `start()`, `record(key)`, `stop()` → saves `Recording` to `recordings` deque
+- [ ] Player moves emit `MOVE_REL <dir>` (relative to player `facing`); pauses between moves emit `WAIT <ticks>`; recording ends with `HALT`
+- [ ] `r` key toggles recording
 - [ ] `q` key cycles `selectedRecording`
-- [ ] `Recorder.instantiate()` — converts recording to `vector<ScheduledAction>` for a given origin, direction, entity ID, and start tick
-- [ ] Direction rotation applied to deltas during instantiation
-- [ ] `e` key spawns `Poop` entity and pushes instantiated actions into scheduler
-- [ ] Poop entity follows the recorded path, then despawns
+- [ ] `e` key spawns `Poop` entity with `selectedRecording`; Poop's `facing` is set from player's `facing` at launch
+- [ ] `RoutineVM::step(AgentExecState&, Recording&, Grid&)` — advances one instruction per tick; `MOVE_REL` resolves direction relative to agent `facing`
+- [ ] Poop despawns when VM reaches `HALT`
 
 **Tests**
-- [ ] `recordMove()` stores correct relative deltas
-- [ ] `instantiate()` facing North — deltas unchanged
-- [ ] `instantiate()` facing East — deltas rotated 90° clockwise
-- [ ] `instantiate()` facing South — deltas rotated 180°
-- [ ] Instantiated actions reference the correct projectile `EntityID`
-- [ ] Tick spacing between instantiated actions matches original recording timing
+- [ ] `record()` emits `MOVE_REL` for each move key with correct relative direction
+- [ ] `record()` emits `WAIT` for gaps between moves; tick count matches actual delay
+- [ ] Recording ends with `HALT`
+- [ ] `RoutineVM` advances `pc` correctly through a linear sequence
+- [ ] Facing North at launch — `MOVE_REL FORWARD` moves north
+- [ ] Facing East at launch — `MOVE_REL FORWARD` moves east
+- [ ] Poop despawns when `RoutineVM` reaches `HALT`
 
 ---
 

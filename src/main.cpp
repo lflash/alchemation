@@ -6,15 +6,27 @@
 #include "terrain.hpp"
 #include "entity.hpp"
 #include "input.hpp"
+#include "spatial.hpp"
 #include "renderer.hpp"
 
 int main() {
     Renderer       renderer;
     Terrain        terrain;
     EntityRegistry registry;
+    SpatialGrid    spatial;
     Input          input;
 
     EntityID playerID = registry.spawn(EntityType::Player, {0, 0});
+    {
+        Entity* e = registry.get(playerID);
+        spatial.add(playerID, e->pos, e->size);
+    }
+
+    EntityID goblinID = registry.spawn(EntityType::Goblin, {5, 5});
+    {
+        Entity* e = registry.get(goblinID);
+        spatial.add(goblinID, e->pos, e->size);
+    }
 
     const double TICK_DT    = 1.0 / 50.0;
     double       accumulator = 0.0;
@@ -49,14 +61,25 @@ int main() {
                 if (input.held(Key::D)) delta.x += 1;
 
                 if (delta != TilePos{0, 0}) {
-                    player->destination = player->pos + delta;
-                    player->facing      = toDirection(delta);
+                    TilePos newDest = player->pos + delta;
+                    player->facing  = toDirection(delta);
+
+                    std::vector<MoveIntention> intentions = {{
+                        playerID, player->pos, newDest, player->type, player->size
+                    }};
+                    auto allowed = resolveMoves(intentions, spatial, registry);
+                    if (allowed.count(playerID))
+                        player->destination = newDest;
                 }
             }
 
             // ── Step movement ────────────────────────────────────────────────
-            for (Entity* ent : registry.all())
-                stepMovement(*ent);
+            for (Entity* ent : registry.all()) {
+                TilePos oldPos  = ent->pos;
+                bool    arrived = stepMovement(*ent);
+                if (arrived)
+                    spatial.move(ent->id, oldPos, ent->pos, ent->size);
+            }
 
             accumulator -= TICK_DT;
         }

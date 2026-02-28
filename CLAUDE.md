@@ -55,8 +55,8 @@ far in conversation, but the user may revise any of them.
 - **Single spatial grid per `Grid`** — not split by collision layer.
 - **Multiple `Grid` instances** are independent simulation spaces (main world, studio,
   interiors, parallel universes). Not collision layers.
-- **Recordings store relative tile deltas** `{dx, dy, delayTicks}`, not absolute positions.
-- **Terrain overrides** (`BareEarth`) are state on the `Terrain` object, not entities.
+- **Recordings are `Instruction` streams** (`MOVE_REL`, `WAIT`, etc.) for the Routine VM, not raw tile deltas.
+- **Terrain type and stimuli** are fields on `TileGrid` tiles, not entities.
 - **Scheduler is a min-heap** ordered by tick.
 
 ## Naming Conventions
@@ -77,7 +77,12 @@ feels wrong.
 | Event type enum | `EventType` |
 | Action scheduler | `Scheduler` |
 | Input handler | `Input` |
-| Landscape | `Terrain` |
+| Tile grid / world | `TileGrid` |
+| Per-tile field data | `TileFields` |
+| Renderer interface | `IRenderer` |
+| Routine VM interpreter | `RoutineVM` |
+| Per-agent VM state | `AgentExecState` |
+| Recorded routine | `Recording` |
 | Hitbox | `bounds` (field), `Bounds` (type) |
 | Draw order | `layer` |
 | Move destination | `destination` |
@@ -105,21 +110,26 @@ feels wrong.
 ```
 src/
   main.cpp
-  types.hpp              ← TilePos, Vec2f, Bounds, enums, lerp, toVec, TilePosHash
-  terrain.hpp / .cpp     ← Terrain (PIMPL over FastNoiseLite)
-  renderer.hpp / .cpp    ← Renderer, SpriteCache (SDL2)
-  entity.hpp / .cpp      ← Entity, EntityRegistry          [Phase 2 — done]
-  input.hpp / .cpp       ← Input snapshot                  [Phase 2 — done]
-  spatial.hpp / .cpp     ← SpatialGrid                     [Phase 3]
-  scheduler.hpp / .cpp   ← Scheduler (min-heap)            [Phase 4]
-  events.hpp / .cpp      ← EventBus                        [Phase 4]
-  recorder.hpp / .cpp    ← Recording, Recorder             [Phase 7]
-  grid.hpp / .cpp        ← Grid, multi-grid management     [Phase 8]
+  types.hpp                    ← TilePos, Vec2f, Bounds, TileFields, enums, lerp, toVec, TilePosHash, constants
+  game.hpp / .cpp              ← Game, game loop, top-level tick
+  tilegrid.hpp / .cpp          ← TileGrid (terrain type, height, stimulus fields)
+  entity.hpp / .cpp            ← Entity, EntityRegistry          [Phase 2 — done]
+  input.hpp / .cpp             ← Input snapshot                  [Phase 2 — done]
+  spatial.hpp / .cpp           ← SpatialGrid                     [Phase 3]
+  scheduler.hpp / .cpp         ← Scheduler (min-heap)            [Phase 4]
+  events.hpp / .cpp            ← EventBus                        [Phase 4]
+  routine.hpp                  ← Instruction, OpCode, Condition, AgentExecState
+  routine_vm.hpp / .cpp        ← RoutineVM: interpreter, routine buffer, step()
+  recorder.hpp / .cpp          ← Recorder: player actions → Instruction stream [Phase 7]
+  grid.hpp / .cpp              ← Grid, multi-grid management     [Phase 8]
+  irenderer.hpp                ← IRenderer interface
+  renderer.hpp / .cpp          ← SDLRenderer, SpriteCache (SDL2)
+  terminal_renderer.hpp / .cpp ← TerminalRenderer (ANSI/ASCII)
 vendor/
   FastNoiseLite.h        ← single-header Perlin noise
   doctest.h              ← single-header test framework
 tests/
-  test_phase1.cpp        ← TilePos, lerp, Terrain tests
+  test_phase1.cpp        ← TilePos, lerp, TileGrid tests
   test_phase2.cpp        ← Entity, EntityRegistry, Input, stepMovement tests
 assets/
   sprites/               ← PNGs copied from Python project

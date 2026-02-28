@@ -568,21 +568,21 @@ grid_game/
 │   └── FastNoiseLite.hpp
 └── src/
     ├── main.cpp
-    ├── types.hpp                   ← TilePos, Vec2f, Bounds, TileFields, enums, constants
-    ├── game.cpp / game.hpp         ← Game, game loop, top-level tick
-    ├── entity.cpp / entity.hpp     ← Entity struct, EntityRegistry
-    ├── grid.cpp / grid.hpp         ← Grid, multi-grid world management
-    ├── spatial.cpp / spatial.hpp     ← SpatialGrid (entity occupancy, hard cap 8)
-    ├── tilegrid.cpp / tilegrid.hpp   ← TileGrid (terrain type, height, stimulus fields)
-    ├── scheduler.cpp / scheduler.hpp ← ScheduledAction, Scheduler (min-heap)
-    ├── events.cpp / events.hpp       ← Event, EventBus
-    ├── routine.hpp                   ← Instruction, OpCode, Condition, AgentExecState
-    ├── routine_vm.cpp / .hpp         ← RoutineVM: GPU kernel, routine buffer, step()
-    ├── recorder.cpp / recorder.hpp   ← records player actions → Instruction stream
-    ├── input.cpp / input.hpp         ← Input snapshot
-    ├── irenderer.hpp                 ← IRenderer interface
-    ├── renderer.cpp / renderer.hpp   ← SDLRenderer (SDL2, SpriteCache)
-    └── terminal_renderer.cpp / .hpp  ← TerminalRenderer (ANSI/ASCII)
+    ├── types.hpp                    ← TilePos, Vec2f, Bounds, TileFields, enums, lerp, toVec, TilePosHash, constants
+    ├── game.hpp / .cpp              ← Game, game loop, top-level tick
+    ├── entity.hpp / .cpp            ← Entity struct, EntityRegistry
+    ├── grid.hpp / .cpp              ← Grid, multi-grid world management
+    ├── spatial.hpp / .cpp           ← SpatialGrid (entity occupancy, hard cap 8)
+    ├── tilegrid.hpp / .cpp          ← TileGrid (terrain type, height, stimulus fields)
+    ├── scheduler.hpp / .cpp         ← ScheduledAction, Scheduler (min-heap)
+    ├── events.hpp / .cpp            ← Event, EventBus
+    ├── routine.hpp                  ← Instruction, OpCode, Condition, AgentExecState
+    ├── routine_vm.hpp / .cpp        ← RoutineVM: GPU kernel, routine buffer, step()
+    ├── recorder.hpp / .cpp          ← records player actions → Instruction stream
+    ├── input.hpp / .cpp             ← Input snapshot
+    ├── irenderer.hpp                ← IRenderer interface
+    ├── renderer.hpp / .cpp          ← SDLRenderer (SDL2, SpriteCache)
+    └── terminal_renderer.hpp / .cpp ← TerminalRenderer (ANSI/ASCII)
 ```
 
 ---

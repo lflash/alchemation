@@ -17,6 +17,7 @@ set(LOGIC_SOURCES
     src/terrain.cpp
     src/entity.cpp
     src/input.cpp
+    src/spatial.cpp
     src/terminal_renderer.cpp
 )
 
@@ -49,6 +50,7 @@ enable_testing()
 add_executable(tests
     tests/test_phase1.cpp
     tests/test_phase2.cpp
+    tests/test_phase3.cpp
     tests/test_terminal_renderer.cpp
     ${LOGIC_SOURCES}
 )
