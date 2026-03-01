@@ -29,6 +29,10 @@ public:
     const std::unordered_map<TilePos, TileType,  TilePosHash>& overrides() const;
     const std::unordered_map<TilePos, TileShape, TilePosHash>& shapes()    const;
 
+    // Seed slopes from Perlin height within a square of half-side `radius`.
+    // Tiles within `safeRadius` of the origin are left flat (safe spawn area).
+    void generateSlopes(int radius, int safeRadius = 4);
+
 private:
     struct Impl;
     std::unique_ptr<Impl> impl;

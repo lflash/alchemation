@@ -81,6 +81,40 @@ const std::unordered_map<TilePos, TileShape, TilePosHash>& Terrain::shapes() con
     return impl->shapeOverrides;
 }
 
+void Terrain::generateSlopes(int radius, int safeRadius) {
+    constexpr float HIGH = 0.30f;
+
+    // A tile counts as "high" if its Perlin value exceeds the threshold,
+    // unless it falls within the safe zone around the origin.
+    auto isHigh = [&](int x, int y) -> bool {
+        if (std::abs(x) <= safeRadius && std::abs(y) <= safeRadius) return false;
+        return heightAt({x, y, 0}) > HIGH;
+    };
+
+    for (int y = -radius; y <= radius; ++y) {
+        for (int x = -radius; x <= radius; ++x) {
+            if (isHigh(x, y)) continue;  // slopes go on low tiles only
+
+            // Count high cardinal neighbours and remember the direction.
+            int       highCount = 0;
+            TileShape slope     = TileShape::Flat;
+
+            auto check = [&](int nx, int ny, TileShape s) {
+                if (isHigh(nx, ny)) { ++highCount; slope = s; }
+            };
+            check(x, y - 1, TileShape::SlopeN);  // high to north → ramp faces N
+            check(x, y + 1, TileShape::SlopeS);  // high to south → ramp faces S
+            check(x + 1, y, TileShape::SlopeE);  // high to east  → ramp faces E
+            check(x - 1, y, TileShape::SlopeW);  // high to west  → ramp faces W
+
+            // Only place a slope when exactly one cardinal neighbour is high;
+            // corners and ridges stay flat (cliff face covers the drop).
+            if (highCount == 1)
+                setShape({x, y, 0}, slope);
+        }
+    }
+}
+
 // ─── resolveZ ────────────────────────────────────────────────────────────────
 
 namespace {

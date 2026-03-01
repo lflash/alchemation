@@ -45,6 +45,15 @@ void Game::subscribeEvents(Grid& grid) {
 
 // ─── Construction ─────────────────────────────────────────────────────────────
 
+// Returns z=1 if the tile at (x,y) is adjacent to a slope whose high edge
+// faces it (i.e. it sits atop a raised platform), otherwise z=0.
+static int terrainZ(const Terrain& t, int x, int y) {
+    return (t.shapeAt({x, y + 1, 0}) == TileShape::SlopeN ||
+            t.shapeAt({x, y - 1, 0}) == TileShape::SlopeS ||
+            t.shapeAt({x - 1, y, 0}) == TileShape::SlopeE ||
+            t.shapeAt({x + 1, y, 0}) == TileShape::SlopeW) ? 1 : 0;
+}
+
 Game::Game() {
     grids_.try_emplace(GRID_WORLD,  GRID_WORLD);
     grids_.try_emplace(GRID_STUDIO, GRID_STUDIO);
@@ -52,10 +61,16 @@ Game::Game() {
     subscribeEvents(grids_.at(GRID_WORLD));
     subscribeEvents(grids_.at(GRID_STUDIO));
 
-    playerID_ = registry_.spawn(EntityType::Player, {0, 0});
+    // Seed slopes from Perlin height. Safe radius keeps the origin flat so the
+    // player always spawns at z=0. Goblin spawn z is derived after generation.
+    Terrain& wt = grids_.at(GRID_WORLD).terrain;
+    wt.generateSlopes(64);
+
+    playerID_ = registry_.spawn(EntityType::Player, {0, 0, 0});
     activeGrid().add(playerID_, *registry_.get(playerID_));
 
-    EntityID goblinID = registry_.spawn(EntityType::Goblin, {5, 5});
+    int       gz       = terrainZ(wt, 5, 5);
+    EntityID  goblinID = registry_.spawn(EntityType::Goblin, {5, 5, gz});
     activeGrid().add(goblinID, *registry_.get(goblinID));
 }
 
@@ -555,7 +570,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 3);   // version 3
+    wr<uint8_t>(f, 4);   // version 4
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -604,7 +619,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 3) return false;
+    if (version != 4) return false;
 
     // Clear all state
     for (auto& [id, grid] : grids_) {
