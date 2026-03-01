@@ -174,9 +174,33 @@ The world splits into independent simulation spaces.
 
 ## Backlog (post-core)
 
+### Infrastructure
 - [ ] Camera / viewport scrolling — world larger than 20×20
 - [ ] Persistent grid state — save/load terrain overrides and entity positions
 - [ ] Room grids — enter a house, transition to interior grid
 - [ ] Parallel universe grid — runs simultaneously in background
 - [ ] UI overlay — mana counter, recording indicator
 - [ ] Sound
+
+### New Assets
+- [ ] Proper sprite art for all entity types (player, goblin, mushroom, poop)
+- [ ] Terrain tile sprites — replace solid colour tiles with textured tiles (grass, bare earth, water, stone)
+- [ ] Wall and structure tiles for room interiors
+- [ ] Animated sprites — idle/walk frames per entity type
+- [ ] Visual indicator for active recording (blinking dot, colour shift, etc.)
+
+### New Interactions
+- [ ] Fire stimulus — tiles can ignite; fire spreads to adjacent tiles each tick; agents react to fire > threshold (flee routine)
+- [ ] Water — floods downhill tiles; slows movement; extinguishes fire
+- [ ] Pushable objects — crates, boulders: any entity with a `pushable` flag can be shoved by the player or poop agents
+- [ ] More entity types — tree (blocks movement, can be chopped), rock (permanent obstacle), chest (opens on arrival, yields mana)
+- [ ] Goblin drops — goblin despawn spawns a loot entity
+- [ ] Routine-triggered terrain — poop agents can dig and plant (DIG/PLANT opcodes already in VM; wire up execution)
+- [ ] Conditional routines — JUMP_IF / JUMP_IF_NOT responding to fire or entity-ahead stimulus
+
+### World Generation
+- [ ] Biome map — divide world into regions (forest, plains, swamp, desert) using a second Perlin layer; terrain type and entity spawn rules vary per biome
+- [ ] Procedural entity spawning — goblins spawn in clusters at startup based on biome; mushroom patches on forest tiles
+- [ ] Structures — procedurally placed houses (exterior shell + matching interior room grid), ruins, caves
+- [ ] Rivers — carved from high to low height using flow simulation; water stimulus pre-seeded along river path
+- [ ] Roads — connect structures; faster movement on road tiles

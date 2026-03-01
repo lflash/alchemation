@@ -16,6 +16,9 @@ int main() {
     Input    input;
     Game     game;
 
+    constexpr const char* SAVE_PATH = "save.dat";
+    game.load(SAVE_PATH);   // no-op if file absent
+
     // ── UI state ─────────────────────────────────────────────────────────────
     bool showControls   = false;
     bool showRecordings = false;
@@ -75,7 +78,7 @@ int main() {
             input.handleEvent(e);
         }
 
-        if (input.pressed(Key::Escape)) quit = true;
+        if (input.pressed(Key::Escape)) { game.save(SAVE_PATH); quit = true; }
 
         // Panel toggles — mutually exclusive
         if (input.pressed(Key::H)) {
@@ -151,6 +154,8 @@ int main() {
         // ── Render ───────────────────────────────────────────────────────
         renderer.setCamera(camera);
         renderer.setStudioMode(game.inStudio());
+        auto [bW, bH] = game.activeGridBounds();
+        renderer.setGridBounds(bW, bH);
         renderer.beginFrame();
         renderer.drawTerrain(game.terrain());
 

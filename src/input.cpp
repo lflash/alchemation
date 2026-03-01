@@ -11,6 +11,7 @@ SDL_Keycode Input::toSDL(Key k) {
         case Key::C:         return SDLK_c;
         case Key::R:         return SDLK_r;
         case Key::Q:         return SDLK_q;
+        case Key::O:         return SDLK_o;
         case Key::H:         return SDLK_h;
         case Key::I:         return SDLK_i;
         case Key::Escape:    return SDLK_ESCAPE;

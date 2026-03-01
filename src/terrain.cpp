@@ -44,3 +44,18 @@ void Terrain::dig(TilePos p) {
 void Terrain::restore(TilePos p) {
     impl->overrides.erase(p);
 }
+
+void Terrain::setType(TilePos p, TileType t) {
+    if (t == TileType::Grass)
+        impl->overrides.erase(p);
+    else
+        impl->overrides[p] = t;
+}
+
+void Terrain::clearOverrides() {
+    impl->overrides.clear();
+}
+
+const std::unordered_map<TilePos, TileType, TilePosHash>& Terrain::overrides() const {
+    return impl->overrides;
+}

@@ -52,7 +52,7 @@ enum class EntityType { Player, Goblin, Mushroom, Poop };
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
-enum class TileType   { Grass, BareEarth };
+enum class TileType   { Grass, BareEarth, Portal };
 
 // ─── Math helpers ────────────────────────────────────────────────────────────
 

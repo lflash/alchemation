@@ -105,15 +105,24 @@ void Renderer::drawTerrain(const Terrain& terrain) {
     int minY = static_cast<int>(std::floor(camera_.pos.y - halfH)) - 1;
     int maxY = static_cast<int>(std::ceil (camera_.pos.y + halfH)) + 1;
 
+    bool bounded = (gridW_ > 0 && gridH_ > 0);
+
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
-            TilePos   p     = {x, y};
+            TilePos p = {x, y};
+            SDL_Rect rect = { toPixelX(x), toPixelY(y), iTs, iTs };
+
+            // Bounded rooms: tiles outside [0,w)×[0,h) are void (dark).
+            if (bounded && (x < 0 || x >= gridW_ || y < 0 || y >= gridH_)) {
+                SDL_SetRenderDrawColor(sdl, 18, 18, 18, 255);
+                SDL_RenderFillRect(sdl, &rect);
+                continue;
+            }
+
             float     h     = terrain.heightAt(p);
             TileType  ttype = terrain.typeAt(p);
             SDL_Color color = tileColor(h, p, ttype);
-
             SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
-            SDL_Rect rect = { toPixelX(x), toPixelY(y), iTs, iTs };
             SDL_RenderFillRect(sdl, &rect);
         }
     }
@@ -140,6 +149,9 @@ void Renderer::endFrame() {
 SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
     if (type == TileType::BareEarth)
         return { 139, 90, 43, 255 };
+
+    if (type == TileType::Portal)
+        return { 160, 60, 220, 255 };
 
     if (studioMode_) {
         // Muted blue-grey studio floor.
@@ -363,7 +375,7 @@ void Renderer::drawControlsMenu() {
     constexpr int PAD  = 12;
     constexpr int LINE = 18;
     constexpr int W    = 308;
-    constexpr int H    = 322;
+    constexpr int H    = 340;
     constexpr int X    = VIEWPORT_W - W - 10;
     constexpr int Y    = 10;
 
@@ -410,6 +422,7 @@ void Renderer::drawControlsMenu() {
     row("R",             "Toggle recording");
     row("Q",             "Cycle recording");
     row("E",             "Deploy agent");
+    row("O",             "Create room portal");
     row("Tab",           "Toggle studio");
     sep();
     row("Arrows",        "Pan camera");

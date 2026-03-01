@@ -8,24 +8,51 @@
 #include "entity.hpp"
 #include <vector>
 #include <algorithm>
+#include <unordered_map>
+
+// ─── Portal ───────────────────────────────────────────────────────────────────
+//
+// Stored per-tile in Grid::portals. When an entity arrives on the tile,
+// it is transferred to targetGrid at targetPos.
+
+struct Portal {
+    GridID  targetGrid;
+    TilePos targetPos;
+};
 
 // ─── Grid ────────────────────────────────────────────────────────────────────
 //
 // One independent simulation space. Owns the per-world systems (terrain,
 // spatial index, scheduler, event bus) and tracks which entities live here.
 // The EntityRegistry is shared across all grids and lives in Game.
+//
+// width/height == 0 means unbounded (infinite). Otherwise the grid is
+// treated as an NxM room; tiles outside [0,width)×[0,height) are void.
 
 class Grid {
 public:
-    explicit Grid(GridID gid) : id(gid) {}
+    explicit Grid(GridID gid, int w = 0, int h = 0)
+        : id(gid), width(w), height(h) {}
 
-    GridID      id;
+    GridID id;
+    int    width  = 0;   // 0 = unbounded
+    int    height = 0;
+    bool   paused = false;
+
+    std::unordered_map<TilePos, Portal, TilePosHash> portals;
+
     Terrain     terrain;
     SpatialGrid spatial;
     Scheduler   scheduler;
     EventBus    events;
 
     std::vector<EntityID> entities;
+
+    bool isBounded() const { return width > 0 && height > 0; }
+    bool inBounds(TilePos p) const {
+        return !isBounded() || (p.x >= 0 && p.x < width &&
+                                p.y >= 0 && p.y < height);
+    }
 
     // Register an entity in this grid: adds to entity list and spatial index.
     void add(EntityID eid, Entity& e) {

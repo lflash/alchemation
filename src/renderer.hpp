@@ -51,6 +51,9 @@ public:
     // Controls terrain colour palette. Call before drawTerrain().
     void setStudioMode(bool s) { studioMode_ = s; }
 
+    // Set bounded grid dimensions (0,0 = unbounded/infinite world).
+    void setGridBounds(int w, int h) { gridW_ = w; gridH_ = h; }
+
     void beginFrame();
     void setTitle(const std::string& title);
     void drawTerrain(const Terrain& terrain);
@@ -81,6 +84,8 @@ private:
     Camera        camera_;   // updated each frame via setCamera()
     TTF_Font*     font_;
     bool          studioMode_ = false;
+    int           gridW_      = 0;   // 0 = unbounded
+    int           gridH_      = 0;
 
     SDL_Color tileColor(float height, TilePos pos, TileType type) const;
 
