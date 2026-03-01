@@ -1,69 +1,21 @@
 #include <SDL2/SDL.h>
 #include <algorithm>
-#include <cstdint>
 #include <cstdlib>
-#include <unordered_map>
+#include <ctime>
 
 #include "types.hpp"
-#include "terrain.hpp"
-#include "entity.hpp"
 #include "input.hpp"
-#include "spatial.hpp"
-#include "scheduler.hpp"
-#include "events.hpp"
-#include "recorder.hpp"
-#include "routine_vm.hpp"
+#include "game.hpp"
 #include "renderer.hpp"
 
 int main() {
-    Renderer       renderer;
-    Terrain        terrain;
-    EntityRegistry registry;
-    SpatialGrid    spatial;
-    Scheduler      scheduler;
-    EventBus       events;
-    Input          input;
-    Recorder       recorder;
-    RoutineVM      vm;
+    std::srand(static_cast<unsigned>(std::time(nullptr)));
 
-    // EntityID → {AgentExecState, Recording} for active Poop agents.
-    std::unordered_map<EntityID, AgentExecState> agentStates;
-    std::unordered_map<EntityID, Recording>      agentRecordings;
-    size_t selectedRecording = 0;
+    Renderer renderer;
+    Input    input;
+    Game     game;
 
-    EntityID playerID = registry.spawn(EntityType::Player, {0, 0});
-    {
-        Entity* e = registry.get(playerID);
-        spatial.add(playerID, e->pos, e->size);
-    }
-
-    EntityID goblinID = registry.spawn(EntityType::Goblin, {5, 5});
-    {
-        Entity* e = registry.get(goblinID);
-        spatial.add(goblinID, e->pos, e->size);
-    }
-
-    std::srand(static_cast<unsigned>(SDL_GetTicks64()));
-
-    // ── Mushroom collection on arrival ───────────────────────────────────────
-    events.subscribe(EventType::Arrived, [&](const Event& ev) {
-        if (ev.subject != playerID) return;
-        Entity* player = registry.get(playerID);
-        if (!player) return;
-
-        for (EntityID cid : spatial.at(player->pos)) {
-            if (cid == playerID) continue;
-            Entity* cand = registry.get(cid);
-            if (!cand || cand->type != EntityType::Mushroom) continue;
-
-            player->mana += 3;
-            spatial.remove(cid, cand->pos, cand->size);
-            registry.destroy(cid);
-            break;
-        }
-    });
-
-    const double TICK_DT    = 1.0 / 50.0;
+    const double TICK_DT     = 1.0 / 50.0;
     double       accumulator = 0.0;
     uint64_t     lastTime    = SDL_GetTicks64();
     Tick         currentTick = 0;
@@ -86,218 +38,16 @@ int main() {
         accumulator += std::min(dt, 0.1);
 
         while (accumulator >= TICK_DT) {
-
-            // ── Execute scheduled actions ────────────────────────────────────
-            for (auto& action : scheduler.popDue(currentTick)) {
-                if (action.type == ActionType::Despawn) {
-                    Entity* target = registry.get(action.entity);
-                    if (target) spatial.remove(target->id, target->pos, target->size);
-                    registry.destroy(action.entity);
-                } else if (action.type == ActionType::ChangeMana) {
-                    Entity* target = registry.get(action.entity);
-                    if (target)
-                        target->mana += std::get<ChangeManaPayload>(action.payload).delta;
-                }
-            }
-
-            // ── Player input ─────────────────────────────────────────────────
-            Entity* player = registry.get(playerID);
-
-            // r: toggle recording
-            if (input.pressed(Key::R)) {
-                if (recorder.isRecording()) {
-                    recorder.stop();
-                    selectedRecording = recorder.recordings.size() - 1;
-                } else {
-                    recorder.start();
-                }
-            }
-
-            // q: cycle selected recording
-            if (input.pressed(Key::Q) && !recorder.recordings.empty()) {
-                selectedRecording = (selectedRecording + 1) % recorder.recordings.size();
-            }
-
-            // e: deploy selected recording as Poop agent
-            if (input.pressed(Key::E) && player &&
-                !recorder.recordings.empty() &&
-                selectedRecording < recorder.recordings.size()) {
-
-                TilePos spawnPos = player->pos + dirToDelta(player->facing);
-                EntityID pid = registry.spawn(EntityType::Poop, spawnPos);
-                Entity*  pe  = registry.get(pid);
-                pe->facing   = player->facing;
-                spatial.add(pid, pe->pos, pe->size);
-                agentStates[pid]     = AgentExecState{};
-                agentRecordings[pid] = recorder.recordings[selectedRecording];
-            }
-
-            if (player && player->isIdle()) {
-                // Advance recorder wait counter each tick
-                if (recorder.isRecording()) recorder.tick();
-
-                TilePos delta = {0, 0};
-                if (input.held(Key::W)) delta.y -= 1;
-                if (input.held(Key::S)) delta.y += 1;
-                if (input.held(Key::A)) delta.x -= 1;
-                if (input.held(Key::D)) delta.x += 1;
-
-                if (delta != TilePos{0, 0}) {
-                    TilePos newDest = player->pos + delta;
-                    Direction facingBefore = player->facing;
-                    if (!input.held(Key::Shift))
-                        player->facing = toDirection(delta);
-
-                    std::vector<MoveIntention> intentions = {{
-                        playerID, player->pos, newDest, player->type, player->size
-                    }};
-                    auto allowed = resolveMoves(intentions, spatial, registry);
-                    if (allowed.count(playerID)) {
-                        player->destination = newDest;
-                        if (recorder.isRecording())
-                            recorder.recordMove(delta, facingBefore);
-                    } else {
-                        // Bump combat: move blocked — check for goblin and push it.
-                        Bounds destBounds = boundsAt(newDest, player->size);
-                        for (EntityID cid : spatial.query(destBounds)) {
-                            Entity* cand = registry.get(cid);
-                            if (!cand || cand->type != EntityType::Goblin) continue;
-                            if (!overlaps(destBounds, boundsAt(cand->pos, cand->size))) continue;
-
-                            cand->health -= player->mana;
-                            if (cand->health <= 0) {
-                                spatial.remove(cid, cand->pos, cand->size);
-                                if (cand->isMoving())
-                                    spatial.remove(cid, cand->destination, cand->size);
-                                registry.destroy(cid);
-                            } else {
-                                TilePos pushBase = cand->isMoving() ? cand->destination : cand->pos;
-                                TilePos pushDest = pushBase + delta;
-                                if (cand->isMoving()) {
-                                    // Mid-move: check pushDest and swap destination registration.
-                                    Bounds pushBounds = boundsAt(pushDest, cand->size);
-                                    bool pushBlocked = false;
-                                    for (EntityID oid : spatial.query(pushBounds)) {
-                                        if (oid == cid) continue;
-                                        const Entity* occ = registry.get(oid);
-                                        if (!occ || !overlaps(pushBounds, boundsAt(occ->pos, occ->size))) continue;
-                                        if (resolveCollision(cand->type, occ->type) == CollisionResult::Block) {
-                                            pushBlocked = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!pushBlocked) {
-                                        spatial.remove(cid, cand->destination, cand->size);
-                                        spatial.add(cid, pushDest, cand->size);
-                                        cand->destination = pushDest;
-                                    }
-                                } else {
-                                    std::vector<MoveIntention> push = {{
-                                        cid, cand->pos, pushDest, cand->type, cand->size
-                                    }};
-                                    auto pushAllowed = resolveMoves(push, spatial, registry);
-                                    if (pushAllowed.count(cid))
-                                        cand->destination = pushDest;
-                                }
-                            }
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // ── Terrain interaction ──────────────────────────────────────────
-            if (player && player->isIdle()) {
-                TilePos ahead = player->pos + dirToDelta(player->facing);
-
-                if (input.pressed(Key::F)) {
-                    terrain.dig(ahead);
-                }
-
-                if (input.pressed(Key::C)) {
-                    if (terrain.typeAt(ahead) == TileType::BareEarth && player->mana >= 1) {
-                        EntityID mid = registry.spawn(EntityType::Mushroom, ahead);
-                        Entity*  m   = registry.get(mid);
-                        spatial.add(mid, m->pos, m->size);
-                        terrain.restore(ahead);
-                        player->mana--;
-                    }
-                }
-            }
-
-            // ── Goblin wander ────────────────────────────────────────────────
-            static const TilePos wanderDirs[] = {{1,0},{-1,0},{0,1},{0,-1}};
-            for (Entity* ent : registry.all()) {
-                if (ent->type != EntityType::Goblin || !ent->isIdle()) continue;
-                if (std::rand() % 80 != 0) continue;
-
-                TilePos delta   = wanderDirs[std::rand() % 4];
-                TilePos newDest = ent->pos + delta;
-                std::vector<MoveIntention> intentions = {{
-                    ent->id, ent->pos, newDest, ent->type, ent->size
-                }};
-                auto allowed = resolveMoves(intentions, spatial, registry);
-                if (allowed.count(ent->id)) {
-                    ent->destination = newDest;
-                    ent->facing = toDirection(delta);
-                }
-            }
-
-            // ── Routine VM: step each active Poop agent ───────────────────────
-            {
-                std::vector<EntityID> toRemove;
-                for (auto& [id, state] : agentStates) {
-                    Entity* ent = registry.get(id);
-                    if (!ent || !ent->isIdle()) continue;
-
-                    VMResult res = vm.step(state, agentRecordings[id], ent->facing);
-
-                    if (res.halt) {
-                        spatial.remove(id, ent->pos, ent->size);
-                        registry.destroy(id);
-                        toRemove.push_back(id);
-                    } else if (res.wantMove) {
-                        TilePos newDest = ent->pos + res.moveDelta;
-                        std::vector<MoveIntention> intentions = {{
-                            id, ent->pos, newDest, ent->type, ent->size
-                        }};
-                        auto allowed = resolveMoves(intentions, spatial, registry);
-                        if (allowed.count(id)) {
-                            ent->destination = newDest;
-                            ent->facing = toDirection(res.moveDelta);
-                        }
-                    }
-                }
-                for (EntityID id : toRemove) {
-                    agentStates.erase(id);
-                    agentRecordings.erase(id);
-                }
-            }
-
-            // ── Step movement ────────────────────────────────────────────────
-            for (Entity* ent : registry.all()) {
-                TilePos oldPos  = ent->pos;
-                bool    arrived = stepMovement(*ent);
-                if (arrived) {
-                    spatial.move(ent->id, oldPos, ent->pos, ent->size);
-                    events.emit({ EventType::Arrived, ent->id });
-                }
-            }
-
-            events.flush();
-
-            if (Entity* p = registry.get(playerID))
-                renderer.setTitle("Grid Game  |  mana: " + std::to_string(p->mana));
-
+            game.tick(input, currentTick);
+            renderer.setTitle("Grid Game  |  mana: " + std::to_string(game.playerMana()));
             accumulator -= TICK_DT;
             ++currentTick;
         }
 
-        // ── Render ───────────────────────────────────────────────────────────
         renderer.beginFrame();
-        renderer.drawTerrain(terrain);
+        renderer.drawTerrain(game.terrain());
 
-        for (const Entity* ent : registry.drawOrder()) {
+        for (const Entity* ent : game.registry().drawOrder()) {
             Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
             renderer.drawSprite(renderPos, ent->type);
         }
