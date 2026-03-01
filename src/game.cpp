@@ -21,7 +21,8 @@ void transferEntity(EntityID eid, Grid& from, Grid& to,
 // ─── Construction ─────────────────────────────────────────────────────────────
 
 Game::Game() {
-    grids_.try_emplace(GRID_WORLD, GRID_WORLD);
+    grids_.try_emplace(GRID_WORLD,  GRID_WORLD);
+    grids_.try_emplace(GRID_STUDIO, GRID_STUDIO);
 
     playerID_ = registry_.spawn(EntityType::Player, {0, 0});
     activeGrid().add(playerID_, *registry_.get(playerID_));
@@ -114,6 +115,22 @@ void Game::tickPlayerInput(const Input& input) {
         grid.add(pid, *pe);
         agentStates_[pid]     = AgentExecState{};
         agentRecordings_[pid] = recorder_.recordings[selectedRecording_];
+    }
+
+    // Tab: toggle between world and studio
+    if (input.pressed(Key::Tab) && player && player->isIdle()) {
+        if (activeGridID_ == GRID_WORLD) {
+            playerWorldPos_ = player->pos;
+            transferEntity(playerID_, grids_.at(GRID_WORLD), grids_.at(GRID_STUDIO),
+                           registry_, {0, 0});
+            activeGridID_ = GRID_STUDIO;
+        } else {
+            transferEntity(playerID_, grids_.at(GRID_STUDIO), grids_.at(GRID_WORLD),
+                           registry_, playerWorldPos_);
+            activeGridID_ = GRID_WORLD;
+        }
+        // Re-fetch player pointer — it's still valid but grid context changed.
+        player = registry_.get(playerID_);
     }
 
     if (!player || !player->isIdle()) return;
@@ -262,6 +279,21 @@ void Game::tickVM() {
         agentStates_.erase(id);
         agentRecordings_.erase(id);
     }
+}
+
+// ─── Draw order ──────────────────────────────────────────────────────────────
+
+std::vector<const Entity*> Game::drawOrder() const {
+    const Grid& grid = activeGrid();
+    std::vector<const Entity*> result;
+    result.reserve(grid.entities.size());
+    for (EntityID eid : grid.entities) {
+        const Entity* e = registry_.get(eid);
+        if (e) result.push_back(e);
+    }
+    std::sort(result.begin(), result.end(),
+              [](const Entity* a, const Entity* b) { return a->layer < b->layer; });
+    return result;
 }
 
 // ─── Movement ────────────────────────────────────────────────────────────────

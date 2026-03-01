@@ -47,7 +47,7 @@ int main() {
         renderer.beginFrame();
         renderer.drawTerrain(game.terrain());
 
-        for (const Entity* ent : game.registry().drawOrder()) {
+        for (const Entity* ent : game.drawOrder()) {
             Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
             renderer.drawSprite(renderPos, ent->type);
         }

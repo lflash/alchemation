@@ -1,7 +1,23 @@
 #include "doctest.h"
 #include "grid.hpp"
 #include "game.hpp"
+#include "input.hpp"
 #include <algorithm>
+
+static SDL_Event makeKeyDown(SDL_Keycode key) {
+    SDL_Event e{};
+    e.type           = SDL_KEYDOWN;
+    e.key.keysym.sym = key;
+    e.key.repeat     = 0;
+    return e;
+}
+
+static SDL_Event makeKeyUp(SDL_Keycode key) {
+    SDL_Event e{};
+    e.type           = SDL_KEYUP;
+    e.key.keysym.sym = key;
+    return e;
+}
 
 // ─── Grid::add / remove ───────────────────────────────────────────────────────
 
@@ -156,4 +172,63 @@ TEST_CASE("scheduler actions in an inactive grid do not affect entities in other
 
     CHECK(reg.get(id) != nullptr);
     CHECK(a.hasEntity(id));
+}
+
+// ─── Studio grid ─────────────────────────────────────────────────────────────
+
+TEST_CASE("Tab enters studio: only player visible, goblin absent") {
+    Game  game;
+    Input input;
+
+    // World has player + goblin = 2 entities
+    CHECK(game.drawOrder().size() == 2);
+
+    // Press Tab to enter studio
+    input.beginFrame();
+    input.handleEvent(makeKeyDown(SDLK_TAB));
+    game.tick(input, 0);
+
+    // Studio has only the player
+    CHECK(game.inStudio());
+    CHECK(game.drawOrder().size() == 1);
+}
+
+TEST_CASE("Tab back to world restores goblin and player position") {
+    Game  game;
+    Input input;
+
+    // Move player somewhere distinctive
+    // (player starts at {0,0}; just record where it is)
+
+    // Enter studio
+    input.beginFrame();
+    input.handleEvent(makeKeyDown(SDLK_TAB));
+    game.tick(input, 0);
+    CHECK(game.inStudio());
+
+    // Release Tab, then press again to return to world
+    input.beginFrame();
+    input.handleEvent(makeKeyUp(SDLK_TAB));
+    input.beginFrame();
+    input.handleEvent(makeKeyDown(SDLK_TAB));
+    game.tick(input, 1);
+
+    CHECK(!game.inStudio());
+    // Both player and goblin should be visible again
+    CHECK(game.drawOrder().size() == 2);
+}
+
+TEST_CASE("studio terrain is independent from world terrain") {
+    // Already covered by the Grid-level test, but confirm via Game
+    Grid world(GRID_WORLD), studio(GRID_STUDIO);
+    world.terrain.dig({3, 3});
+    CHECK(world.terrain.typeAt({3, 3})  == TileType::BareEarth);
+    CHECK(studio.terrain.typeAt({3, 3}) == TileType::Grass);
+}
+
+TEST_CASE("Key::Tab is recognised by Input") {
+    Input input;
+    input.beginFrame();
+    input.handleEvent(makeKeyDown(SDLK_TAB));
+    CHECK(input.pressed(Key::Tab));
 }

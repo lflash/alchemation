@@ -3,7 +3,7 @@
 #include <SDL2/SDL.h>
 #include <unordered_set>
 
-enum class Key { W, A, S, D, E, F, C, R, Q, Escape, Shift };
+enum class Key { W, A, S, D, E, F, C, R, Q, Escape, Shift, Tab };
 
 class Input {
 public:

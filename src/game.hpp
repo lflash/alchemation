@@ -33,16 +33,20 @@ public:
     void tick(const Input& input, Tick currentTick);
 
     // Accessors for the renderer.
-    const Terrain&        terrain()    const { return activeGrid().terrain; }
-    const EntityRegistry& registry()   const { return registry_; }
-    int                   playerMana() const;
-    bool                  isRecording() const { return recorder_.isRecording(); }
+    const Terrain& terrain()     const { return activeGrid().terrain; }
+    int            playerMana()  const;
+    bool           isRecording() const { return recorder_.isRecording(); }
+    bool           inStudio()    const { return activeGridID_ == GRID_STUDIO; }
+
+    // Entities in the active grid, sorted by layer — for rendering.
+    std::vector<const Entity*> drawOrder() const;
 
 private:
     EntityRegistry registry_;
     std::unordered_map<GridID, Grid> grids_;
-    GridID   activeGridID_ = GRID_WORLD;
-    EntityID playerID_     = INVALID_ENTITY;
+    GridID   activeGridID_    = GRID_WORLD;
+    EntityID playerID_        = INVALID_ENTITY;
+    TilePos  playerWorldPos_  = {0, 0};   // saved on entering studio
 
     Recorder  recorder_;
     RoutineVM vm_;

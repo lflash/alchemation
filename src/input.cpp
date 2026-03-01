@@ -13,6 +13,7 @@ SDL_Keycode Input::toSDL(Key k) {
         case Key::Q:      return SDLK_q;
         case Key::Escape: return SDLK_ESCAPE;
         case Key::Shift:  return SDLK_LSHIFT;
+        case Key::Tab:    return SDLK_TAB;
     }
     return SDLK_UNKNOWN;
 }
