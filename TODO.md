@@ -194,6 +194,13 @@ between z-levels. Rendering switches to oblique/dimetric projection.
 - [x] Sprite anchor: bottom of sprite at tile centre; facing arrow centred on sprite body
 - [x] Grass colour: flat checkerboard (no Perlin noise) for clearer z-level visibility
 
+### Known issues
+- [ ] **Side-on slope visual glitch**: `visualZ` returns 0.5 for any entity on a
+  cardinal slope tile, regardless of whether they ascended or just passed through
+  perpendicularly at z=0. An entity walking east along the foot of a north cliff
+  will visually float to mid-height. Fix requires distinguishing "climbed" vs
+  "traversed" slope occupancy — the right approach is not yet decided.
+
 ### Tests ✓ (173/173 passing)
 - [x] `TilePos` hash includes z — (1,2,3) and (1,2,4) are distinct keys
 - [x] Movement onto slope in ascent direction → z+1
