@@ -10,9 +10,9 @@ populated and alive.
 Agents perceive and react to environmental stimuli — fire, water, freezing, being
 pushed or pulled, and others to be defined. Stimuli are per-tile float fields: fire
 intensity, cold, water level, force vector, and so on. They propagate across the
-tile grid each tick (fire spreads, cold radiates, force transfers) and agents sample
-the tile they occupy to determine their reaction. Stimuli are not entities — they
-are properties of space, updated in parallel by the compute backend.
+tile grid each tick (fire spreads, cold radiates, water flows, force transfers) and
+agents sample the tile they occupy to determine their reaction. Stimuli are not
+entities — they are properties of space, updated in parallel by the compute backend.
 
 The simulation is designed to run in parallel on the GPU or integrated graphics —
 the agent count target (millions) makes CPU-serial execution infeasible. The
@@ -40,8 +40,12 @@ to be built from reusable components.
 
 ## Overview
 
-A 2D tile-based game with smooth visual movement, a multi-world system, and a
-movement recording/playback mechanic. Written in C++ with SDL2.
+A 2.5D tile-based game with smooth visual movement, a multi-world system, a movement
+recording/playback mechanic, and a vertical terrain system. Written in C++ with SDL2.
+
+Rendering uses an **oblique/dimetric projection** (Pokémon Gen 4 style): tiles are
+wider than tall on screen, and Z-elevation shifts tiles straight up, giving depth
+without a true 3D engine.
 
 ---
 
@@ -53,33 +57,61 @@ movement recording/playback mechanic. Written in C++ with SDL2.
   ticks. It has no effect on game logic.
 - **Fixed timestep.** The simulation advances in discrete ticks at a fixed rate.
   Rendering runs as fast as possible and interpolates between ticks.
-- **One grid per world.** Entities exist in exactly one `Grid` at a time. Grids are
-  independent simulations (main world, studio, interiors, parallel universes).
+- **Multiple grids, all ticking.** Entities exist in exactly one `Grid` at a time.
+  All non-paused grids tick every frame. Only the active grid is rendered. Grids are
+  independent simulations (main world, studio, rooms, parallel universes).
 - **Tile hard cap.** A maximum of 8 entities may occupy the same tile simultaneously.
   A move that would exceed this cap is blocked.
 - **Three occupancy layers, independently managed.** Terrain type and stimulus fields
-  are properties of tiles (flat arrays). Entities are a separate system. All three
-  coexist freely — an entity standing on a fire tile does not displace the fire.
+  are properties of tiles. Entities are a separate system. All three coexist freely.
 
 ---
 
 ## Data Types
 
 ```cpp
-struct TilePos { int x, y; };           // integer grid coordinate — game logic only
-struct Vec2f   { float x, y; };         // float world position  — rendering only
-struct Bounds  { Vec2f min, max; };     // AABB hitbox in world space
+struct TilePos { int x, y, z; };        // integer grid coordinate — game logic only
+                                         // z = vertical level (0 = ground)
+struct Vec2f   { float x, y; };         // float render position — rendering only
+struct Bounds  { Vec2f min, max; };     // AABB hitbox in world space (XY only)
+struct Camera  { Vec2f pos; Vec2f target; float zoom; };  // smooth camera state
 
-using EntityID   = uint32_t;
-using GridID     = uint32_t;
+using EntityID    = uint32_t;
+using GridID      = uint32_t;
 using RecordingID = uint32_t;
-using Tick       = uint64_t;
+using Tick        = uint64_t;
 
 enum class EntityType { Player, Goblin, Mushroom, Poop };
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
-enum class TileType   { Grass, BareEarth };
+
+enum class TileType  { Grass, BareEarth, Portal };
+
+// Geometric shape of a tile — determines how entities traverse it vertically.
+// SlopeN means walking North ascends by one z-level.
+enum class TileShape { Flat, SlopeN, SlopeS, SlopeE, SlopeW };
+
+enum class SFX {
+    Step, Dig, Plant, CollectMushroom,
+    RecordStart, RecordStop, DeployAgent,
+    PortalCreate, PortalEnter, GridSwitch,
+    GoblinHit, AgentStep,
+};
+
+enum class MusicLayer {
+    WorldCalm,      // open world base ambience
+    GoblinTension,  // rises with goblin proximity on screen
+    Studio,         // inside the studio grid
+    RoomInterior,   // inside any bounded room grid
+};
+
+enum class AudioEvent {
+    PlayerStep, Dig, Plant, CollectMushroom,
+    RecordStart, RecordStop, DeployAgent,
+    PortalCreate, PortalEnter, GridSwitch,
+    GoblinHit, AgentStep,
+};
 
 using RoutineID = uint32_t;
 
@@ -110,27 +142,27 @@ struct Instruction {
     uint32_t  addr;       // jump target or subroutine RoutineID (for CALL)
 };
 
-constexpr int CALL_STACK_DEPTH = 8;   // max subroutine nesting — fixed for GPU
+constexpr int CALL_STACK_DEPTH = 8;
 
 struct AgentExecState {
-    RoutineID routineID;                    // which routine to execute
-    uint32_t  pc;                           // program counter
-    uint32_t  waitTicks;                    // remaining ticks on a WAIT
-    uint32_t  callStack[CALL_STACK_DEPTH];  // return addresses for CALL/RET
-    uint8_t   callDepth;                    // current call stack depth
+    RoutineID routineID;
+    uint32_t  pc;
+    uint32_t  waitTicks;
+    uint32_t  callStack[CALL_STACK_DEPTH];
+    uint8_t   callDepth;
 };
 
-constexpr int TILE_ENTITY_CAP = 8;   // max entities per tile
+constexpr int TILE_ENTITY_CAP = 8;
 
-// Per-tile field data (flat arrays in TileGrid, indexed by TilePos)
 struct TileFields {
-    TileType type;       // terrain type
-    float    height;     // Perlin height, render only
-    float    fire;       // stimulus: fire intensity  (0.0 = none)
-    float    cold;       // stimulus: cold intensity  (0.0 = none)
-    float    water;      // stimulus: water level     (0.0 = none)
-    float    forceX;     // stimulus: push/pull force (tile units/tick)
-    float    forceY;
+    TileType  type;
+    TileShape shape;     // geometric shape (flat or slope direction)
+    float     height;    // Perlin height, render shading only
+    float     fire;
+    float     cold;
+    float     water;
+    float     forceX;
+    float     forceY;
 };
 ```
 
@@ -144,7 +176,7 @@ Fixed timestep with uncapped render rate and sub-tick interpolation.
 TICK_RATE = 50 Hz  (20ms per tick)
 
 each frame:
-  dt = time since last frame (capped at 100ms to prevent spiral of death)
+  dt = time since last frame (capped at 100ms)
   accumulator += dt
 
   while accumulator >= TICK_DT:
@@ -154,10 +186,8 @@ each frame:
 
   alpha = accumulator / TICK_DT        // 0.0 → 1.0, sub-tick position
   renderer.draw(game, alpha)
+  audio.update(dt)
 ```
-
-`alpha` is passed to the renderer to interpolate entity positions between their last
-tick state and their current state, producing smooth visuals at any framerate.
 
 ---
 
@@ -166,11 +196,16 @@ tick state and their current state, producing smooth visuals at any framerate.
 ### Input
 
 Snapshots key state once per tick. Provides:
-- `bool held(Key)`   — key currently down
-- `bool pressed(Key)` — key went down this tick
+- `bool held(Key)`     — key currently down
+- `bool pressed(Key)`  — key went down this tick (not on repeat)
 - `bool released(Key)` — key went up this tick
+- `int  scroll()`      — mouse wheel delta this frame (positive = up)
 
-No raw events leak into the game logic. Input is polled, not pushed.
+Keys: `W A S D E F C R Q O H I Tab Shift Escape Enter Backspace`
+      `ArrowUp ArrowDown ArrowLeft ArrowRight Ctrl`
+
+No raw events leak into the game logic. Text input (rename mode) is handled
+separately in main.cpp via SDL_TEXTINPUT events, bypassing the Input snapshot.
 
 ---
 
@@ -178,90 +213,92 @@ No raw events leak into the game logic. Input is polled, not pushed.
 
 ```cpp
 struct Entity {
-    EntityID  id;
+    EntityID   id;
     EntityType type;
-    GridID    grid;
 
-    TilePos   pos;           // current logical tile (game logic)
-    TilePos   destination;   // target tile (== pos when idle)
-    float     moveT;         // 0.0→1.0 progress toward destination (render only)
+    TilePos    pos;          // current logical tile
+    TilePos    destination;  // target tile (== pos when idle)
+    float      moveT;        // 0.0→1.0 progress toward destination (render only)
 
-    Vec2f     bounds;        // hitbox size in tile units (can be < 1.0 or > 1.0)
-    float     speed;         // moveT progress added per tick
-    Direction facing;
-    int       layer;         // draw order (lower = drawn first)
-    int       mana;
+    Vec2f      size;         // hitbox size in tile units
+    float      speed;        // moveT progress added per tick
+    Direction  facing;
+    int        layer;        // draw order (lower = drawn first)
+    int        mana;
+    int        health;
 };
 ```
 
-`EntityRegistry` owns all entities across all grids, keyed by `EntityID`. Each `Grid`
-holds only a list of `EntityID`s that belong to it.
+`EntityRegistry` owns all entities across all grids, keyed by `EntityID`. Each
+`Grid` holds only a list of `EntityID`s that belong to it.
 
-Movement state: while an entity is moving, it is registered in the `SpatialGrid` at
-**both** its `pos` and its `destination` (see Collision). On arrival, it is removed
-from `pos` and stays at `destination`, which becomes the new `pos`.
+Movement state: while moving, the entity is registered in `SpatialGrid` at **both**
+its `pos` and `destination`. On arrival it is removed from `pos`; `destination`
+becomes the new `pos`.
 
 ---
 
 ### Grid & World
 
 ```cpp
+struct Portal { GridID targetGrid; TilePos targetPos; };
+
 class Grid {
-    GridID       id;
-    SpatialGrid  spatial;
-    Terrain      terrain;
-    Scheduler    scheduler;
+    GridID   id;
+    int      width, height;   // 0 = unbounded (infinite world)
+    bool     paused = false;
+
+    unordered_map<TilePos, Portal> portals;
+    Terrain     terrain;
+    SpatialGrid spatial;
+    Scheduler   scheduler;
+    EventBus    events;
     vector<EntityID> entities;
 };
 
 class Game {
-    unordered_map<GridID, Grid> grids;
-    EntityRegistry              registry;
-    Recorder                    recorder;
-    GridID                      activeGrid;
+    unordered_map<GridID, Grid> grids_;
+    EntityRegistry              registry_;
+    Recorder                    recorder_;
+    GridID                      activeGridID_;
+    GridID                      nextGridID_;      // monotonically increasing
+    optional<PendingTransfer>   pendingTransfer_; // applied between ticks
 };
 ```
 
-Only the active grid is simulated and rendered each tick. Inactive grids are frozen
-unless explicitly ticked (e.g. a parallel universe running in the background).
+**Grid IDs:**
+- `GRID_WORLD  = 1` — the main infinite open world
+- `GRID_STUDIO = 2` — blank bounded studio for recording/testing
+- `GRID_DYN_START = 3` — dynamic room grids start here
 
-**Transferring an entity between grids:**
-```
-transferEntity(id, fromGrid, toGrid, TilePos destination)
-  → remove from fromGrid spatial + entity list
-  → add to toGrid spatial + entity list
-  → set entity.grid = toGrid
-  → set entity.pos = destination
-```
+**All non-paused grids tick every frame.** Only the active grid is rendered.
+Player input is delivered only to the active grid's tick.
+
+**Bounded rooms** (`width > 0 && height > 0`): tiles outside `[0,w)×[0,h)` are
+void. Entities and the player are clamped to bounds.
+
+**Portals:** each `Grid` has a map from `TilePos` to `Portal`. When any entity
+arrives on a portal tile, a `PendingTransfer` is queued. It is applied at the
+**start of the next tick** (never mid-loop) to avoid iterator invalidation.
+Tab (world↔studio) transfers happen immediately within `tickPlayerInput`.
+
+**Creating a room (Key::O):** places a `Portal` tile at the tile ahead of the
+player in the current grid, creates a new bounded `20×20` grid, places a return
+portal at the room's centre. Return destination is the forward portal tile itself
+(safe because portal detection fires only on movement arrival, not on placement).
+
+**Active grid ID is captured before the tick loop** so that `tickPlayerInput`
+switching grids mid-loop cannot cause it to fire twice.
 
 ---
 
 ### SpatialGrid
 
 Hash map from `TilePos` to a fixed-size array of up to `TILE_ENTITY_CAP` (8)
-`EntityID`s. Entities in motion are registered in **both** their `pos` and
-`destination` cells simultaneously. This prevents any entity from entering a cell
-that another entity has only partially vacated.
+`EntityID`s. With verticality, keys include the z-coordinate.
 
-A move is blocked before it starts if the destination tile already holds 8 entities
-(after accounting for any that are departing this tick).
-
-**Multi-tile entities** (e.g. 2×1, 3×3) register in every cell their bounds overlap:
-```
-x0 = floor(pos.x),  x1 = floor(pos.x + bounds.x)
-y0 = floor(pos.y),  y1 = floor(pos.y + bounds.y)
-register entity in all (x, y) in [x0..x1] × [y0..y1]
-```
-
-When an entity moves, only the delta of old vs new cell sets is updated — cells that
-remain covered are untouched.
-
-**Querying** (broad phase): given an AABB, return all unique `EntityID`s registered
-in any overlapping cell. Duplicates (from multi-cell registration) are deduplicated
-before the narrow phase.
-
-The `SpatialGrid` manages entities only. Stimulus fields and terrain are stored
-separately in `TileGrid` and are not affected by entity occupancy.
+Entities in motion register in **both** `pos` and `destination` simultaneously.
+Multi-tile entities register in all cells their bounds overlap.
 
 ---
 
@@ -269,108 +306,61 @@ separately in `TileGrid` and are not affected by entity occupancy.
 
 Two-phase:
 
-**Broad phase** — `SpatialGrid.query(AABB)` → candidate `EntityID` list. Cheap O(1)
-lookup per cell, avoids O(n²) all-pairs checking.
+**Broad phase** — `SpatialGrid.query(AABB)` → candidate `EntityID` list.
 
-**Narrow phase** — AABB intersection test between the moving entity's hitbox and each
-candidate's hitbox. Fires only when boxes actually overlap in world space, not just
-when tile boundaries touch. This correctly handles sprites smaller than a tile.
+**Narrow phase** — AABB intersection test between mover's hitbox and each candidate.
 
-**Collision resolution** is determined by a lookup on `(mover type, occupant type)`:
+**Collision resolution** by `(mover type, occupant type)`:
 
 ```
           │ Player   Goblin   Mushroom  Poop
 ──────────┼──────────────────────────────────
-Player    │  —       Block*   Collect   Pass   *bump combat: push fires on block
+Player    │  —       Block*   Collect   Pass   *bump combat: push + damage
 Goblin    │ Combat   Block    Pass      Pass
 Poop      │  Pass    Hit      Pass      Pass
 ```
 
-Each cell is independently configurable. `Block` prevents the move from starting.
-All other results allow movement; the event fires on arrival.
-
-**Swap prevention**: movement intentions are collected across all entities first, then
-resolved together. If A wants B's tile and B wants A's tile in the same tick, it is
-detected as a head-on conflict and treated as `Block` for both.
+**Swap prevention**: all movement intentions collected first, then resolved
+together. A→B and B→A in the same tick → both blocked.
 
 ---
 
 ### Scheduler
 
-A min-heap (priority queue) of `ScheduledAction`s ordered by `tick`. Each tick:
-```
-while scheduler.top().tick <= currentTick:
-    execute(scheduler.pop())
-```
-
-```cpp
-struct ScheduledAction {
-    Tick       tick;
-    EntityID   entity;
-    ActionType type;
-    variant<MovePayload, SpawnPayload, DespawnPayload,
-            ChangeManaPayload, TilePosPayload> payload;
-};
-```
-
-O(log n) insert and pop. No linear scanning.
-
-Actions are never mutated after insertion. Transformations (translate, rotate, delay,
-rescale) are applied when building a batch of actions (e.g. instantiating a
-recording), before they are pushed into the scheduler.
+Min-heap of `ScheduledAction`s ordered by `tick`. Each tick pops all due actions.
+O(log n) insert and pop. Actions are immutable after insertion.
 
 ---
 
 ### Events
 
-```cpp
-struct Event {
-    EventType type;
-    EntityID  subject;
-    EntityID  other;      // for Collided
-    int       magnitude;  // for Hit
-};
-```
+`EventBus` per grid. Events are queued during the tick and flushed at end, so
+handlers always run on consistent state.
 
-`EventBus` holds a list of subscribers per `EventType`. Events are queued during the
-tick and flushed at the end, so handlers always run on a consistent game state.
+Mushroom collection is handled via the `Arrived` event: when the player arrives
+on a tile occupied by a `Mushroom`, the mushroom is collected and an
+`AudioEvent::CollectMushroom` is pushed. Each grid subscribes its own handler on
+creation/load.
 
 ---
 
-### Tile Fields
-
-Terrain and stimuli are properties of tiles, not entities. They are stored in
-`TileGrid` as flat arrays of `TileFields` structs indexed by `TilePos`. The
-`SpatialGrid` is entirely separate.
+### Terrain
 
 ```cpp
-class TileGrid {
-    FastNoiseLite                        noise;
-    unordered_map<TilePos, TileFields>   tiles;   // sparse; default-constructed on miss
-public:
-    TileFields&       at(TilePos);        // returns default if not yet set
-    const TileFields& at(TilePos) const;
-
-    // Terrain
-    void  dig(TilePos);                   // sets type = BareEarth
-    void  restore(TilePos);              // sets type = Grass
-
-    // Stimulus update — called once per tick
-    void  stepStimuli();                  // propagate/decay all stimulus fields
+class Terrain {
+    FastNoiseLite noise;
+    unordered_map<TilePos, float>    heightCache;   // Perlin, lazy-computed
+    unordered_map<TilePos, TileType> typeOverrides;  // sparse; default = Grass
+    // (TileShape stored separately when verticality is added)
 };
 ```
 
-**Terrain type** (`Grass`, `BareEarth`, ...) is a field on `TileFields`. Perlin
-height is computed on demand and cached. `dig()` and `restore()` mutate the type
-field directly.
+`heightAt(TilePos)` returns Perlin float in `[-1, 1]`, cached per tile.
+`typeAt(TilePos)` checks overrides, defaults to `Grass`.
 
-**Stimulus fields** (`fire`, `cold`, `water`, `forceX/Y`) are floats on `TileFields`.
-`stepStimuli()` runs each tick: fire spreads to adjacent tiles and decays, cold
-radiates, water flows downhill, force dissipates. Terrain type can modulate
-propagation (fire spreads faster on `BareEarth`).
-
-Agents sample `TileGrid::at(pos)` each tick and react to stimulus values above
-their per-type thresholds. Stimuli do not interact with the `SpatialGrid`.
+With verticality, `TilePos` includes `z` and the Terrain becomes a sparse 3D
+volume: a tile only exists at `(x, y, z)` if explicitly placed. Most positions
+in a column are air.
 
 ---
 
@@ -378,184 +368,232 @@ their per-type thresholds. Stimuli do not interact with the `SpatialGrid`.
 
 Routines are programs. Agents are threads. The GPU kernel is the interpreter.
 
-Agents are not projectiles — they are autonomous robots. A Poop entity executing a
-routine can move, dig, plant, and react to stimuli exactly as a player can. The only
-difference is that its actions are driven by a `Recording` rather than live input.
-Future agent types will share the same VM.
+Each agent holds an `AgentExecState` — a program counter, wait counter, and fixed-
+depth call stack. One instruction executes per tick.
 
-Each routine is a flat array of `Instruction`s stored in a GPU-resident buffer. Each
-agent holds an `AgentExecState` — a program counter, a wait counter, and a fixed-
-depth call stack. One GPU thread per agent executes one instruction per tick.
-
-**GPU kernel (per tick, one thread per agent):**
 ```
-if agent.waitTicks > 0:
-    agent.waitTicks--
-    return
-
-instr = routines[agent.routineID][agent.pc]
-
-switch instr.op:
-    MOVE_REL:    intendedMove = resolve(instr.dir, agent.facing)
-    MOVE_ABS:    intendedMove = instr.dir
-    FACE:        agent.facing = instr.dir
-    WAIT:        agent.waitTicks = instr.addr; agent.pc++; return
-    JUMP:        agent.pc = instr.addr; return
-    JUMP_IF:     if stimuli[agent.pos][instr.condition] > instr.threshold:
-                     agent.pc = instr.addr; return
-    JUMP_IF_NOT: if stimuli[agent.pos][instr.condition] <= instr.threshold:
-                     agent.pc = instr.addr; return
-    CALL:        callStack[callDepth++] = agent.pc + 1
-                 agent.routineID = instr.addr
-                 agent.pc = 0; return
-    RET:         if callDepth == 0: halt
-                 agent.pc = callStack[--callDepth]; return
-    HALT:        return
-
-agent.pc++
+MOVE_REL / MOVE_ABS → sets intended move for the move-resolution pass
+FACE                → updates agent facing
+WAIT                → decrements waitTicks, skips until zero
+DIG / PLANT         → terrain interaction (wired to Terrain::dig/restore)
+JUMP                → unconditional jump
+JUMP_IF / JUMP_IF_NOT → conditional jump on stimulus threshold
+CALL / RET          → subroutine call stack (depth 8, GPU-safe fixed size)
+HALT                → agent despawns
 ```
-
-A second pass collects all `intendedMove`s, resolves conflicts (tile cap, swaps), and
-commits. The VM and the collision pass are independent GPU kernels.
 
 ---
 
-**Subroutines**
+### Camera
 
-`CALL routineID` pushes the return address onto the agent's fixed-size call stack and
-jumps to the start of the named routine. `RET` returns to the caller. Maximum nesting
-depth is `CALL_STACK_DEPTH` (8) — fixed at compile time so agent state remains a
-constant-size GPU struct.
+Owned by `main.cpp`. Updated every render frame (not every game tick).
 
-This lets complex behaviours be built from named components:
-
-```
-routine "patrol":           routine "flee_from_fire":
-  CALL  flee_from_fire        JUMP_IF_NOT  FIRE 0.3  done
-  MOVE_REL  E                 MOVE_REL     BACK
-  CALL  flee_from_fire        RET
-  MOVE_REL  N               done:
-  JUMP  0                     RET
+```cpp
+struct Camera { Vec2f pos; Vec2f target; float zoom; };
+Vec2f camOffset;  // manual pan offset added on top of player position
 ```
 
-Subroutines are just routines — they live in the same buffer and are referenced by
-`RoutineID`. There is no distinction between a top-level routine and a subroutine.
+**Tracking:** `camera.target = playerRenderPos + camOffset`. Exponential lerp:
+`camera.pos += (target - pos) * (1 - exp(-CAM_LERP * dt))`.
 
----
+**Grid switch snap:** `game.consumeGridSwitch()` returns true on the frame a grid
+switch happens. Camera pos and target snap immediately to the new player position
+to avoid lerp artefacts.
 
-**Recording**
-
-The player records a routine by playing. Each action emits one or more instructions:
-
-| Player action | Emitted instruction |
-|---|---|
-| Move key | `MOVE_REL <dir>` |
-| Pause between moves | `WAIT <ticks>` |
-| `f` (dig) | `DIG` |
-| `c` (plant) | `PLANT` |
-| Branch trigger + condition pick | `JUMP_IF <condition> <threshold> <addr>` |
-| Subroutine trigger + routine pick | `CALL <routineID>` |
-| End of loop | `JUMP 0` |
-
-Conditional branches and subroutine calls are inserted via the **Routine Editor**
-(see below) rather than recorded live, since they require the player to specify a
-target address or condition. The recorder captures movement and timing; the editor
-handles control flow.
+**Controls:**
+- Arrow keys: pan `camOffset` (tile units/sec)
+- Backspace: reset `camOffset` to zero
+- Ctrl + scroll: zoom `camera.zoom` (clamped `[0.25, 4.0]`)
 
 ---
 
 ### Renderer
 
-Rendering is abstracted behind `IRenderer`. The simulation has no dependency on any
-specific frontend. Two implementations are planned:
+Abstracted behind `IRenderer`. Two implementations:
 
-- **`SDLRenderer`** — SDL2 window, sprite blitting, tile shading. Primary target.
-- **`TerminalRenderer`** — ANSI/ASCII output. No SDL dependency. Useful for rapid
-  iteration and headless machines.
+- **`Renderer`** (SDL2) — primary target; sprite blitting, tile shading, UI overlay
+- **`TerminalRenderer`** — ANSI/ASCII; no SDL dependency
 
-`IRenderer` receives game state and `alpha` (sub-tick interpolation factor). It has
-no write access to game state.
-
-**Per frame:**
-1. Clear screen
-2. For each tile in viewport: read `TileGrid::at()` for terrain type, height, and
-   stimulus values; compute colour/character; draw
-3. Sort entities in active grid by `layer` (ascending)
-4. For each entity: compute render position, blit sprite or character
-
-**Render position** (smooth movement):
+**Current projection (top-down with camera):**
 ```
-Vec2f renderPos = lerp(toVec(entity.pos), toVec(entity.destination), entity.moveT)
+screen_x = VIEWPORT_W/2 + (tile_x - cam.pos.x) * (TILE_SIZE * zoom)
+screen_y = VIEWPORT_H/2 + (tile_y - cam.pos.y) * (TILE_SIZE * zoom)
 ```
 
-`moveT` is the tick-level progress (updated by the movement system). `alpha` can be
-applied on top for sub-tick smoothness if needed.
+**Planned projection (oblique/dimetric, Pokémon Gen 4 style):**
+```
+screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_W
+screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H - tile_z * Z_STEP
+```
+Where `TILE_H < TILE_W` (tiles squished for depth) and `Z_STEP` is pixels per
+z-level. Draw order: sort by `world_y` ascending (back-to-front), then by
+`world_z` ascending within the same row. Elevated tiles show a south-facing cliff
+strip when the tile to their south is at a lower z.
 
-**SpriteCache** (`SDLRenderer` only): loads and caches textures by `EntityType` at
-startup. Entities hold no rendering data.
+**Bounded grid void:** tiles outside `[0,w)×[0,h)` render as dark void `(18,18,18)`.
+
+**Terrain colour:**
+- Grass: green channel driven by Perlin height; checkerboard offset
+- BareEarth: flat brown `(139, 90, 43)`
+- Portal: purple `(160, 60, 220)`
+- Studio mode: muted blue-grey palette, height-varied
+
+**Facing indicator:** small filled triangle (SDL_RenderGeometry) at the edge of
+each non-Mushroom entity's tile, pointing in `facing` direction.
+
+**UI (SDL_ttf, font: DejaVuSansMono 13pt):**
+- HUD (always visible, top-left): mana counter `♦ N`, recording indicator `● REC`
+- Controls panel (H): keybinding reference, top-right
+- Recordings panel (I): recording list with rename; mutually exclusive with H panel
+  - Enter: start rename (SDL_TEXTINPUT mode); text input bypasses Input snapshot
+  - While renaming, empty Input passed to game.tick() to suppress game actions
 
 ---
 
-### Routine Editor
+### Audio
 
-The routine editor is an in-game UI for authoring, naming, and assigning routines.
-It is a future phase — the simulation and VM must be in place first — but its
-requirements shape the VM design.
-
-**What the editor must support:**
-- View the current routine as a list of numbered instructions
-- Insert, delete, and reorder instructions
-- Set `JUMP_IF` conditions and thresholds interactively
-- Name and save routines to a persistent library
-- Pick a subroutine by name when inserting a `CALL` instruction
-- Assign a routine to a selected agent type or individual agent
-- Run the routine on a single test agent in the studio grid for preview
-
-**Relationship to recording:**
-Recording and editing are complementary. The player records the movement skeleton
-(a linear sequence of `MOVE_REL` and `WAIT` instructions), then opens the editor to
-add branches, loops, and subroutine calls. Neither tool alone is sufficient; both are
-required for authoring non-trivial routines.
-
-**UI requirements:**
-The editor requires a basic immediate-mode UI system: text rendering, a selectable
-list, directional navigation, and modal input (for naming routines, entering
-thresholds). This implies a font/glyph rendering system and a minimal widget layer
-on top of `IRenderer`. SDL2's built-in capabilities are insufficient; a font library
-(e.g. SDL_ttf) or a baked bitmap font will be needed.
-
----
-
-## Entity Configuration
-
-Loaded from `assets/entities.json` at startup. Defines per-type properties:
-
-```json
-{
-  "player":   { "speed": 0.1, "bounds": [0.8, 0.8], "layer": 0, "sprite": "player.png"   },
-  "goblin":   { "speed": 0.1, "bounds": [0.8, 0.8], "layer": 1, "sprite": "goblin.png"   },
-  "mushroom": { "speed": 0.0, "bounds": [0.6, 0.6], "layer": 2, "sprite": "mushroom.png" },
-  "poop":     { "speed": 0.2, "bounds": [0.5, 0.5], "layer": 1, "sprite": "poop.png"     }
-}
+```cpp
+class AudioSystem {
+    // Channel layout (SDL2_mixer):
+    //   0–7  : SFX (group 0, 8 concurrent)
+    //   8–11 : music layers (looping, volume-faded)
+    //   12   : idle ambient (one-shot)
+};
 ```
 
+**SFX:** one-shot playback on the next free SFX channel. If all 8 are busy, oldest
+is stolen. `Game` accumulates `AudioEvent`s during `tick()`; `main.cpp` drains them
+each render frame and calls `audio.playSFX()`.
+
+**Music layers:** four looping tracks started at volume 0 at startup. Each frame,
+`main.cpp` computes layer targets from game state and calls `setLayerTarget()`.
+`update(dt)` smoothly fades each layer's actual volume toward its target (1 vol
+unit/sec). Targets:
+- `WorldCalm` → 1.0 when in the open world, 0.0 in studio/rooms
+- `GoblinTension` → `min(1.0, goblin_count_on_screen / 3.0)`
+- `Studio` → 1.0 when in studio grid
+- `RoomInterior` → 1.0 when in any bounded room grid
+
+**Idle ambience (Minecraft-style):** when all layer volumes are below 0.05 for 30
+seconds, a random ambient track is selected and faded in (0.25 vol/sec). Fades out
+when music activity resumes. Plays once, not looping.
+
+**Asset format:** WAV (placeholder); any format supported by `Mix_LoadWAV` can be
+dropped in as a replacement (OGG with SDL2_mixer OGG support).
+
 ---
 
-## Game Mechanics
+### Persistence
+
+Binary save format (version 2). Auto-loaded on startup, auto-saved on quit (Esc).
+
+**Format:**
+```
+magic: "GRID" (4 bytes)
+version: uint32 = 2
+activeGridID: uint32
+nextGridID: uint32
+
+grid_count: uint32
+for each grid (excluding studio):
+    gridID: uint32
+    width, height: int32
+    terrain override count: uint32
+    for each override: TilePos (x,y), TileType
+    portal count: uint32
+    for each portal: TilePos (x,y), targetGrid, targetPos (x,y)
+    entity count: uint32
+    for each entity: type, pos(x,y), facing
+
+player: pos(x,y), facing, mana
+playerWorldPos: x, y
+selectedRecording: uint32
+recording count: uint32
+for each recording: name (length-prefixed string), instruction count, instructions
+```
+
+Version mismatch → load fails silently (no save file = fresh world).
+
+---
+
+### Verticality (planned — Phase 9)
+
+The world is a **sparse 3D volume**. Each `(x, y)` column can have surfaces at
+multiple z-levels simultaneously — e.g. a bridge at z=2 over a chasm floor at z=0,
+with air at z=1.
+
+**Data model:**
+- `TilePos` gains `int z`: `struct TilePos { int x, y, z; };`
+- `TileShape` enum: `Flat | SlopeN | SlopeS | SlopeE | SlopeW`
+  - `SlopeN`: walking North ascends by one z-level (z+1)
+  - `SlopeS/E/W`: analogous
+- `Terrain` stores tiles sparsely by 3D `TilePos`; an unset position is air/void
+- `Entity::pos` and `Entity::destination` include z
+- `SpatialGrid` keys on `TilePos {x, y, z}`
+
+**Movement with slopes:**
+
+When entity at `(x, y, z)` moves in direction D toward `(x', y')`:
+
+1. Slope up: tile at `(x', y', z)` has shape matching direction D → arrive at `(x', y', z+1)`
+2. Slope down: tile at `(x', y', z-1)` has shape matching opposite of D → arrive at `(x', y', z-1)`
+3. Flat: solid tile at `(x', y', z)` → arrive there (z unchanged)
+4. Otherwise: blocked (cliff or void)
+
+Traversing a slope sideways (perpendicular to its ascent direction) is blocked.
+Only slopes connect z-levels; there is no jumping or free vertical movement.
+
+**Rendering: oblique/dimetric projection**
+
+```
+screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_W
+screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H - tile_z * Z_STEP
+```
+
+- `TILE_W` = 32px (unchanged)
+- `TILE_H` ≈ 20px (squished to imply overhead angle)
+- `Z_STEP` ≈ 12px per z-level (tunable)
+
+Draw order (back-to-front): sort draw calls by `world_y` ascending, then by
+`world_z` ascending within the same y-row. This ensures the bridge renders visually
+above the chasm floor automatically.
+
+**Cliff faces:** when a tile at `(x, y, z)` is elevated relative to the tile at
+`(x, y+1, z-1)` (the tile to its south, one level below), draw a vertical
+"wall strip" on the south face — the difference in screen_y between the two tiles
+filled with a darker variant of the tile's colour. This is what gives elevation
+the solid, 3D appearance of Pokémon Gen 4.
+
+**Camera z:** `Camera` gains a `float z` component. The camera tracks the player's
+z the same way it tracks x/y — exponential lerp, snap on grid switch.
+
+---
+
+## Game Mechanics — Controls
 
 | Input | Action |
 |---|---|
-| `WASD` | Move player one tile in direction. Updates `facing`. |
-| `r` | Toggle recording. On stop, saves `Recording` to `recordings` deque. |
-| `q` | Cycle `selectedRecording`. |
-| `e` | Deploy `selectedRecording` as a `Poop` routine agent spawned in front of the player, inheriting player `facing`. |
-| `f` | Dig tile in front of player (`terrain.dig()`). |
-| `c` | If tile in front is `BareEarth` and player `mana >= 1`: spawn `Mushroom`, restore terrain, deduct 1 mana. |
+| `WASD` | Move player one tile. Updates `facing`. |
+| `Shift + WASD` | Strafe (move without updating `facing`). |
+| `F` | Dig tile ahead (`terrain.dig()`). |
+| `C` | If tile ahead is `BareEarth` and `mana >= 1`: plant mushroom, restore terrain, deduct 1 mana. |
+| `R` | Toggle recording. On stop, saves `Recording` to deque with default name "Script N". |
+| `Q` | Cycle `selectedRecording`. |
+| `E` | Deploy `selectedRecording` as a `Poop` agent spawned ahead of player. |
+| `O` | Create portal tile ahead; spawn linked 20×20 room grid. |
+| `Tab` | Toggle between world and studio (direct transfer, no portal). |
+| `H` | Toggle controls reference panel. |
+| `I` | Toggle recordings panel (replaces H panel). |
+| `Enter` | (Recordings panel open) Begin rename of selected recording. |
+| `Arrow keys` | Pan camera offset. |
+| `Backspace` | Re-centre camera (reset pan offset). |
+| `Ctrl + Scroll` | Zoom in/out (`[0.25×, 4.0×]`). |
+| `Esc` | Save and quit. |
 
 | Collision | Result |
 |---|---|
 | Player + Mushroom | Player gains 3 mana. Mushroom despawns. |
-| Player + Goblin | Bump combat: player mana as damage, goblin pushed back. |
+| Player + Goblin | Bump combat: goblin takes `player.mana` damage, is pushed back. |
 | Poop + Goblin | Goblin takes hit. |
 
 ---
@@ -565,32 +603,49 @@ Loaded from `assets/entities.json` at startup. Defines per-type properties:
 ```
 grid_game/
 ├── DESIGN.md
+├── TODO.md
 ├── CMakeLists.txt
+├── save.dat                           ← auto-saved binary state (gitignored)
 ├── assets/
-│   ├── entities.json
-│   └── sprites/
-│       ├── player.png
-│       ├── goblin.png
-│       ├── mushroom.png
-│       └── poop.png
+│   ├── fonts/
+│   │   └── DejaVuSansMono.ttf
+│   ├── sprites/
+│   │   ├── player.png
+│   │   ├── goblin.png
+│   │   ├── mushroom.png
+│   │   └── poop.png
+│   ├── sfx/                           ← one-shot sound effects (WAV/OGG)
+│   │   ├── step.wav  dig.wav  plant.wav  collect.wav
+│   │   ├── record_start.wav  record_stop.wav  deploy.wav
+│   │   ├── portal_create.wav  portal_enter.wav  grid_switch.wav
+│   │   ├── goblin_hit.wav  agent_step.wav
+│   └── music/                         ← looping layers + idle ambient (WAV/OGG)
+│       ├── world_calm.wav  goblin_tension.wav
+│       ├── studio.wav  room_interior.wav
+│       └── ambient_1.wav  ambient_2.wav  ambient_3.wav
 ├── vendor/
-│   └── FastNoiseLite.hpp
+│   ├── FastNoiseLite.h
+│   └── doctest.h
+├── tests/
+│   ├── test_phase1.cpp  …  test_phase8.cpp
+│   └── test_terminal_renderer.cpp
 └── src/
     ├── main.cpp
-    ├── types.hpp                    ← TilePos, Vec2f, Bounds, TileFields, enums, lerp, toVec, TilePosHash, constants
-    ├── game.hpp / .cpp              ← Game, game loop, top-level tick
-    ├── entity.hpp / .cpp            ← Entity struct, EntityRegistry
-    ├── grid.hpp / .cpp              ← Grid, multi-grid world management
-    ├── spatial.hpp / .cpp           ← SpatialGrid (entity occupancy, hard cap 8)
-    ├── tilegrid.hpp / .cpp          ← TileGrid (terrain type, height, stimulus fields)
-    ├── scheduler.hpp / .cpp         ← ScheduledAction, Scheduler (min-heap)
-    ├── events.hpp / .cpp            ← Event, EventBus
-    ├── routine.hpp                  ← Instruction, OpCode, Condition, AgentExecState
-    ├── routine_vm.hpp / .cpp        ← RoutineVM: GPU kernel, routine buffer, step()
-    ├── recorder.hpp / .cpp          ← records player actions → Instruction stream
-    ├── input.hpp / .cpp             ← Input snapshot
-    ├── irenderer.hpp                ← IRenderer interface
-    ├── renderer.hpp / .cpp          ← SDLRenderer (SDL2, SpriteCache)
+    ├── types.hpp          ← TilePos, Vec2f, Bounds, Camera, enums, lerp, toVec, TilePosHash
+    ├── game.hpp / .cpp    ← Game, tick, AudioEvent queue, save/load
+    ├── entity.hpp / .cpp  ← Entity, EntityRegistry, stepMovement, resolveMoves
+    ├── grid.hpp           ← Grid, Portal
+    ├── terrain.hpp / .cpp ← Terrain (Perlin + sparse overrides)
+    ├── spatial.hpp / .cpp ← SpatialGrid (entity occupancy, hard cap 8)
+    ├── scheduler.hpp / .cpp ← ScheduledAction, Scheduler (min-heap)
+    ├── events.hpp / .cpp  ← Event, EventBus
+    ├── routine.hpp        ← Instruction, OpCode, Condition, AgentExecState, Recording
+    ├── routine_vm.hpp / .cpp ← RoutineVM: step(), move resolution
+    ├── recorder.hpp / .cpp ← Recorder: player actions → Instruction stream
+    ├── input.hpp / .cpp   ← Input snapshot (SDL keycodes → Key enum)
+    ├── audio.hpp / .cpp   ← AudioSystem (SDL2_mixer, SFX + music layers + ambient)
+    ├── irenderer.hpp      ← IRenderer interface
+    ├── renderer.hpp / .cpp ← Renderer (SDL2, camera, UI, SDL_ttf)
     └── terminal_renderer.hpp / .cpp ← TerminalRenderer (ANSI/ASCII)
 ```
 
@@ -601,7 +656,10 @@ grid_game/
 | Library | Purpose | Integration |
 |---|---|---|
 | SDL2 | Window, input, 2D rendering | `find_package(SDL2)` |
-| FastNoiseLite | Perlin noise (single header) | Drop into `vendor/` |
-| nlohmann/json | Parse `entities.json` (single header) | Drop into `vendor/` |
+| SDL2_image | PNG sprite loading | `find_package(SDL2_image)` |
+| SDL2_ttf | Font rendering for UI overlay | `pkg_check_modules(SDL2_TTF ...)` |
+| SDL2_mixer | SFX and music playback | `pkg_check_modules(SDL2_MIXER ...)` |
+| FastNoiseLite | Perlin noise (single header) | `vendor/FastNoiseLite.h` |
+| doctest | Unit test framework (single header) | `vendor/doctest.h` |
 
-Build system: CMake.
+Build system: CMake. C++23.

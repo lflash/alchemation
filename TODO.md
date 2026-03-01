@@ -5,9 +5,7 @@ Tests are written alongside the system they cover.
 
 ---
 
-## Phase 1 — Window & Renderer
-
-The first thing that should work is seeing something on screen.
+## Phase 1 — Window & Renderer ✓
 
 - [x] `CMakeLists.txt` — SDL2, compiler flags, test runner (doctest)
 - [x] `types.hpp` — `TilePos`, `Vec2f`, `Bounds`, `EntityID`, all enums
@@ -18,7 +16,7 @@ The first thing that should work is seeing something on screen.
 - [x] `SpriteCache` — loads PNGs from `assets/sprites/`, keyed by `EntityType`
 - [x] Renderer draws a single hardcoded entity sprite on the grid
 
-**Tests**
+**Tests** ✓ (all passing)
 - [x] `TilePos` arithmetic (add, subtract, equality)
 - [x] `Vec2f` lerp correctness
 - [x] `Terrain.heightAt()` returns consistent values for the same `TilePos`
@@ -26,181 +24,204 @@ The first thing that should work is seeing something on screen.
 
 ---
 
-## Phase 2 — Entity & Input
+## Phase 2 — Entity & Input ✓
 
-Entities exist and the player can move. No collision yet.
-
-- [x] `Entity` struct with all fields from design doc
+- [x] `Entity` struct with all fields
 - [x] `EntityRegistry` — `spawn()`, `destroy()`, lookup by `EntityID`
-- [x] `Input` — per-tick snapshot, `held()`, `pressed()`, `released()`
+- [x] `Input` — per-tick snapshot, `held()`, `pressed()`, `released()`, `scroll()`
 - [x] Player entity spawns at `(0,0)`, moves one tile per WASD press
-- [x] `facing` updates on movement
-- [x] `moveT` advances each tick, entity renders at lerped position using `alpha`
-- [x] Player walks off-grid (no bounds enforcement yet — that comes with collision)
+- [x] `facing` updates on movement; `Shift` to strafe
+- [x] `moveT` advances each tick, entity renders at lerped position
 
-**Tests**
-- [x] `EntityRegistry` — spawn returns unique IDs, destroy removes entity, lookup after destroy returns null/invalid
-- [x] `Input` — `pressed()` true only on first tick a key is down, not while held
-- [x] Movement lerp — `moveT` reaches 1.0 after expected number of ticks given `speed`
+**Tests** ✓
 
 ---
 
-## Phase 3 — Spatial Grid & Collision
+## Phase 3 — Spatial Grid & Collision ✓
 
-Entities can block each other. The world becomes solid.
+- [x] `SpatialGrid` — `add()`, `remove()`, `at()`, `query(Bounds)`
+- [x] Dual registration: entity in both `pos` and `destination` while moving
+- [x] Broad + narrow phase collision (AABB)
+- [x] Collision resolution table (`resolveCollision(EntityType, EntityType)`)
+- [x] Two-phase movement: collect intentions, resolve conflicts, commit
+- [x] Swap detection: A→B and B→A in same tick → both blocked
 
-- [ ] `SpatialGrid` — `add()`, `remove()`, `at()`, `query(Bounds)`
-- [ ] Entities register in all cells their bounds overlap (multi-tile support from day one)
-- [ ] Dual registration: entity registers in both `pos` and `destination` when moving; removed from `pos` on arrival
-- [ ] Broad phase: `query()` returns deduplicated candidates from all overlapping cells
-- [ ] Narrow phase: AABB intersection test between mover and each candidate
-- [ ] Collision resolution table (`resolveCollision(EntityType, EntityType)`)
-- [ ] Two-phase movement per tick: collect all intentions, then resolve conflicts
-- [ ] Swap detection: A→B's tile and B→A's tile in the same tick → both blocked
-- [ ] Player is blocked by goblin, passes through mushroom (collect)
-
-**Tests**
-- [ ] `SpatialGrid.at()` — entity appears in all cells its bounds cover
-- [ ] `SpatialGrid` — dual registration: entity appears in both `pos` and `destination` cells during movement, only `destination` after arrival
-- [ ] `SpatialGrid` — multi-tile entity (2×1) registers in exactly 2 cells; moving east updates only the delta cells
-- [ ] AABB narrow phase — overlapping boxes return true, adjacent boxes return false, partial overlap returns true
-- [ ] Swap detection — two entities moving into each other's tiles are both blocked
-- [ ] `resolveCollision` — player+mushroom returns `Collect`, goblin+goblin returns `Block`
+**Tests** ✓
 
 ---
 
-## Phase 4 — Scheduler & Events
+## Phase 4 — Scheduler & Events ✓
 
-World events can be scheduled. Systems communicate through events. Note: per-agent
-movement timing is handled by the Routine VM (`WAIT` instructions + `AgentExecState`),
-not by this scheduler. The Scheduler is for low-frequency world events only.
+- [x] `ScheduledAction` with `variant` payload
+- [x] `Scheduler` min-heap — `push()`, `popDue(tick)`
+- [x] `EventBus` — `subscribe()`, `emit()`, `flush()` at end of tick
+- [x] `Arrived` event fires when `moveT` reaches 1.0
+- [x] `Despawn` and `ChangeMana` actions
 
-- [ ] `ScheduledAction` with `variant` payload
-- [ ] `Scheduler` as a min-heap — `push()`, `popDue(tick)` returns all actions due this tick
-- [ ] `EventBus` — `subscribe()`, `emit()`, `flush()` at end of tick
-- [ ] `Arrived` event fires when `moveT` reaches 1.0
-- [ ] `Despawn` action removes entity from registry and spatial grid
-- [ ] `ChangeMana` action modifies entity mana
-
-**Tests**
-- [ ] `Scheduler` — actions pop in tick order regardless of insertion order
-- [ ] `Scheduler` — actions with the same tick all pop together
-- [ ] `EventBus` — subscriber receives event after `flush()`, not before
-- [ ] `EventBus` — `Arrived` fires exactly once per entity arrival
-- [ ] `Despawn` action — entity removed from registry and all spatial grid cells
+**Tests** ✓
 
 ---
 
-## Phase 5 — Terrain Interaction & Mana
+## Phase 5 — Terrain Interaction & Mana ✓
 
-The world becomes interactive.
+- [x] `F` digs tile ahead; dug tiles render as BareEarth
+- [x] `C` plants mushroom on `BareEarth` if `mana >= 1`
+- [x] Player collects mushroom on arrival: +3 mana, mushroom despawns
+- [x] Mana visible in HUD overlay
 
-- [ ] `f` key digs tile in front of player — `terrain.dig()`
-- [ ] Dug tiles render differently (colour change, no entity needed)
-- [ ] `c` key plants mushroom on `BareEarth` if `mana >= 1` — spawns `Mushroom` entity, calls `terrain.restore()`, deducts 1 mana
-- [ ] Player collects mushroom on arrival: `+3 mana`, mushroom entity despawns
-- [ ] Mana value visible in window title or console (no UI system yet)
-
-**Tests**
-- [ ] Plant on grass tile does nothing
-- [ ] Plant on `BareEarth` with 0 mana does nothing
-- [ ] Plant on `BareEarth` with mana >= 1 spawns mushroom, deducts 1 mana, restores terrain
-- [ ] Collecting mushroom increments mana by 3
+**Tests** ✓
 
 ---
 
-## Phase 6 — Goblin & Combat
+## Phase 6 — Goblin & Combat ✓
 
-Entities have agency and can be harmed.
+- [x] Goblin wanders randomly each tick (1/80 chance per tick)
+- [x] Player + goblin bump combat: goblin takes `player.mana` damage, pushed back
+- [x] Goblin despawns at 0 health
+- [x] Poop + goblin: goblin takes hit
 
-- [ ] Goblin wanders — simple scheduled move sequence on spawn
-- [ ] Player + goblin collision triggers combat: goblin takes `player.mana` as damage
-- [ ] Goblin health — despawns at 0
-- [ ] Poop + goblin: goblin takes hit
-
-**Tests**
-- [ ] Goblin despawns when health reaches 0
-- [ ] Combat with 0 mana deals 0 damage
+**Tests** ✓
 
 ---
 
-## Phase 7 — Recorder & Routine Agents
+## Phase 7 — Recorder & Routine Agents ✓
 
-Player actions are recorded as a `Recording` — a flat `Instruction` stream executed by
-the `RoutineVM`. A deployed Poop entity is a routine agent: an autonomous robot that
-replays the recorded actions (movement, digging, planting) independently of the player.
-It is not a projectile. Future agent types will share the same VM.
+- [x] `Recording` struct wrapping `vector<Instruction>` + name string
+- [x] `Recorder` — `start()`, `stop()` saves recording named "Script N"
+- [x] Movement emits `MOVE_REL`; pauses emit `WAIT`; recording ends with `HALT`
+- [x] `R` toggles recording; `Q` cycles selected; `E` deploys as Poop agent
+- [x] `RoutineVM::step()` — one instruction per tick, `MOVE_REL` relative to facing
+- [x] Poop despawns when VM reaches `HALT`
 
-This requires `RoutineVM` to exist; implement the minimal VM needed here.
-
-- [ ] `Recording` struct wrapping a `vector<Instruction>`
-- [ ] `Recorder` — `start()`, `record(key)`, `stop()` → saves `Recording` to `recordings` deque
-- [ ] Player moves emit `MOVE_REL <dir>` (relative to player `facing`); pauses between moves emit `WAIT <ticks>`; recording ends with `HALT`
-- [ ] `r` key toggles recording
-- [ ] `q` key cycles `selectedRecording`
-- [ ] `e` key deploys `selectedRecording` as a `Poop` routine agent spawned in front of the player, inheriting player `facing`
-- [ ] `RoutineVM::step(AgentExecState&, Recording&, Grid&)` — advances one instruction per tick; `MOVE_REL` resolves direction relative to agent `facing`
-- [ ] Poop despawns when VM reaches `HALT`
-- [ ] *(future)* `DIG` and `PLANT` instructions recorded and executed by agent
-
-**Tests**
-- [ ] `record()` emits `MOVE_REL` for each move key with correct relative direction
-- [ ] `record()` emits `WAIT` for gaps between moves; tick count matches actual delay
-- [ ] Recording ends with `HALT`
-- [ ] `RoutineVM` advances `pc` correctly through a linear sequence
-- [ ] Facing North at launch — `MOVE_REL FORWARD` moves north
-- [ ] Facing East at launch — `MOVE_REL FORWARD` moves east
-- [ ] Poop despawns when `RoutineVM` reaches `HALT`
+**Tests** ✓
 
 ---
 
-## Phase 8 — Multiple Grids
+## Phase 8 — Multiple Grids ✓
 
-The world splits into independent simulation spaces.
+- [x] `Grid` class: `SpatialGrid`, `Terrain`, `Scheduler`, `EventBus`, entity list
+- [x] `Game` owns `unordered_map<GridID, Grid>`; tracks `activeGridID`
+- [x] **All non-paused grids tick every frame** (not just active); player input only to active grid
+- [x] Active grid ID captured before tick loop to prevent double-input on grid switch
+- [x] `transferEntity()` — moves entity between grids cleanly
+- [x] Studio grid (GRID_STUDIO = 2): blue-grey terrain, entered via Tab
+- [x] `PendingTransfer` applied between ticks (never mid-loop)
+- [x] Portal tile (`TileType::Portal`, purple) created with `O` key
+- [x] Portal links current grid to new bounded 20×20 room; return portal at room centre
+- [x] Any entity (player, goblin) teleports through portals on arrival
+- [x] Return from room lands on the portal tile itself (safe: detection fires on movement arrival only)
+- [x] `gridJustSwitched_` flag → camera snaps instantly on grid switch, no lerp artefact
+- [x] Bounded room: void tiles (dark) rendered outside `[0,w)×[0,h)`
+- [x] Goblin and player clamped to grid bounds in bounded grids
 
-- [ ] `Grid` class wraps `SpatialGrid`, `Terrain`, `Scheduler`, entity list
-- [ ] `Game` owns a map of `GridID → Grid` and tracks `activeGrid`
-- [ ] Only the active grid is ticked and rendered
-- [ ] `transferEntity()` moves an entity between grids cleanly (removes from old spatial, adds to new)
-- [ ] Studio grid — blank terrain, no consequences, used for recording
-- [ ] Entering/leaving studio via a key or tile trigger
-
-**Tests**
-- [ ] Entity transferred between grids appears in new grid's spatial, absent from old
-- [ ] Scheduler actions targeting an entity in an inactive grid do not execute
-- [ ] Terrain in grid A is independent from terrain in grid B
+**Tests** ✓ (147/147 passing)
 
 ---
 
-## Backlog (post-core)
+## Infrastructure ✓
 
-### Infrastructure
-- [ ] Camera / viewport scrolling — world larger than 20×20
-- [ ] Persistent grid state — save/load terrain overrides and entity positions
-- [ ] Room grids — enter a house, transition to interior grid
-- [ ] Parallel universe grid — runs simultaneously in background
-- [ ] UI overlay — mana counter, recording indicator
-- [ ] Sound
+### Camera ✓
+- [x] Smooth exponential lerp tracking player position
+- [x] Manual pan with arrow keys; Backspace re-centres
+- [x] Ctrl + scroll zoom (`[0.25×, 4.0×]`)
+- [x] Infinite world: `drawTerrain` computes visible tile range from camera
+- [x] Camera snaps instantly on grid switch (no lerp artefact)
+
+### Persistent State ✓
+- [x] Binary save format v2: all grids, portals, terrain overrides, entities, recordings
+- [x] Auto-save on quit (Esc); auto-load on startup
+- [x] Version check: mismatch → fresh world
+
+### UI Overlay ✓
+- [x] SDL_ttf integrated (DejaVuSansMono 13pt)
+- [x] HUD: mana counter `♦ N` + recording indicator `● REC` (always visible)
+- [x] Controls panel (H): keybinding reference
+- [x] Recordings panel (I): list with rename (Enter); mutually exclusive with H
+- [x] SDL_TEXTINPUT rename mode: empty Input passed to game.tick() while renaming
+- [x] Facing indicators: filled triangle on all non-Mushroom entities
+- [x] Studio blue-grey palette (muted, desaturated)
+
+### Sound ✓
+- [x] `AudioSystem` (SDL2_mixer): 8 SFX channels + 4 music layers + 1 ambient
+- [x] SFX for all 12 game events; `AudioEvent` queue drained each render frame
+- [x] Proximity-based music layers (WorldCalm, GoblinTension, Studio, RoomInterior)
+- [x] Idle ambience: Minecraft-style sparse tracks after 30 seconds of quiet
+- [x] Placeholder WAV assets generated with sox (replace with real audio)
+
+---
+
+## Phase 9 — Verticality
+
+Add z-coordinate to tiles and entities. Slope tiles are the only way to transition
+between z-levels. Rendering switches to oblique/dimetric projection.
+
+### Core data changes
+- [ ] `TilePos` gains `int z`: `struct TilePos { int x, y, z; };`
+- [ ] `TilePosHash` updated for 3D key
+- [ ] `Entity::pos` and `Entity::destination` include z
+- [ ] `TileShape` enum: `Flat | SlopeN | SlopeS | SlopeE | SlopeW`
+- [ ] `Terrain` stores shape per tile; `shapeAt(TilePos)` accessor
+- [ ] `SpatialGrid` keyed on 3D `TilePos`
+- [ ] Save format v3: includes z in all TilePos fields
+
+### Movement
+- [ ] Movement resolver (`resolveMoves`) checks slope to determine destination z
+  - Slope in direction D at (x', y', z) → arrive at z+1
+  - Slope in opposite of D at (x', y', z-1) → arrive at z-1
+  - Perpendicular to slope direction → blocked
+  - Flat tile at (x', y', z) → arrive at z unchanged
+  - No tile reachable → blocked
+- [ ] Goblin wander respects slope rules
+- [ ] Agent VM moves respect slope rules
+- [ ] Bounds clamping in bounded rooms is XY-only (z free within room)
+
+### Terrain tools
+- [ ] Place slope tile with directional key combo (design TBD)
+- [ ] Dig works per z-level (only affects tile at entity's z)
+- [ ] Perlin height optionally seeds initial z-levels (world generation)
+
+### Rendering
+- [ ] Switch `toPixelY` to oblique formula: `baseY - tile_z * Z_STEP`
+- [ ] `TILE_H` < `TILE_W` (tiles squished vertically, e.g. 32×20)
+- [ ] `Z_STEP` constant (pixels per z-level, e.g. 12)
+- [ ] Draw order: sort by `world_y` ascending, then `world_z` ascending within same y
+- [ ] Cliff faces: south-side wall strip when tile at (x,y,z) is above (x,y+1,z-1)
+- [ ] Cliff face colour: darker variant of the tile's surface colour
+- [ ] Slope tile renders as diagonal ramp face (parallelogram)
+- [ ] Camera gains `float z` component; tracks player z with same lerp/snap logic
+
+### Tests
+- [ ] `TilePos` hash includes z — (1,2,3) and (1,2,4) are distinct keys
+- [ ] Movement onto slope in ascent direction → z+1
+- [ ] Movement onto slope in descent direction → z-1
+- [ ] Movement perpendicular to slope → blocked
+- [ ] Movement to tile with no floor at entity's z → blocked (cliff)
+- [ ] Two entities at same (x,y) but different z do not collide
+
+---
+
+## Backlog
 
 ### New Assets
 - [ ] Proper sprite art for all entity types (player, goblin, mushroom, poop)
-- [ ] Terrain tile sprites — replace solid colour tiles with textured tiles (grass, bare earth, water, stone)
+- [ ] Terrain tile sprites — textured tiles (grass, bare earth, stone, water)
 - [ ] Wall and structure tiles for room interiors
 - [ ] Animated sprites — idle/walk frames per entity type
-- [ ] Visual indicator for active recording (blinking dot, colour shift, etc.)
+- [ ] Real audio — replace placeholder WAV with composed OGG tracks
 
 ### New Interactions
-- [ ] Fire stimulus — tiles can ignite; fire spreads to adjacent tiles each tick; agents react to fire > threshold (flee routine)
+- [ ] Fire stimulus — tiles ignite; fire spreads each tick; agents react (flee routine)
 - [ ] Water — floods downhill tiles; slows movement; extinguishes fire
-- [ ] Pushable objects — crates, boulders: any entity with a `pushable` flag can be shoved by the player or poop agents
-- [ ] More entity types — tree (blocks movement, can be chopped), rock (permanent obstacle), chest (opens on arrival, yields mana)
-- [ ] Goblin drops — goblin despawn spawns a loot entity
-- [ ] Routine-triggered terrain — poop agents can dig and plant (DIG/PLANT opcodes already in VM; wire up execution)
-- [ ] Conditional routines — JUMP_IF / JUMP_IF_NOT responding to fire or entity-ahead stimulus
+- [ ] Pushable objects — crates, boulders: `pushable` flag, shoved by player or agents
+- [ ] More entity types — tree (blocks, choppable), rock (permanent), chest (yields mana)
+- [ ] Goblin drops — loot entity on despawn
+- [ ] Routine-triggered terrain — wire DIG/PLANT opcodes in VM to Terrain calls
+- [ ] Conditional routines — JUMP_IF / JUMP_IF_NOT on fire/entity-ahead stimulus
 
 ### World Generation
-- [ ] Biome map — divide world into regions (forest, plains, swamp, desert) using a second Perlin layer; terrain type and entity spawn rules vary per biome
-- [ ] Procedural entity spawning — goblins spawn in clusters at startup based on biome; mushroom patches on forest tiles
-- [ ] Structures — procedurally placed houses (exterior shell + matching interior room grid), ruins, caves
-- [ ] Rivers — carved from high to low height using flow simulation; water stimulus pre-seeded along river path
+- [ ] Biome map — second Perlin layer drives region type (forest, plains, swamp, desert)
+- [ ] Procedural entity spawning — goblins in clusters, mushroom patches in forest
+- [ ] Structures — houses (exterior + matching room grid), ruins, caves
+- [ ] Rivers — flow simulation from high to low height; water stimulus pre-seeded
 - [ ] Roads — connect structures; faster movement on road tiles
+- [ ] Z-terrain generation — Perlin height drives initial z-levels; cliffs and valleys
