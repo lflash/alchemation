@@ -141,14 +141,21 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
     if (type == TileType::BareEarth)
         return { 139, 90, 43, 255 };
 
-    // Map Perlin height [-1,1] → green channel [72, 184]
+    if (studioMode_) {
+        // Muted blue-grey studio floor.
+        int v = static_cast<int>(height * 18.0f);
+        int r = std::clamp(90  + v, 72,  115);
+        int g = std::clamp(105 + v, 88,  128);
+        int b = std::clamp(160 + v, 140, 185);
+        if ((pos.x + pos.y) % 2 == 0) { r += 4; g += 4; b += 5; }
+        return { static_cast<uint8_t>(r), static_cast<uint8_t>(g),
+                 static_cast<uint8_t>(b), 255 };
+    }
+
+    // World: Perlin height maps to green channel.
     auto g = static_cast<int>(128.0f + height * 56.0f);
     g = std::clamp(g, 64, 220);
-
-    // Checkerboard: slightly lighter on even tiles
-    if ((pos.x + pos.y) % 2 == 0)
-        g = std::min(g + 6, 255);
-
+    if ((pos.x + pos.y) % 2 == 0) g = std::min(g + 6, 255);
     return { 0, static_cast<uint8_t>(g), 0, 255 };
 }
 
@@ -163,6 +170,44 @@ int Renderer::toPixelY(float tileY) const {
 }
 
 // ─── HUD & Text ──────────────────────────────────────────────────────────────
+
+void Renderer::drawFacingIndicator(Vec2f renderPos, Direction facing) {
+    float ts = TILE_SIZE * camera_.zoom;
+    float cx = toPixelX(renderPos.x) + ts * 0.5f;
+    float cy = toPixelY(renderPos.y) + ts * 0.5f;
+
+    // Unit vector for each direction
+    float dx = 0.0f, dy = 0.0f;
+    switch (facing) {
+        case Direction::N:  dx =  0.000f; dy = -1.000f; break;
+        case Direction::NE: dx =  0.707f; dy = -0.707f; break;
+        case Direction::E:  dx =  1.000f; dy =  0.000f; break;
+        case Direction::SE: dx =  0.707f; dy =  0.707f; break;
+        case Direction::S:  dx =  0.000f; dy =  1.000f; break;
+        case Direction::SW: dx = -0.707f; dy =  0.707f; break;
+        case Direction::W:  dx = -1.000f; dy =  0.000f; break;
+        case Direction::NW: dx = -0.707f; dy = -0.707f; break;
+    }
+    float px = -dy, py = dx;   // perpendicular
+
+    float tipDist  = ts * 0.38f;
+    float baseDist = ts * 0.20f;
+    float halfW    = ts * 0.13f;
+
+    SDL_FPoint tip   = { cx + dx * tipDist,  cy + dy * tipDist  };
+    SDL_FPoint baseL = { cx + dx * baseDist + px * halfW,
+                         cy + dy * baseDist + py * halfW };
+    SDL_FPoint baseR = { cx + dx * baseDist - px * halfW,
+                         cy + dy * baseDist - py * halfW };
+
+    SDL_Color col = {255, 255, 255, 210};
+    SDL_Vertex verts[3] = {
+        { tip,   col, {0, 0} },
+        { baseL, col, {0, 0} },
+        { baseR, col, {0, 0} },
+    };
+    SDL_RenderGeometry(sdl, nullptr, verts, 3, nullptr, 0);
+}
 
 void Renderer::drawHUD(int mana, bool isRecording) {
     constexpr int PAD = 8;

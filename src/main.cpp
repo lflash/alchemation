@@ -150,12 +150,15 @@ int main() {
 
         // ── Render ───────────────────────────────────────────────────────
         renderer.setCamera(camera);
+        renderer.setStudioMode(game.inStudio());
         renderer.beginFrame();
         renderer.drawTerrain(game.terrain());
 
         for (const Entity* ent : game.drawOrder()) {
             Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
             renderer.drawSprite(renderPos, ent->type);
+            if (ent->type != EntityType::Mushroom)
+                renderer.drawFacingIndicator(renderPos, ent->facing);
         }
 
         renderer.drawHUD(game.playerMana(), game.isRecording());

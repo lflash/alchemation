@@ -48,6 +48,9 @@ public:
     // Must be called once per frame before any draw calls.
     void setCamera(const Camera& cam) { camera_ = cam; }
 
+    // Controls terrain colour palette. Call before drawTerrain().
+    void setStudioMode(bool s) { studioMode_ = s; }
+
     void beginFrame();
     void setTitle(const std::string& title);
     void drawTerrain(const Terrain& terrain);
@@ -60,6 +63,9 @@ public:
 
     // Draws the always-on HUD (mana counter + recording indicator) top-left.
     void drawHUD(int mana, bool isRecording);
+
+    // Draws a small directional triangle at the edge of a tile in the entity's facing direction.
+    void drawFacingIndicator(Vec2f renderPos, Direction facing);
 
     // Draws the recordings panel in the top-right corner (replaces controls when open).
     void drawRecordingsPanel(const std::vector<RecordingInfo>& list,
@@ -74,6 +80,7 @@ private:
     SpriteCache   sprites;
     Camera        camera_;   // updated each frame via setCamera()
     TTF_Font*     font_;
+    bool          studioMode_ = false;
 
     SDL_Color tileColor(float height, TilePos pos, TileType type) const;
 
