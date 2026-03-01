@@ -20,6 +20,8 @@ set(LOGIC_SOURCES
     src/spatial.cpp
     src/scheduler.cpp
     src/events.cpp
+    src/recorder.cpp
+    src/routine_vm.cpp
     src/terminal_renderer.cpp
 )
 
@@ -56,6 +58,7 @@ add_executable(tests
     tests/test_phase4.cpp
     tests/test_phase5.cpp
     tests/test_phase6.cpp
+    tests/test_phase7.cpp
     tests/test_terminal_renderer.cpp
     ${LOGIC_SOURCES}
 )

@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <unordered_map>
 
 #include "types.hpp"
 #include "terrain.hpp"
@@ -10,6 +11,8 @@
 #include "spatial.hpp"
 #include "scheduler.hpp"
 #include "events.hpp"
+#include "recorder.hpp"
+#include "routine_vm.hpp"
 #include "renderer.hpp"
 
 int main() {
@@ -20,6 +23,13 @@ int main() {
     Scheduler      scheduler;
     EventBus       events;
     Input          input;
+    Recorder       recorder;
+    RoutineVM      vm;
+
+    // EntityID → {AgentExecState, Recording} for active Poop agents.
+    std::unordered_map<EntityID, AgentExecState> agentStates;
+    std::unordered_map<EntityID, Recording>      agentRecordings;
+    size_t selectedRecording = 0;
 
     EntityID playerID = registry.spawn(EntityType::Player, {0, 0});
     {
@@ -92,7 +102,40 @@ int main() {
 
             // ── Player input ─────────────────────────────────────────────────
             Entity* player = registry.get(playerID);
+
+            // r: toggle recording
+            if (input.pressed(Key::R)) {
+                if (recorder.isRecording()) {
+                    recorder.stop();
+                    selectedRecording = recorder.recordings.size() - 1;
+                } else {
+                    recorder.start();
+                }
+            }
+
+            // q: cycle selected recording
+            if (input.pressed(Key::Q) && !recorder.recordings.empty()) {
+                selectedRecording = (selectedRecording + 1) % recorder.recordings.size();
+            }
+
+            // e: deploy selected recording as Poop agent
+            if (input.pressed(Key::E) && player &&
+                !recorder.recordings.empty() &&
+                selectedRecording < recorder.recordings.size()) {
+
+                TilePos spawnPos = player->pos + dirToDelta(player->facing);
+                EntityID pid = registry.spawn(EntityType::Poop, spawnPos);
+                Entity*  pe  = registry.get(pid);
+                pe->facing   = player->facing;
+                spatial.add(pid, pe->pos, pe->size);
+                agentStates[pid]     = AgentExecState{};
+                agentRecordings[pid] = recorder.recordings[selectedRecording];
+            }
+
             if (player && player->isIdle()) {
+                // Advance recorder wait counter each tick
+                if (recorder.isRecording()) recorder.tick();
+
                 TilePos delta = {0, 0};
                 if (input.held(Key::W)) delta.y -= 1;
                 if (input.held(Key::S)) delta.y += 1;
@@ -101,6 +144,7 @@ int main() {
 
                 if (delta != TilePos{0, 0}) {
                     TilePos newDest = player->pos + delta;
+                    Direction facingBefore = player->facing;
                     if (!input.held(Key::Shift))
                         player->facing = toDirection(delta);
 
@@ -110,6 +154,8 @@ int main() {
                     auto allowed = resolveMoves(intentions, spatial, registry);
                     if (allowed.count(playerID)) {
                         player->destination = newDest;
+                        if (recorder.isRecording())
+                            recorder.recordMove(delta, facingBefore);
                     } else {
                         // Bump combat: move blocked — check for goblin and push it.
                         Bounds destBounds = boundsAt(newDest, player->size);
@@ -194,6 +240,37 @@ int main() {
                 if (allowed.count(ent->id)) {
                     ent->destination = newDest;
                     ent->facing = toDirection(delta);
+                }
+            }
+
+            // ── Routine VM: step each active Poop agent ───────────────────────
+            {
+                std::vector<EntityID> toRemove;
+                for (auto& [id, state] : agentStates) {
+                    Entity* ent = registry.get(id);
+                    if (!ent || !ent->isIdle()) continue;
+
+                    VMResult res = vm.step(state, agentRecordings[id], ent->facing);
+
+                    if (res.halt) {
+                        spatial.remove(id, ent->pos, ent->size);
+                        registry.destroy(id);
+                        toRemove.push_back(id);
+                    } else if (res.wantMove) {
+                        TilePos newDest = ent->pos + res.moveDelta;
+                        std::vector<MoveIntention> intentions = {{
+                            id, ent->pos, newDest, ent->type, ent->size
+                        }};
+                        auto allowed = resolveMoves(intentions, spatial, registry);
+                        if (allowed.count(id)) {
+                            ent->destination = newDest;
+                            ent->facing = toDirection(res.moveDelta);
+                        }
+                    }
+                }
+                for (EntityID id : toRemove) {
+                    agentStates.erase(id);
+                    agentRecordings.erase(id);
                 }
             }
 
