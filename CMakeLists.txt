@@ -11,7 +11,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(SDL2       REQUIRED)
 find_package(SDL2_image REQUIRED)
 find_package(PkgConfig  REQUIRED)
-pkg_check_modules(SDL2_TTF REQUIRED IMPORTED_TARGET SDL2_ttf)
+pkg_check_modules(SDL2_TTF   REQUIRED IMPORTED_TARGET SDL2_ttf)
+pkg_check_modules(SDL2_MIXER REQUIRED IMPORTED_TARGET SDL2_mixer)
 
 # ─── Logic sources: no display required, safe to link into tests ─────────────
 
@@ -32,6 +33,7 @@ set(LOGIC_SOURCES
 
 set(RENDER_SOURCES
     src/renderer.cpp
+    src/audio.cpp
 )
 
 # ─── Main executable ──────────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ add_executable(grid_game
 )
 
 target_include_directories(grid_game PRIVATE src vendor)
-target_link_libraries(grid_game PRIVATE SDL2::SDL2 SDL2_image::SDL2_image PkgConfig::SDL2_TTF)
+target_link_libraries(grid_game PRIVATE SDL2::SDL2 SDL2_image::SDL2_image PkgConfig::SDL2_TTF PkgConfig::SDL2_MIXER)
 
 # Run from the project root so asset paths resolve correctly
 set_target_properties(grid_game PROPERTIES

@@ -8,13 +8,15 @@
 #include "input.hpp"
 #include "game.hpp"
 #include "renderer.hpp"
+#include "audio.hpp"
 
 int main() {
     std::srand(static_cast<unsigned>(std::time(nullptr)));
 
-    Renderer renderer;
-    Input    input;
-    Game     game;
+    Renderer    renderer;
+    Input       input;
+    Game        game;
+    AudioSystem audio;
 
     constexpr const char* SAVE_PATH = "save.dat";
     game.load(SAVE_PATH);   // no-op if file absent
@@ -165,6 +167,43 @@ int main() {
             if (ent->type != EntityType::Mushroom)
                 renderer.drawFacingIndicator(renderPos, ent->facing);
         }
+
+        // ── Audio ─────────────────────────────────────────────────────────
+        // Drain game events → SFX
+        static constexpr SFX eventToSFX[] = {
+            SFX::Step, SFX::Dig, SFX::Plant, SFX::CollectMushroom,
+            SFX::RecordStart, SFX::RecordStop, SFX::DeployAgent,
+            SFX::PortalCreate, SFX::PortalEnter, SFX::GridSwitch,
+            SFX::GoblinHit, SFX::AgentStep,
+        };
+        for (AudioEvent ev : game.drainAudioEvents())
+            audio.playSFX(eventToSFX[static_cast<int>(ev)]);
+
+        // Proximity-based music layers
+        {
+            float ts    = Renderer::TILE_SIZE * camera.zoom;
+            float halfW = Renderer::VIEWPORT_W / (2.0f * ts);
+            float halfH = Renderer::VIEWPORT_H / (2.0f * ts);
+            int goblinCount = 0;
+            for (const Entity* e : game.drawOrder()) {
+                if (e->type != EntityType::Goblin) continue;
+                Vec2f rp = lerp(toVec(e->pos), toVec(e->destination), e->moveT);
+                if (std::abs(rp.x - camera.pos.x) <= halfW + 2 &&
+                    std::abs(rp.y - camera.pos.y) <= halfH + 2)
+                    ++goblinCount;
+            }
+            bool inStudio = game.inStudio();
+            auto [bW, bH] = game.activeGridBounds();
+            bool inRoom   = (bW > 0 && bH > 0 && !inStudio);
+
+            audio.setLayerTarget(MusicLayer::WorldCalm,
+                                 (!inStudio && !inRoom) ? 1.0f : 0.0f);
+            audio.setLayerTarget(MusicLayer::GoblinTension,
+                                 std::min(1.0f, goblinCount / 3.0f));
+            audio.setLayerTarget(MusicLayer::Studio,       inStudio ? 1.0f : 0.0f);
+            audio.setLayerTarget(MusicLayer::RoomInterior, inRoom   ? 1.0f : 0.0f);
+        }
+        audio.update(fdt);
 
         renderer.drawHUD(game.playerMana(), game.isRecording());
         if (showRecordings)

@@ -10,6 +10,19 @@
 #include <unordered_map>
 #include <string>
 #include <utility>
+#include <vector>
+
+// ─── AudioEvent ───────────────────────────────────────────────────────────────
+//
+// Game pushes these during tick(); main.cpp drains them each frame and plays
+// the corresponding SFX via AudioSystem.
+
+enum class AudioEvent {
+    PlayerStep, Dig, Plant, CollectMushroom,
+    RecordStart, RecordStop, DeployAgent,
+    PortalCreate, PortalEnter, GridSwitch,
+    GoblinHit, AgentStep,
+};
 
 // ─── RecordingInfo ────────────────────────────────────────────────────────────
 
@@ -72,6 +85,14 @@ public:
     // Clears and returns the grid-switched flag (used for camera snap).
     bool consumeGridSwitch() { bool v = gridJustSwitched_; gridJustSwitched_ = false; return v; }
 
+    // Drains all audio events accumulated since the last call. main.cpp plays
+    // the corresponding SFX for each entry.
+    std::vector<AudioEvent> drainAudioEvents() {
+        auto v = std::move(audioEvents_);
+        audioEvents_.clear();
+        return v;
+    }
+
     // Entities in the active grid, sorted by layer.
     std::vector<const Entity*> drawOrder() const;
 
@@ -96,6 +117,7 @@ private:
 
     Recorder  recorder_;
     RoutineVM vm_;
+    std::vector<AudioEvent> audioEvents_;
     std::unordered_map<EntityID, AgentExecState> agentStates_;
     std::unordered_map<EntityID, Recording>      agentRecordings_;
     size_t selectedRecording_ = 0;

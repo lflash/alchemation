@@ -36,6 +36,7 @@ void Game::subscribeEvents(Grid& grid) {
             player->mana += 3;
             g.remove(cid, *cand);
             registry_.destroy(cid);
+            audioEvents_.push_back(AudioEvent::CollectMushroom);
             break;
         }
     });
@@ -90,6 +91,7 @@ void Game::applyPendingTransfer() {
         if (t.eid == playerID_) {
             activeGridID_     = t.toGrid;
             gridJustSwitched_ = true;
+            audioEvents_.push_back(AudioEvent::PortalEnter);
         }
     }
     pendingTransfer_.reset();
@@ -176,8 +178,10 @@ void Game::tickPlayerInput(const Input& input) {
         if (recorder_.isRecording()) {
             recorder_.stop();
             selectedRecording_ = recorder_.recordings.size() - 1;
+            audioEvents_.push_back(AudioEvent::RecordStop);
         } else {
             recorder_.start();
+            audioEvents_.push_back(AudioEvent::RecordStart);
         }
     }
 
@@ -197,6 +201,7 @@ void Game::tickPlayerInput(const Input& input) {
         grid.add(pid, *pe);
         agentStates_[pid]     = AgentExecState{};
         agentRecordings_[pid] = recorder_.recordings[selectedRecording_];
+        audioEvents_.push_back(AudioEvent::DeployAgent);
     }
 
     // Tab: toggle between world and studio
@@ -212,6 +217,7 @@ void Game::tickPlayerInput(const Input& input) {
             activeGridID_ = GRID_WORLD;
         }
         gridJustSwitched_ = true;
+        audioEvents_.push_back(AudioEvent::GridSwitch);
         player = registry_.get(playerID_);
     }
 
@@ -256,6 +262,7 @@ void Game::tickPlayerInput(const Input& input) {
                 if (!overlaps(destBounds, boundsAt(cand->pos, cand->size))) continue;
 
                 cand->health -= player->mana;
+                audioEvents_.push_back(AudioEvent::GoblinHit);
                 if (cand->health <= 0) {
                     grid.remove(cid, *cand);
                     registry_.destroy(cid);
@@ -293,8 +300,10 @@ void Game::tickPlayerInput(const Input& input) {
 
     // Terrain interaction
     TilePos ahead = player->pos + dirToDelta(player->facing);
-    if (input.pressed(Key::F))
+    if (input.pressed(Key::F)) {
         grid.terrain.dig(ahead);
+        audioEvents_.push_back(AudioEvent::Dig);
+    }
 
     if (input.pressed(Key::C)) {
         if (grid.terrain.typeAt(ahead) == TileType::BareEarth && player->mana >= 1) {
@@ -302,6 +311,7 @@ void Game::tickPlayerInput(const Input& input) {
             grid.add(mid, *registry_.get(mid));
             grid.terrain.restore(ahead);
             player->mana--;
+            audioEvents_.push_back(AudioEvent::Plant);
         }
     }
 
@@ -324,6 +334,8 @@ void Game::tickPlayerInput(const Input& input) {
             // Forward portal in current grid
             grid.terrain.setType(fwd, TileType::Portal);
             grid.portals[fwd] = { newID, roomEntry };
+
+            audioEvents_.push_back(AudioEvent::PortalCreate);
 
             // Return portal in new room
             room.terrain.setType(roomEntry, TileType::Portal);
@@ -384,6 +396,7 @@ void Game::tickVM(Grid& grid) {
             if (allowed.count(id)) {
                 ent->destination = newDest;
                 ent->facing      = toDirection(res.moveDelta);
+                audioEvents_.push_back(AudioEvent::AgentStep);
             }
         }
     }
@@ -407,6 +420,9 @@ void Game::tickMovement(Grid& grid) {
         if (arrived) {
             grid.spatial.move(eid, oldPos, ent->pos, ent->size);
             grid.events.emit({ EventType::Arrived, eid });
+
+            if (eid == playerID_)
+                audioEvents_.push_back(AudioEvent::PlayerStep);
 
             // Portal check: any entity, only if no transfer already pending
             if (!pendingTransfer_) {
