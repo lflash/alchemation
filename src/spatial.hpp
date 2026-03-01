@@ -26,8 +26,9 @@ public:
     // Entities registered at a specific tile.
     std::vector<EntityID> at(TilePos pos) const;
 
-    // Broad phase: all unique EntityIDs in any cell overlapping the given bounds.
-    std::vector<EntityID> query(Bounds bounds) const;
+    // Broad phase: all unique EntityIDs in any cell overlapping the given bounds
+    // at the specified z level. Defaults to z=0 for backward compatibility.
+    std::vector<EntityID> query(Bounds bounds, int z = 0) const;
 
     // Cells covered by an entity at pos with given size.
     static std::vector<TilePos> cellsFor(TilePos pos, Vec2f size);

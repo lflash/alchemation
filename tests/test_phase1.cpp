@@ -69,6 +69,12 @@ TEST_CASE("TilePosHash: different positions have different hashes (spot check)")
     CHECK(h({1, 0}) != h({0, 1}));
 }
 
+TEST_CASE("TilePosHash: z coordinate is included in hash") {
+    TilePosHash h;
+    CHECK(h({1, 2, 3}) != h({1, 2, 4}));
+    CHECK(h({0, 0, 0}) != h({0, 0, 1}));
+}
+
 // ─── Terrain ─────────────────────────────────────────────────────────────────
 
 TEST_CASE("heightAt returns consistent value for same TilePos") {
@@ -135,4 +141,44 @@ TEST_CASE("restore on unmodified tile is a no-op") {
     Terrain t;
     t.restore({0, 0});   // should not throw or change anything
     CHECK(t.typeAt({0, 0}) == TileType::Grass);
+}
+
+// ─── TileShape ───────────────────────────────────────────────────────────────
+
+TEST_CASE("shapeAt returns Flat by default") {
+    Terrain t;
+    CHECK(t.shapeAt({0, 0}) == TileShape::Flat);
+    CHECK(t.shapeAt({5, -3}) == TileShape::Flat);
+}
+
+TEST_CASE("setShape stores a slope override") {
+    Terrain t;
+    t.setShape({1, 2}, TileShape::SlopeN);
+    CHECK(t.shapeAt({1, 2}) == TileShape::SlopeN);
+}
+
+TEST_CASE("setShape Flat removes override") {
+    Terrain t;
+    t.setShape({3, 4}, TileShape::SlopeE);
+    REQUIRE(t.shapeAt({3, 4}) == TileShape::SlopeE);
+    t.setShape({3, 4}, TileShape::Flat);
+    CHECK(t.shapeAt({3, 4}) == TileShape::Flat);
+    CHECK(t.shapes().empty());
+}
+
+TEST_CASE("setShape does not affect other tiles") {
+    Terrain t;
+    t.setShape({0, 0}, TileShape::SlopeS);
+    CHECK(t.shapeAt({1, 0}) == TileShape::Flat);
+    CHECK(t.shapeAt({0, 1}) == TileShape::Flat);
+}
+
+TEST_CASE("clearOverrides also clears shape overrides") {
+    Terrain t;
+    t.dig({0, 0});
+    t.setShape({1, 1}, TileShape::SlopeW);
+    t.clearOverrides();
+    CHECK(t.typeAt({0, 0}) == TileType::Grass);
+    CHECK(t.shapeAt({1, 1}) == TileShape::Flat);
+    CHECK(t.shapes().empty());
 }

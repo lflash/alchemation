@@ -3,6 +3,7 @@
 #include "types.hpp"
 #include <unordered_map>
 #include <memory>
+#include <optional>
 
 class Terrain {
 public:
@@ -17,13 +18,31 @@ public:
 
     void dig(TilePos p);                    // marks tile as BareEarth
     void restore(TilePos p);               // removes override, tile reverts to Grass
-    void setType(TilePos p, TileType t);   // generic override setter
-    void clearOverrides();                 // removes all overrides (used by save/load)
+    void setType(TilePos p, TileType t);   // generic type setter
+    void clearOverrides();                 // removes all type + shape overrides
 
-    // Read-only view of the overrides map — for serialisation.
-    const std::unordered_map<TilePos, TileType, TilePosHash>& overrides() const;
+    // Shape (slope) accessors.
+    TileShape shapeAt(TilePos p) const;             // defaults to Flat
+    void      setShape(TilePos p, TileShape s);     // Flat removes the override
+
+    // Read-only views for serialisation.
+    const std::unordered_map<TilePos, TileType,  TilePosHash>& overrides() const;
+    const std::unordered_map<TilePos, TileShape, TilePosHash>& shapes()    const;
 
 private:
     struct Impl;
     std::unique_ptr<Impl> impl;
 };
+
+// ─── Slope movement resolver ──────────────────────────────────────────────────
+//
+// Computes the actual destination (including z) for an entity at `from` moving
+// to `to` (where to.z == from.z initially). Slope rules applied in order:
+//   - Slope ascending in dir at (to.xy, from.z)       → arrive at z+1
+//   - Any other slope at (to.xy, from.z)              → blocked (nullopt)
+//   - Slope ascending opposite dir at (to.xy, from.z-1) → arrive at z-1
+//   - Flat tile (no slope at z or z-1)                → arrive at z unchanged
+//
+// Only cardinal (N/S/E/W) moves interact with slopes.
+// Diagonal moves pass through with z unchanged.
+std::optional<TilePos> resolveZ(TilePos from, TilePos to, const Terrain& terrain);

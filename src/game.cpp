@@ -1,5 +1,6 @@
 #include "game.hpp"
 #include "routine.hpp"
+#include "terrain.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -147,7 +148,11 @@ std::vector<const Entity*> Game::drawOrder() const {
         if (e) result.push_back(e);
     }
     std::sort(result.begin(), result.end(),
-              [](const Entity* a, const Entity* b) { return a->layer < b->layer; });
+              [](const Entity* a, const Entity* b) {
+                  if (a->pos.y != b->pos.y) return a->pos.y < b->pos.y;
+                  if (a->pos.z != b->pos.z) return a->pos.z < b->pos.z;
+                  return a->layer < b->layer;
+              });
     return result;
 }
 
@@ -238,11 +243,16 @@ void Game::tickPlayerInput(const Input& input) {
         if (!input.held(Key::Shift))
             player->facing = toDirection(delta);
 
-        // Clamp to grid bounds if bounded
+        // Clamp to grid bounds if bounded (XY only — z free)
         if (grid.isBounded()) {
             newDest.x = std::clamp(newDest.x, 0, grid.width  - 1);
             newDest.y = std::clamp(newDest.y, 0, grid.height - 1);
         }
+
+        // Resolve z via slope rules; nullopt means slope blocks this move.
+        auto slopeDest = resolveZ(player->pos, newDest, grid.terrain);
+        if (slopeDest) {
+            newDest = *slopeDest;
 
         std::vector<MoveIntention> intentions = {{
             playerID_, player->pos, newDest, player->type, player->size
@@ -256,7 +266,7 @@ void Game::tickPlayerInput(const Input& input) {
         } else {
             // Bump combat
             Bounds destBounds = boundsAt(newDest, player->size);
-            for (EntityID cid : grid.spatial.query(destBounds)) {
+            for (EntityID cid : grid.spatial.query(destBounds, newDest.z)) {
                 Entity* cand = registry_.get(cid);
                 if (!cand || cand->type != EntityType::Goblin) continue;
                 if (!overlaps(destBounds, boundsAt(cand->pos, cand->size))) continue;
@@ -272,7 +282,7 @@ void Game::tickPlayerInput(const Input& input) {
                     if (cand->isMoving()) {
                         Bounds pushBounds   = boundsAt(pushDest, cand->size);
                         bool   pushBlocked  = false;
-                        for (EntityID oid : grid.spatial.query(pushBounds)) {
+                        for (EntityID oid : grid.spatial.query(pushBounds, pushDest.z)) {
                             if (oid == cid) continue;
                             const Entity* occ = registry_.get(oid);
                             if (!occ || !overlaps(pushBounds, boundsAt(occ->pos, occ->size))) continue;
@@ -296,6 +306,7 @@ void Game::tickPlayerInput(const Input& input) {
                 break;
             }
         }
+        } // if (slopeDest)
     }
 
     // Terrain interaction
@@ -313,6 +324,21 @@ void Game::tickPlayerInput(const Input& input) {
             player->mana--;
             audioEvents_.push_back(AudioEvent::Plant);
         }
+    }
+
+    // Z: cycle slope shape on tile ahead
+    if (input.pressed(Key::Z)) {
+        TilePos ahead2 = player->pos + dirToDelta(player->facing);
+        TileShape cur  = grid.terrain.shapeAt(ahead2);
+        TileShape next = TileShape::Flat;
+        switch (cur) {
+            case TileShape::Flat:   next = TileShape::SlopeN; break;
+            case TileShape::SlopeN: next = TileShape::SlopeE; break;
+            case TileShape::SlopeE: next = TileShape::SlopeS; break;
+            case TileShape::SlopeS: next = TileShape::SlopeW; break;
+            case TileShape::SlopeW: next = TileShape::Flat;   break;
+        }
+        grid.terrain.setShape(ahead2, next);
     }
 
     // O: create portal + linked room ahead of player
@@ -360,6 +386,9 @@ void Game::tickGoblinWander(Grid& grid) {
             newDest.x = std::clamp(newDest.x, 0, grid.width  - 1);
             newDest.y = std::clamp(newDest.y, 0, grid.height - 1);
         }
+        auto slopeDest = resolveZ(ent->pos, newDest, grid.terrain);
+        if (!slopeDest) continue;
+        newDest = *slopeDest;
         std::vector<MoveIntention> intentions = {{
             eid, ent->pos, newDest, ent->type, ent->size
         }};
@@ -388,15 +417,19 @@ void Game::tickVM(Grid& grid) {
             registry_.destroy(id);
             toRemove.push_back(id);
         } else if (res.wantMove) {
-            TilePos newDest = ent->pos + res.moveDelta;
-            std::vector<MoveIntention> intentions = {{
-                id, ent->pos, newDest, ent->type, ent->size
-            }};
-            auto allowed = resolveMoves(intentions, grid.spatial, registry_);
-            if (allowed.count(id)) {
-                ent->destination = newDest;
-                ent->facing      = toDirection(res.moveDelta);
-                audioEvents_.push_back(AudioEvent::AgentStep);
+            TilePos newDest  = ent->pos + res.moveDelta;
+            auto slopeDest   = resolveZ(ent->pos, newDest, grid.terrain);
+            if (slopeDest) {
+                newDest = *slopeDest;
+                std::vector<MoveIntention> intentions = {{
+                    id, ent->pos, newDest, ent->type, ent->size
+                }};
+                auto allowed = resolveMoves(intentions, grid.spatial, registry_);
+                if (allowed.count(id)) {
+                    ent->destination = newDest;
+                    ent->facing      = toDirection(res.moveDelta);
+                    audioEvents_.push_back(AudioEvent::AgentStep);
+                }
             }
         }
     }
@@ -469,9 +502,11 @@ namespace {
         for (const auto& [pos, portal] : grid.portals) {
             wr<int32_t>(f, pos.x);
             wr<int32_t>(f, pos.y);
+            wr<int32_t>(f, pos.z);
             wr<uint32_t>(f, portal.targetGrid);
             wr<int32_t>(f, portal.targetPos.x);
             wr<int32_t>(f, portal.targetPos.y);
+            wr<int32_t>(f, portal.targetPos.z);
         }
 
         // Terrain overrides
@@ -480,7 +515,18 @@ namespace {
         for (const auto& [pos, type] : ovr) {
             wr<int32_t>(f, pos.x);
             wr<int32_t>(f, pos.y);
+            wr<int32_t>(f, pos.z);
             wr<uint8_t>(f, static_cast<uint8_t>(type));
+        }
+
+        // Shape overrides
+        const auto& shp = grid.terrain.shapes();
+        wr<uint32_t>(f, static_cast<uint32_t>(shp.size()));
+        for (const auto& [pos, shape] : shp) {
+            wr<int32_t>(f, pos.x);
+            wr<int32_t>(f, pos.y);
+            wr<int32_t>(f, pos.z);
+            wr<uint8_t>(f, static_cast<uint8_t>(shape));
         }
 
         // Entities (skip player and Poop)
@@ -496,6 +542,7 @@ namespace {
             wr<uint8_t>(f, static_cast<uint8_t>(e->type));
             wr<int32_t>(f, e->pos.x);
             wr<int32_t>(f, e->pos.y);
+            wr<int32_t>(f, e->pos.z);
             wr<uint8_t>(f, static_cast<uint8_t>(e->facing));
             wr<int32_t>(f, e->mana);
             wr<int32_t>(f, e->health);
@@ -508,7 +555,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 2);   // version 2
+    wr<uint8_t>(f, 3);   // version 3
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -519,6 +566,7 @@ void Game::save(const std::string& path) const {
     wr<uint32_t>(f, playerGrid);
     wr<int32_t>(f,  ppos.x);
     wr<int32_t>(f,  ppos.y);
+    wr<int32_t>(f,  ppos.z);
     wr<uint8_t>(f,  player ? static_cast<uint8_t>(player->facing) : 0);
     wr<int32_t>(f,  player ? player->mana : 0);
 
@@ -556,7 +604,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 2) return false;
+    if (version != 3) return false;
 
     // Clear all state
     for (auto& [id, grid] : grids_) {
@@ -580,9 +628,9 @@ bool Game::load(const std::string& path) {
     pendingTransfer_.reset();
 
     // Player
-    GridID  playerGrid = rd<uint32_t>(f);
-    TilePos ppos       = { rd<int32_t>(f), rd<int32_t>(f) };
-    Direction pfacing  = static_cast<Direction>(rd<uint8_t>(f));
+    GridID    playerGrid = rd<uint32_t>(f);
+    TilePos   ppos       = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
+    Direction pfacing    = static_cast<Direction>(rd<uint8_t>(f));
     int       pmana    = rd<int32_t>(f);
 
     // Grids
@@ -608,25 +656,33 @@ bool Game::load(const std::string& path) {
         // Portals
         uint32_t portalCount = rd<uint32_t>(f);
         for (uint32_t i = 0; i < portalCount; ++i) {
-            TilePos  pos       = { rd<int32_t>(f), rd<int32_t>(f) };
+            TilePos  pos       = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
             GridID   tGrid     = rd<uint32_t>(f);
-            TilePos  tPos      = { rd<int32_t>(f), rd<int32_t>(f) };
+            TilePos  tPos      = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
             grid.portals[pos]  = { tGrid, tPos };
         }
 
         // Terrain overrides
         uint32_t ovrCount = rd<uint32_t>(f);
         for (uint32_t i = 0; i < ovrCount; ++i) {
-            TilePos  pos  = { rd<int32_t>(f), rd<int32_t>(f) };
+            TilePos  pos  = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
             TileType type = static_cast<TileType>(rd<uint8_t>(f));
             grid.terrain.setType(pos, type);
+        }
+
+        // Shape overrides
+        uint32_t shpCount = rd<uint32_t>(f);
+        for (uint32_t i = 0; i < shpCount; ++i) {
+            TilePos   pos   = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
+            TileShape shape = static_cast<TileShape>(rd<uint8_t>(f));
+            grid.terrain.setShape(pos, shape);
         }
 
         // Entities
         uint32_t entCount = rd<uint32_t>(f);
         for (uint32_t i = 0; i < entCount; ++i) {
             EntityType et     = static_cast<EntityType>(rd<uint8_t>(f));
-            TilePos    pos    = { rd<int32_t>(f), rd<int32_t>(f) };
+            TilePos    pos    = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
             Direction  facing = static_cast<Direction>(rd<uint8_t>(f));
             int        mana   = rd<int32_t>(f);
             int        health = rd<int32_t>(f);

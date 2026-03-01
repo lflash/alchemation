@@ -119,6 +119,8 @@ int main() {
             Vec2f snap = toVec(game.playerPos());
             camera.pos    = snap;
             camera.target = snap;
+            camera.z      = static_cast<float>(game.playerPos().z);
+            camera.targetZ = camera.z;
             camOffset     = {0.0f, 0.0f};
         }
 
@@ -145,13 +147,17 @@ int main() {
             toVec(game.playerDestination()),
             game.playerMoveT()
         );
-        camera.target = { playerRenderPos.x + camOffset.x,
-                          playerRenderPos.y + camOffset.y };
+        float playerRenderZ = game.playerPos().z +
+            (game.playerDestination().z - game.playerPos().z) * game.playerMoveT();
+        camera.target  = { playerRenderPos.x + camOffset.x,
+                           playerRenderPos.y + camOffset.y };
+        camera.targetZ = playerRenderZ;
 
         // Exponential lerp toward target.
         float factor = 1.0f - std::exp(-CAM_LERP * fdt);
         camera.pos.x += (camera.target.x - camera.pos.x) * factor;
         camera.pos.y += (camera.target.y - camera.pos.y) * factor;
+        camera.z     += (camera.targetZ  - camera.z)     * factor;
 
         // ── Render ───────────────────────────────────────────────────────
         renderer.setCamera(camera);
@@ -163,9 +169,10 @@ int main() {
 
         for (const Entity* ent : game.drawOrder()) {
             Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
-            renderer.drawSprite(renderPos, ent->type);
+            float renderZ   = ent->pos.z + (ent->destination.z - ent->pos.z) * ent->moveT;
+            renderer.drawSprite(renderPos, renderZ, ent->type);
             if (ent->type != EntityType::Mushroom)
-                renderer.drawFacingIndicator(renderPos, ent->facing);
+                renderer.drawFacingIndicator(renderPos, renderZ, ent->facing);
         }
 
         // ── Audio ─────────────────────────────────────────────────────────

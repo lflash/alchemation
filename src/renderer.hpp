@@ -33,7 +33,9 @@ private:
 
 class Renderer : public IRenderer {
 public:
-    static constexpr int TILE_SIZE    = 32;
+    static constexpr int TILE_SIZE    = 32;    // width of one tile (pixels, unzoomed)
+    static constexpr int TILE_H       = 20;    // height of one tile (oblique squish)
+    static constexpr int Z_STEP       = 12;    // pixels per z-level (unzoomed)
     // Viewport dimensions in pixels (fixed window size).
     static constexpr int VIEWPORT_W   = 640;
     static constexpr int VIEWPORT_H   = 640;
@@ -59,8 +61,9 @@ public:
     void drawTerrain(const Terrain& terrain);
 
     // Draws a sprite at a tile position.
-    // renderPos is the interpolated visual position (tile units); used for smooth movement.
-    void drawSprite(Vec2f renderPos, EntityType type);
+    // renderPos is the interpolated visual position (tile units, XY only).
+    // renderZ is the interpolated z (for oblique vertical offset).
+    void drawSprite(Vec2f renderPos, float renderZ, EntityType type);
 
     void endFrame();
 
@@ -68,7 +71,7 @@ public:
     void drawHUD(int mana, bool isRecording);
 
     // Draws a small directional triangle at the edge of a tile in the entity's facing direction.
-    void drawFacingIndicator(Vec2f renderPos, Direction facing);
+    void drawFacingIndicator(Vec2f renderPos, float renderZ, Direction facing);
 
     // Draws the recordings panel in the top-right corner (replaces controls when open).
     void drawRecordingsPanel(const std::vector<RecordingInfo>& list,
@@ -89,10 +92,10 @@ private:
 
     SDL_Color tileColor(float height, TilePos pos, TileType type) const;
 
-    // Convert a world tile coordinate to screen pixels.
-    // (camera_.pos is the tile at screen centre.)
+    // Convert world tile coordinates to screen pixels.
+    // toPixelY uses oblique projection: higher z = higher on screen.
     int toPixelX(float tileX) const;
-    int toPixelY(float tileY) const;
+    int toPixelY(float tileY, float tileZ = 0.0f) const;
 
     // Render a UTF-8 string at screen pixel (x, y).
     void drawText(const std::string& text, int x, int y, SDL_Color col) const;

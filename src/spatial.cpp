@@ -15,7 +15,7 @@ std::vector<TilePos> SpatialGrid::cellsFor(TilePos pos, Vec2f size) {
     std::vector<TilePos> result;
     for (int y = y0; y <= y1; ++y)
         for (int x = x0; x <= x1; ++x)
-            result.push_back({x, y});
+            result.push_back({x, y, pos.z});
     return result;
 }
 
@@ -65,7 +65,7 @@ std::vector<EntityID> SpatialGrid::at(TilePos pos) const {
     return it->second;
 }
 
-std::vector<EntityID> SpatialGrid::query(Bounds bounds) const {
+std::vector<EntityID> SpatialGrid::query(Bounds bounds, int z) const {
     int x0 = static_cast<int>(std::floor(bounds.min.x));
     int y0 = static_cast<int>(std::floor(bounds.min.y));
     int x1 = static_cast<int>(std::floor(bounds.max.x - 1e-6f));
@@ -74,7 +74,7 @@ std::vector<EntityID> SpatialGrid::query(Bounds bounds) const {
     std::vector<EntityID> result;
     for (int y = y0; y <= y1; ++y) {
         for (int x = x0; x <= x1; ++x) {
-            auto it = cells.find({x, y});
+            auto it = cells.find({x, y, z});
             if (it == cells.end()) continue;
             for (EntityID id : it->second) {
                 if (std::find(result.begin(), result.end(), id) == result.end())
@@ -135,9 +135,10 @@ std::unordered_set<EntityID> resolveMoves(
 
         if (blocked) continue;
 
-        // Broad phase: candidates in cells overlapping the destination bounds.
+        // Broad phase: candidates in cells overlapping the destination bounds,
+        // at the same z level as the intended destination.
         Bounds destBounds = boundsAt(intent.to, intent.size);
-        auto candidates = spatial.query(destBounds);
+        auto candidates = spatial.query(destBounds, intent.to.z);
 
         // Narrow phase + collision resolution.
         for (EntityID occupantID : candidates) {

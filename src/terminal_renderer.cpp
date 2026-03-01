@@ -28,7 +28,7 @@ void TerminalRenderer::drawTerrain(const Terrain& terrain) {
     }
 }
 
-void TerminalRenderer::drawSprite(Vec2f renderPos, EntityType type) {
+void TerminalRenderer::drawSprite(Vec2f renderPos, float /*renderZ*/, EntityType type) {
     int col = toCol(renderPos.x);
     int row = toRow(renderPos.y);
     if (inBounds(row, col))

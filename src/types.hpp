@@ -8,13 +8,15 @@
 
 struct TilePos {
     int x, y;
+    int z = 0;   // vertical level; 0 = ground. Defaults to 0 so existing
+                 // two-field aggregate initialisers {x, y} remain valid.
 
     bool operator==(const TilePos&) const = default;
     bool operator!=(const TilePos&) const = default;
 
-    TilePos operator+(const TilePos& o) const { return {x + o.x, y + o.y}; }
-    TilePos operator-(const TilePos& o) const { return {x - o.x, y - o.y}; }
-    TilePos operator*(int s)            const { return {x * s,   y * s};   }
+    TilePos operator+(const TilePos& o) const { return {x + o.x, y + o.y, z + o.z}; }
+    TilePos operator-(const TilePos& o) const { return {x - o.x, y - o.y, z - o.z}; }
+    TilePos operator*(int s)            const { return {x * s,   y * s,   z * s};   }
 };
 
 struct Vec2f {
@@ -35,6 +37,8 @@ struct Camera {
     Vec2f pos    = {0.0f, 0.0f};   // current smoothed position (tile coords)
     Vec2f target = {0.0f, 0.0f};   // lerp target
     float zoom   = 1.0f;           // multiplier on TILE_SIZE
+    float z      = 0.0f;           // current smoothed z (tile units, step 6 drives this)
+    float targetZ = 0.0f;          // lerp target for z
 };
 
 // ─── ID types ────────────────────────────────────────────────────────────────
@@ -52,7 +56,11 @@ enum class EntityType { Player, Goblin, Mushroom, Poop };
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
-enum class TileType   { Grass, BareEarth, Portal };
+enum class TileType  { Grass, BareEarth, Portal };
+
+// Geometric shape of a tile — determines vertical traversal.
+// Slope direction = the direction you walk to ascend one z-level.
+enum class TileShape { Flat, SlopeN, SlopeS, SlopeE, SlopeW };
 
 // ─── Math helpers ────────────────────────────────────────────────────────────
 
@@ -99,6 +107,7 @@ struct TilePosHash {
         size_t seed = 0;
         seed ^= std::hash<int>{}(p.x) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
         seed ^= std::hash<int>{}(p.y) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+        seed ^= std::hash<int>{}(p.z) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
         return seed;
     }
 };

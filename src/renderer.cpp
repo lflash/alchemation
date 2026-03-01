@@ -94,26 +94,97 @@ void Renderer::beginFrame() {
 }
 
 void Renderer::drawTerrain(const Terrain& terrain) {
-    float ts  = TILE_SIZE * camera_.zoom;
-    int   iTs = static_cast<int>(std::ceil(ts));
+    float tsW = TILE_SIZE * camera_.zoom;
+    float tsH = TILE_H    * camera_.zoom;
+    int   iW  = static_cast<int>(std::ceil(tsW));
+    int   iH  = static_cast<int>(std::ceil(tsH));
 
-    // Compute which tile columns/rows are visible.
-    float halfW = (VIEWPORT_W / 2.0f) / ts;
-    float halfH = (VIEWPORT_H / 2.0f) / ts;
+    // Compute visible tile range. Use TILE_H for vertical coverage;
+    // add a few rows of headroom for elevated slopes.
+    float halfW = (VIEWPORT_W / 2.0f) / tsW;
+    float halfH = (VIEWPORT_H / 2.0f) / tsH;
     int minX = static_cast<int>(std::floor(camera_.pos.x - halfW)) - 1;
     int maxX = static_cast<int>(std::ceil (camera_.pos.x + halfW)) + 1;
-    int minY = static_cast<int>(std::floor(camera_.pos.y - halfH)) - 1;
+    int minY = static_cast<int>(std::floor(camera_.pos.y - halfH)) - 4;  // headroom for z
     int maxY = static_cast<int>(std::ceil (camera_.pos.y + halfH)) + 1;
 
     bool bounded = (gridW_ > 0 && gridH_ > 0);
 
+    // Helper: pixel corners for tile (x, y) at given z levels per corner.
+    // Corners: NW(x,y,zN), NE(x+1,y,zN), SE(x+1,y+1,zS), SW(x,y+1,zS)
+    auto drawQuad = [&](int x, int y, float zN, float zS, SDL_Color col) {
+        SDL_FPoint nw = { (float)toPixelX(x),   (float)toPixelY(y,   zN) };
+        SDL_FPoint ne = { (float)toPixelX(x+1),  (float)toPixelY(y,   zN) };
+        SDL_FPoint se = { (float)toPixelX(x+1),  (float)toPixelY(y+1, zS) };
+        SDL_FPoint sw = { (float)toPixelX(x),    (float)toPixelY(y+1, zS) };
+        SDL_Color  c  = col;
+        SDL_Vertex verts[4] = {
+            { nw, c, {0,0} }, { ne, c, {0,0} },
+            { se, c, {0,0} }, { sw, c, {0,0} },
+        };
+        int idx[6] = { 0,1,2, 0,2,3 };
+        SDL_RenderGeometry(sdl, nullptr, verts, 4, idx, 6);
+    };
+
+    // Same but E/W slopes: NW(x,y,zW), NE(x+1,y,zE), SE(x+1,y+1,zE), SW(x,y+1,zW)
+    auto drawQuadEW = [&](int x, int y, float zW, float zE, SDL_Color col) {
+        SDL_FPoint nw = { (float)toPixelX(x),   (float)toPixelY(y,   zW) };
+        SDL_FPoint ne = { (float)toPixelX(x+1),  (float)toPixelY(y,   zE) };
+        SDL_FPoint se = { (float)toPixelX(x+1),  (float)toPixelY(y+1, zE) };
+        SDL_FPoint sw = { (float)toPixelX(x),    (float)toPixelY(y+1, zW) };
+        SDL_Color  c  = col;
+        SDL_Vertex verts[4] = {
+            { nw, c, {0,0} }, { ne, c, {0,0} },
+            { se, c, {0,0} }, { sw, c, {0,0} },
+        };
+        int idx[6] = { 0,1,2, 0,2,3 };
+        SDL_RenderGeometry(sdl, nullptr, verts, 4, idx, 6);
+    };
+
+    // True if tile (x,y) is adjacent to a slope whose high edge faces it —
+    // i.e. the tile sits atop a raised platform.
+    auto isElev = [&](int x, int y) -> bool {
+        return terrain.shapeAt({x, y+1, 0}) == TileShape::SlopeN ||
+               terrain.shapeAt({x, y-1, 0}) == TileShape::SlopeS ||
+               terrain.shapeAt({x-1, y, 0}) == TileShape::SlopeE ||
+               terrain.shapeAt({x+1, y, 0}) == TileShape::SlopeW;
+    };
+
+    auto darken = [](SDL_Color c, float f) -> SDL_Color {
+        return { static_cast<uint8_t>(c.r * f),
+                 static_cast<uint8_t>(c.g * f),
+                 static_cast<uint8_t>(c.b * f),
+                 c.a };
+    };
+
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
             TilePos p = {x, y};
-            SDL_Rect rect = { toPixelX(x), toPixelY(y), iTs, iTs };
 
-            // Bounded rooms: tiles outside [0,w)×[0,h) are void (dark).
-            if (bounded && (x < 0 || x >= gridW_ || y < 0 || y >= gridH_)) {
+            bool thisVoid  = bounded && (x < 0 || x >= gridW_ || y   < 0 || y   >= gridH_);
+            bool northVoid = bounded && (x < 0 || x >= gridW_ || y-1 < 0 || y-1 >= gridH_);
+
+            // ── Cliff face ────────────────────────────────────────────────────
+            // Draw the south face of the northern tile when it is elevated and
+            // the current tile is at ground level.  SlopeN at the current tile
+            // already handles the visual ramp, so skip that case.
+            if (!thisVoid && !northVoid
+                && isElev(x, y-1) && !isElev(x, y)
+                && terrain.shapeAt({x, y, 0}) != TileShape::SlopeN)
+            {
+                int cliffTop = toPixelY(y, 1.0f);
+                int cliffBot = toPixelY(y, 0.0f);
+                SDL_Color northCol = tileColor(
+                    terrain.heightAt({x, y-1}), {x, y-1}, terrain.typeAt({x, y-1}));
+                SDL_Color cliffCol = darken(northCol, 0.55f);
+                SDL_Rect  cr = { toPixelX(x), cliffTop, iW, cliffBot - cliffTop };
+                SDL_SetRenderDrawColor(sdl, cliffCol.r, cliffCol.g, cliffCol.b, 255);
+                SDL_RenderFillRect(sdl, &cr);
+            }
+
+            // ── Void tile ─────────────────────────────────────────────────────
+            if (thisVoid) {
+                SDL_Rect rect = { toPixelX(x), toPixelY(y), iW, iH };
                 SDL_SetRenderDrawColor(sdl, 18, 18, 18, 255);
                 SDL_RenderFillRect(sdl, &rect);
                 continue;
@@ -121,21 +192,50 @@ void Renderer::drawTerrain(const Terrain& terrain) {
 
             float     h     = terrain.heightAt(p);
             TileType  ttype = terrain.typeAt(p);
+            TileShape shape = terrain.shapeAt(p);
             SDL_Color color = tileColor(h, p, ttype);
-            SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
-            SDL_RenderFillRect(sdl, &rect);
+
+            switch (shape) {
+                case TileShape::Flat: {
+                    SDL_Rect rect = { toPixelX(x), toPixelY(y, 0.0f), iW, iH };
+                    SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
+                    SDL_RenderFillRect(sdl, &rect);
+                    break;
+                }
+                case TileShape::SlopeN:
+                    drawQuad(x, y, 1.0f, 0.0f, color);   // N edge at z+1, S at z
+                    break;
+                case TileShape::SlopeS:
+                    drawQuad(x, y, 0.0f, 1.0f, color);   // N edge at z, S at z+1
+                    break;
+                case TileShape::SlopeE:
+                    drawQuadEW(x, y, 0.0f, 1.0f, color); // W edge at z, E at z+1
+                    break;
+                case TileShape::SlopeW:
+                    drawQuadEW(x, y, 1.0f, 0.0f, color); // W edge at z+1, E at z
+                    break;
+            }
+
+            // ── Elevated flat copy ────────────────────────────────────────────
+            // Flat tiles adjacent to a slope top are drawn again at z=1 so they
+            // appear raised above the ground plane.
+            if (isElev(x, y) && shape == TileShape::Flat) {
+                SDL_Rect elevRect = { toPixelX(x), toPixelY(y, 1.0f), iW, iH };
+                SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
+                SDL_RenderFillRect(sdl, &elevRect);
+            }
         }
     }
 }
 
-void Renderer::drawSprite(Vec2f renderPos, EntityType type) {
+void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type) {
     SDL_Texture* tex = sprites.get(type);
     if (!tex) return;
 
     int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
     SDL_Rect dst = {
         toPixelX(renderPos.x),
-        toPixelY(renderPos.y),
+        toPixelY(renderPos.y, renderZ),
         iTs,
         iTs
     };
@@ -176,17 +276,22 @@ int Renderer::toPixelX(float tileX) const {
     return static_cast<int>(std::round(VIEWPORT_W / 2.0f + (tileX - camera_.pos.x) * ts));
 }
 
-int Renderer::toPixelY(float tileY) const {
-    float ts = TILE_SIZE * camera_.zoom;
-    return static_cast<int>(std::round(VIEWPORT_H / 2.0f + (tileY - camera_.pos.y) * ts));
+int Renderer::toPixelY(float tileY, float tileZ) const {
+    float tsH  = TILE_H  * camera_.zoom;
+    float step = Z_STEP  * camera_.zoom;
+    return static_cast<int>(std::round(
+        VIEWPORT_H / 2.0f
+        + (tileY - camera_.pos.y) * tsH
+        - (tileZ - camera_.z)     * step
+    ));
 }
 
 // ─── HUD & Text ──────────────────────────────────────────────────────────────
 
-void Renderer::drawFacingIndicator(Vec2f renderPos, Direction facing) {
+void Renderer::drawFacingIndicator(Vec2f renderPos, float renderZ, Direction facing) {
     float ts = TILE_SIZE * camera_.zoom;
     float cx = toPixelX(renderPos.x) + ts * 0.5f;
-    float cy = toPixelY(renderPos.y) + ts * 0.5f;
+    float cy = toPixelY(renderPos.y, renderZ) + ts * 0.5f;
 
     // Unit vector for each direction
     float dx = 0.0f, dy = 0.0f;
@@ -375,7 +480,7 @@ void Renderer::drawControlsMenu() {
     constexpr int PAD  = 12;
     constexpr int LINE = 18;
     constexpr int W    = 308;
-    constexpr int H    = 340;
+    constexpr int H    = 358;
     constexpr int X    = VIEWPORT_W - W - 10;
     constexpr int Y    = 10;
 
@@ -423,6 +528,7 @@ void Renderer::drawControlsMenu() {
     row("Q",             "Cycle recording");
     row("E",             "Deploy agent");
     row("O",             "Create room portal");
+    row("Z",             "Cycle slope ahead");
     row("Tab",           "Toggle studio");
     sep();
     row("Arrows",        "Pan camera");
