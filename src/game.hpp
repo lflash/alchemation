@@ -8,7 +8,17 @@
 #include "routine_vm.hpp"
 #include <unordered_map>
 
-constexpr GridID GRID_WORLD = 1;
+constexpr GridID GRID_WORLD  = 1;
+constexpr GridID GRID_STUDIO = 2;
+
+// ─── transferEntity ───────────────────────────────────────────────────────────
+//
+// Move an entity from one grid to another. Removes it from `from`'s spatial
+// and entity list, snaps its position to `dest`, then registers it in `to`.
+// Resets moveT so no interpolation artefact appears on arrival.
+
+void transferEntity(EntityID eid, Grid& from, Grid& to,
+                    EntityRegistry& registry, TilePos dest);
 
 // ─── Game ─────────────────────────────────────────────────────────────────────
 //

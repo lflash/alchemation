@@ -2,6 +2,22 @@
 #include <algorithm>
 #include <cstdlib>
 
+// ─── transferEntity ───────────────────────────────────────────────────────────
+
+void transferEntity(EntityID eid, Grid& from, Grid& to,
+                    EntityRegistry& registry, TilePos dest) {
+    Entity* e = registry.get(eid);
+    if (!e) return;
+
+    from.remove(eid, *e);
+
+    e->pos         = dest;
+    e->destination = dest;
+    e->moveT       = 0.0f;
+
+    to.add(eid, *e);
+}
+
 // ─── Construction ─────────────────────────────────────────────────────────────
 
 Game::Game() {

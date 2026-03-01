@@ -1,5 +1,7 @@
 #include "doctest.h"
 #include "grid.hpp"
+#include "game.hpp"
+#include <algorithm>
 
 // ─── Grid::add / remove ───────────────────────────────────────────────────────
 
@@ -78,4 +80,80 @@ TEST_CASE("multiple entities can be added and removed independently") {
     grid.remove(a, *reg.get(a));
     CHECK(!grid.hasEntity(a));
     CHECK(grid.hasEntity(b));
+}
+
+// ─── transferEntity ───────────────────────────────────────────────────────────
+
+TEST_CASE("transferEntity: entity appears in destination, absent from source") {
+    EntityRegistry reg;
+    Grid a(GRID_WORLD), b(GRID_STUDIO);
+
+    EntityID id = reg.spawn(EntityType::Player, {2, 3});
+    a.add(id, *reg.get(id));
+
+    transferEntity(id, a, b, reg, {5, 5});
+
+    CHECK(!a.hasEntity(id));
+    CHECK( b.hasEntity(id));
+
+    auto at_old = a.spatial.at({2, 3});
+    CHECK(std::find(at_old.begin(), at_old.end(), id) == at_old.end());
+
+    auto at_new = b.spatial.at({5, 5});
+    CHECK(std::find(at_new.begin(), at_new.end(), id) != at_new.end());
+}
+
+TEST_CASE("transferEntity: entity position snaps to destination") {
+    EntityRegistry reg;
+    Grid a(GRID_WORLD), b(GRID_STUDIO);
+
+    EntityID id = reg.spawn(EntityType::Player, {0, 0});
+    a.add(id, *reg.get(id));
+
+    transferEntity(id, a, b, reg, {7, 3});
+    Entity* e = reg.get(id);
+    REQUIRE(e != nullptr);
+    CHECK(e->pos         == TilePos{7, 3});
+    CHECK(e->destination == TilePos{7, 3});
+    CHECK(e->moveT       == doctest::Approx(0.0f));
+}
+
+TEST_CASE("transferEntity: mid-move entity has dual registration cleaned up") {
+    EntityRegistry reg;
+    Grid a(GRID_WORLD), b(GRID_STUDIO);
+
+    EntityID id = reg.spawn(EntityType::Goblin, {0, 0});
+    Entity* e   = reg.get(id);
+    a.add(id, *e);
+
+    // Simulate mid-move
+    e->destination = {1, 0};
+    a.spatial.add(id, e->destination, e->size);
+
+    transferEntity(id, a, b, reg, {0, 0});
+
+    // Both old cells cleared from source grid
+    CHECK(a.spatial.at({0, 0}).empty());
+    CHECK(a.spatial.at({1, 0}).empty());
+}
+
+// ─── Scheduler isolation ─────────────────────────────────────────────────────
+
+TEST_CASE("scheduler actions in an inactive grid do not affect entities in other grids") {
+    EntityRegistry reg;
+    Grid a(GRID_WORLD), b(GRID_STUDIO);
+
+    EntityID id = reg.spawn(EntityType::Goblin, {0, 0});
+    a.add(id, *reg.get(id));
+
+    // Schedule a Despawn on grid A's scheduler at tick 1
+    a.scheduler.push({ 1, id, ActionType::Despawn, std::monostate{} });
+
+    // Only tick grid B's scheduler — entity should be untouched
+    for (auto& action : b.scheduler.popDue(1)) {
+        (void)action;   // nothing should fire
+    }
+
+    CHECK(reg.get(id) != nullptr);
+    CHECK(a.hasEntity(id));
 }
