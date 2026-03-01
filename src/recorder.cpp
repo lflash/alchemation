@@ -25,6 +25,7 @@ void Recorder::recordMove(TilePos delta, Direction facingBeforeMove) {
 
 Recording Recorder::stop() {
     current_.instructions.push_back({ OpCode::HALT, 0, 0 });
+    current_.name = "Script " + std::to_string(recordings.size() + 1);
     recording_ = false;
     recordings.push_back(current_);
     current_ = {};

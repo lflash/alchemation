@@ -7,6 +7,18 @@
 #include "recorder.hpp"
 #include "routine_vm.hpp"
 #include <unordered_map>
+#include <string>
+
+// ─── RecordingInfo ────────────────────────────────────────────────────────────
+//
+// Snapshot passed to the renderer for the recordings panel.
+
+struct RecordingInfo {
+    size_t      index;
+    std::string name;
+    int         steps;     // instruction count excluding HALT
+    bool        selected;
+};
 
 constexpr GridID GRID_WORLD  = 1;
 constexpr GridID GRID_STUDIO = 2;
@@ -42,6 +54,10 @@ public:
     TilePos playerPos()         const;
     TilePos playerDestination() const;
     float   playerMoveT()       const;
+
+    // Recordings panel data.
+    std::vector<RecordingInfo> recordingList() const;
+    void renameRecording(size_t index, const std::string& name);
 
     // Returns true (and clears the flag) if the active grid switched this tick.
     // Used by main.cpp to snap the camera without lerping.

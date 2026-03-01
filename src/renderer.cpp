@@ -1,5 +1,6 @@
 #include "renderer.hpp"
 #include "terrain.hpp"
+#include "routine.hpp"
 
 #include <stdexcept>
 #include <algorithm>
@@ -161,7 +162,44 @@ int Renderer::toPixelY(float tileY) const {
     return static_cast<int>(std::round(VIEWPORT_H / 2.0f + (tileY - camera_.pos.y) * ts));
 }
 
-// ─── Text & UI ───────────────────────────────────────────────────────────────
+// ─── HUD & Text ──────────────────────────────────────────────────────────────
+
+void Renderer::drawHUD(int mana, bool isRecording) {
+    constexpr int PAD = 8;
+    constexpr int H   = 30;
+    constexpr int X   = 10;
+    constexpr int Y   = 10;
+
+    // Build strings
+    std::string manaStr = "\xe2\x99\xa6 " + std::to_string(mana); // ♦
+    std::string recStr  = " \xe2\x97\x8f REC";                    // ●
+
+    // Measure text widths to size the panel
+    int manaW = 0, manaH = 0, recW = 0, recH = 0;
+    if (font_) {
+        TTF_SizeUTF8(font_, manaStr.c_str(), &manaW, &manaH);
+        if (isRecording) TTF_SizeUTF8(font_, recStr.c_str(), &recW, &recH);
+    }
+    int panelW = PAD + manaW + recW + PAD;
+
+    // Background
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 10, 10, 10, 195);
+    SDL_Rect panel = {X, Y, panelW, H};
+    SDL_RenderFillRect(sdl, &panel);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+
+    SDL_SetRenderDrawColor(sdl, 90, 90, 90, 255);
+    SDL_RenderDrawRect(sdl, &panel);
+
+    // Mana — gold
+    int ty = Y + (H - manaH) / 2;
+    drawText(manaStr, X + PAD, ty, {220, 185, 50, 255});
+
+    // Recording indicator — red
+    if (isRecording)
+        drawText(recStr, X + PAD + manaW, ty, {210, 60, 60, 255});
+}
 
 void Renderer::drawText(const std::string& text, int x, int y, SDL_Color col) const {
     if (!font_ || text.empty()) return;
@@ -175,6 +213,105 @@ void Renderer::drawText(const std::string& text, int x, int y, SDL_Color col) co
     SDL_Rect dst = {x, y, w, h};
     SDL_RenderCopy(sdl, tex, nullptr, &dst);
     SDL_DestroyTexture(tex);
+}
+
+void Renderer::drawRecordingsPanel(const std::vector<RecordingInfo>& list,
+                                   bool renaming, const std::string& renameBuffer) {
+    constexpr int PAD         = 10;
+    constexpr int W           = 310;
+    constexpr int ROW         = 22;
+    constexpr int MAX_VISIBLE = 8;
+    constexpr int X           = VIEWPORT_W - W - 10;
+    constexpr int Y           = 10;
+
+    int numVisible = std::min((int)list.size(), MAX_VISIBLE);
+    int extraRows  = list.empty() ? 1 : (list.size() > MAX_VISIBLE ? 1 : 0);
+    int H = PAD + 20 + 10 + (numVisible + extraRows) * ROW + 10 + 20 + PAD;
+
+    // Background + border
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 10, 10, 10, 195);
+    SDL_Rect panel = {X, Y, W, H};
+    SDL_RenderFillRect(sdl, &panel);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(sdl, 90, 90, 90, 255);
+    SDL_RenderDrawRect(sdl, &panel);
+
+    SDL_Color titleCol  = {220, 210,  80, 255};
+    SDL_Color selCol    = {255, 255, 255, 255};
+    SDL_Color normCol   = {150, 150, 150, 255};
+    SDL_Color dimCol    = { 80,  80,  80, 255};
+    SDL_Color accentCol = { 90, 180,  90, 255};
+    SDL_Color hintCol   = {100, 140, 100, 255};
+
+    int ty = Y + PAD;
+
+    // Title
+    drawText("R E C O R D I N G S", X + 58, ty, titleCol);
+    ty += 20;
+
+    // Separator
+    SDL_SetRenderDrawColor(sdl, 70, 70, 70, 255);
+    SDL_RenderDrawLine(sdl, X + 5, ty + 4, X + W - 5, ty + 4);
+    ty += 10;
+
+    // Rows
+    if (list.empty()) {
+        drawText("  no recordings yet", X + PAD, ty, dimCol);
+        ty += ROW;
+    } else {
+        for (int i = 0; i < numVisible; ++i) {
+            const auto& rec = list[i];
+
+            if (rec.selected) {
+                // Row highlight
+                SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(sdl, 40, 90, 40, 110);
+                SDL_Rect rowRect = {X + 2, ty - 1, W - 4, ROW};
+                SDL_RenderFillRect(sdl, &rowRect);
+                SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+
+                // Arrow indicator
+                drawText("\xe2\x96\xb6", X + PAD, ty, accentCol);   // ▶
+
+                if (renaming) {
+                    // Text input field
+                    bool blink = (SDL_GetTicks64() / 500) % 2;
+                    std::string field = renameBuffer + (blink ? "|" : " ");
+                    drawText(field, X + PAD + 16, ty, selCol);
+                } else {
+                    drawText(rec.name, X + PAD + 16, ty, selCol);
+                }
+            } else {
+                drawText("  " + rec.name, X + PAD, ty, normCol);
+            }
+
+            // Step count (right side)
+            std::string steps = std::to_string(rec.steps);
+            drawText(steps, X + W - PAD - 28, ty,
+                     rec.selected ? accentCol : dimCol);
+
+            ty += ROW;
+        }
+
+        if ((int)list.size() > MAX_VISIBLE) {
+            std::string more = "  \xe2\x80\xa6 " +                               // …
+                std::to_string((int)list.size() - MAX_VISIBLE) + " more";
+            drawText(more, X + PAD, ty, dimCol);
+            ty += ROW;
+        }
+    }
+
+    // Footer separator
+    SDL_SetRenderDrawColor(sdl, 70, 70, 70, 255);
+    SDL_RenderDrawLine(sdl, X + 5, ty + 4, X + W - 5, ty + 4);
+    ty += 10;
+
+    // Footer hints
+    if (renaming)
+        drawText("\xe2\x86\xb5 confirm   Esc cancel", X + PAD, ty, hintCol);  // ↵
+    else
+        drawText("Q cycle   E deploy   \xe2\x86\xb5 rename", X + PAD, ty, hintCol);
 }
 
 void Renderer::drawControlsMenu() {
@@ -235,5 +372,6 @@ void Renderer::drawControlsMenu() {
     row("Ctrl + Scroll", "Zoom");
     sep();
     row("H",             "Toggle this menu");
+    row("I",             "Recordings panel");
     row("Esc",           "Quit");
 }

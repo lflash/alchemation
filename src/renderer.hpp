@@ -1,11 +1,13 @@
 #pragma once
 
 #include "irenderer.hpp"
+#include "game.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include <unordered_map>
 #include <string>
+#include <vector>
 
 class Terrain;
 
@@ -56,8 +58,14 @@ public:
 
     void endFrame();
 
+    // Draws the always-on HUD (mana counter + recording indicator) top-left.
+    void drawHUD(int mana, bool isRecording);
+
+    // Draws the recordings panel in the top-right corner (replaces controls when open).
+    void drawRecordingsPanel(const std::vector<RecordingInfo>& list,
+                             bool renaming, const std::string& renameBuffer);
+
     // Draws the controls reference panel in the top-right corner.
-    // Call after drawTerrain/drawSprite, before endFrame().
     void drawControlsMenu();
 
 private:

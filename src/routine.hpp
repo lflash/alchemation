@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 #include <vector>
+#include <string>
 #include <cstdint>
 
 // ─── OpCode ──────────────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ struct AgentExecState {
 // ─── Recording ───────────────────────────────────────────────────────────────
 
 struct Recording {
+    std::string              name;
     std::vector<Instruction> instructions;
     bool empty() const { return instructions.empty(); }
 };

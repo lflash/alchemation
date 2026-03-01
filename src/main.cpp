@@ -17,7 +17,11 @@ int main() {
     Game     game;
 
     // ── UI state ─────────────────────────────────────────────────────────────
-    bool showControls = false;
+    bool showControls   = false;
+    bool showRecordings = false;
+    bool renamingScript = false;
+    std::string renameBuffer;
+    Input emptyInput;   // passed to game.tick() while rename is active
 
     // ── Camera state ─────────────────────────────────────────────────────────
     Camera camera;                        // starts at (0,0), zoom 1.0
@@ -42,20 +46,65 @@ int main() {
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) quit = true;
+
+            // Text input events for rename mode
+            if (renamingScript) {
+                if (e.type == SDL_TEXTINPUT) {
+                    renameBuffer += e.text.text;
+                    continue;
+                }
+                if (e.type == SDL_KEYDOWN) {
+                    SDL_Keycode k = e.key.keysym.sym;
+                    if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+                        // Confirm rename
+                        auto list = game.recordingList();
+                        for (const auto& r : list)
+                            if (r.selected) { game.renameRecording(r.index, renameBuffer); break; }
+                        SDL_StopTextInput();
+                        renamingScript = false;
+                    } else if (k == SDLK_ESCAPE) {
+                        SDL_StopTextInput();
+                        renamingScript = false;
+                    } else if (k == SDLK_BACKSPACE && !renameBuffer.empty()) {
+                        renameBuffer.pop_back();
+                    }
+                    continue;
+                }
+            }
+
             input.handleEvent(e);
         }
 
-        if (input.pressed(Key::Escape))  quit = true;
-        if (input.pressed(Key::H))       showControls = !showControls;
+        if (input.pressed(Key::Escape)) quit = true;
+
+        // Panel toggles — mutually exclusive
+        if (input.pressed(Key::H)) {
+            showControls   = !showControls;
+            showRecordings = false;
+        }
+        if (input.pressed(Key::I)) {
+            showRecordings = !showRecordings;
+            showControls   = false;
+        }
+
+        // Start rename when recordings panel is open and Enter pressed
+        if (showRecordings && !renamingScript && input.pressed(Key::Enter)) {
+            auto list = game.recordingList();
+            for (const auto& r : list) {
+                if (r.selected) { renameBuffer = r.name; break; }
+            }
+            SDL_StartTextInput();
+            renamingScript = true;
+        }
 
         uint64_t now = SDL_GetTicks64();
         double   dt  = (now - lastTime) / 1000.0;
         lastTime = now;
         accumulator += std::min(dt, 0.1);
 
+        const Input& tickInput = renamingScript ? emptyInput : input;
         while (accumulator >= TICK_DT) {
-            game.tick(input, currentTick);
-            renderer.setTitle("Grid Game  |  mana: " + std::to_string(game.playerMana()));
+            game.tick(tickInput, currentTick);
             accumulator -= TICK_DT;
             ++currentTick;
         }
@@ -76,7 +125,7 @@ int main() {
         if (input.held(Key::ArrowRight)) camOffset.x += PAN_SPEED * fdt;
         if (input.held(Key::ArrowUp))    camOffset.y -= PAN_SPEED * fdt;
         if (input.held(Key::ArrowDown))  camOffset.y += PAN_SPEED * fdt;
-        if (input.pressed(Key::Backspace)) camOffset = {0.0f, 0.0f};
+        if (!renamingScript && input.pressed(Key::Backspace)) camOffset = {0.0f, 0.0f};
 
         // Ctrl + scroll wheel → zoom around screen centre.
         int scroll = input.scroll();
@@ -109,7 +158,11 @@ int main() {
             renderer.drawSprite(renderPos, ent->type);
         }
 
-        if (showControls) renderer.drawControlsMenu();
+        renderer.drawHUD(game.playerMana(), game.isRecording());
+        if (showRecordings)
+            renderer.drawRecordingsPanel(game.recordingList(), renamingScript, renameBuffer);
+        else if (showControls)
+            renderer.drawControlsMenu();
 
         renderer.endFrame();
     }

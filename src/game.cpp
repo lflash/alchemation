@@ -81,6 +81,23 @@ float Game::playerMoveT() const {
     return p ? p->moveT : 0.0f;
 }
 
+std::vector<RecordingInfo> Game::recordingList() const {
+    std::vector<RecordingInfo> result;
+    for (size_t i = 0; i < recorder_.recordings.size(); ++i) {
+        const Recording& rec = recorder_.recordings[i];
+        int steps = 0;
+        for (const auto& instr : rec.instructions)
+            if (instr.op != OpCode::HALT) ++steps;
+        result.push_back({ i, rec.name, steps, i == selectedRecording_ });
+    }
+    return result;
+}
+
+void Game::renameRecording(size_t index, const std::string& name) {
+    if (index < recorder_.recordings.size())
+        recorder_.recordings[index].name = name;
+}
+
 // ─── Scheduler ───────────────────────────────────────────────────────────────
 
 void Game::tickScheduler(Tick currentTick) {

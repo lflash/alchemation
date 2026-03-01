@@ -4,8 +4,8 @@
 #include <unordered_set>
 
 enum class Key {
-    W, A, S, D, E, F, C, R, Q, H,
-    Escape, Shift, Tab,
+    W, A, S, D, E, F, C, R, Q, H, I,
+    Escape, Shift, Tab, Enter,
     ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
     Ctrl, Backspace
 };
