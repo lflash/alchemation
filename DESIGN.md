@@ -89,8 +89,11 @@ enum class EventType  { Arrived, Collided, Despawned };
 enum class TileType  { Grass, BareEarth, Portal };
 
 // Geometric shape of a tile — determines how entities traverse it vertically.
-// SlopeN means walking North ascends by one z-level.
-enum class TileShape { Flat, SlopeN, SlopeS, SlopeE, SlopeW };
+// Cardinal slopes: SlopeN means walking North ascends by one z-level.
+// Corner slopes: SlopeNE has the NE corner raised; passable from all directions.
+enum class TileShape { Flat,
+                       SlopeN, SlopeS, SlopeE, SlopeW,
+                       SlopeNE, SlopeNW, SlopeSE, SlopeSW };
 
 enum class SFX {
     Step, Dig, Plant, CollectMushroom,
@@ -414,26 +417,20 @@ Abstracted behind `IRenderer`. Two implementations:
 - **`Renderer`** (SDL2) — primary target; sprite blitting, tile shading, UI overlay
 - **`TerminalRenderer`** — ANSI/ASCII; no SDL dependency
 
-**Current projection (top-down with camera):**
+**Projection (oblique/dimetric, Pokémon Gen 4 style):**
 ```
-screen_x = VIEWPORT_W/2 + (tile_x - cam.pos.x) * (TILE_SIZE * zoom)
-screen_y = VIEWPORT_H/2 + (tile_y - cam.pos.y) * (TILE_SIZE * zoom)
+screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_SIZE * zoom
+screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H * zoom - (tile_z - cam.z) * Z_STEP * zoom
 ```
-
-**Planned projection (oblique/dimetric, Pokémon Gen 4 style):**
-```
-screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_W
-screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H - tile_z * Z_STEP
-```
-Where `TILE_H < TILE_W` (tiles squished for depth) and `Z_STEP` is pixels per
-z-level. Draw order: sort by `world_y` ascending (back-to-front), then by
-`world_z` ascending within the same row. Elevated tiles show a south-facing cliff
-strip when the tile to their south is at a lower z.
+`TILE_SIZE=32`, `TILE_H=20`, `Z_STEP=12` (unzoomed). Draw order: sort by `world_y`
+ascending (back-to-front), then by `world_z` ascending within the same row.
+Elevated tiles show a south-facing cliff strip when the tile to their south is at
+a lower z.
 
 **Bounded grid void:** tiles outside `[0,w)×[0,h)` render as dark void `(18,18,18)`.
 
 **Terrain colour:**
-- Grass: green channel driven by Perlin height; checkerboard offset
+- Grass: flat checkerboard `(0,134,0)` / `(0,120,0)` — no Perlin noise, for clear z-level visibility
 - BareEarth: flat brown `(139, 90, 43)`
 - Portal: purple `(160, 60, 220)`
 - Studio mode: muted blue-grey palette, height-varied
@@ -485,7 +482,7 @@ dropped in as a replacement (OGG with SDL2_mixer OGG support).
 
 ### Persistence
 
-Binary save format (version 2). Auto-loaded on startup, auto-saved on quit (Esc).
+Binary save format (version 4). Auto-loaded on startup, auto-saved on quit (Esc).
 
 **Format:**
 ```
@@ -516,56 +513,58 @@ Version mismatch → load fails silently (no save file = fresh world).
 
 ---
 
-### Verticality (planned — Phase 9)
+### Verticality (Phase 9 — implemented)
 
 The world is a **sparse 3D volume**. Each `(x, y)` column can have surfaces at
 multiple z-levels simultaneously — e.g. a bridge at z=2 over a chasm floor at z=0,
 with air at z=1.
 
 **Data model:**
-- `TilePos` gains `int z`: `struct TilePos { int x, y, z; };`
-- `TileShape` enum: `Flat | SlopeN | SlopeS | SlopeE | SlopeW`
-  - `SlopeN`: walking North ascends by one z-level (z+1)
-  - `SlopeS/E/W`: analogous
-- `Terrain` stores tiles sparsely by 3D `TilePos`; an unset position is air/void
+- `TilePos { int x, y, z }` — z=0 is ground level
+- `TileShape` — `Flat`, four cardinal slopes, four corner slopes (see enum above)
+  - `SlopeN`: walking North ascends by one z-level (z+1); descend by walking South
+  - Corner slopes (`SlopeNE` etc.): one corner raised; passable from all directions
+- `Terrain::shapeAt(TilePos)` — sparse override map; default Flat
+- `Terrain::generateSlopes(radius, safeRadius)` — auto-generates slopes from Perlin
+  height: cardinal ramp where exactly one cardinal neighbour is high; corner ramp
+  where two perpendicular neighbours are high. Safe zone around origin stays flat.
 - `Entity::pos` and `Entity::destination` include z
 - `SpatialGrid` keys on `TilePos {x, y, z}`
 
-**Movement with slopes:**
+**Movement with slopes — `resolveZ(from, to, terrain)`:**
 
-When entity at `(x, y, z)` moves in direction D toward `(x', y')`:
+Only cardinal moves interact with slopes. Given movement direction D:
 
-1. Slope up: tile at `(x', y', z)` has shape matching direction D → arrive at `(x', y', z+1)`
-2. Slope down: tile at `(x', y', z-1)` has shape matching opposite of D → arrive at `(x', y', z-1)`
-3. Flat: solid tile at `(x', y', z)` → arrive there (z unchanged)
-4. Otherwise: blocked (cliff or void)
+1. **Ascend**: cardinal slope at `(to.x, to.y, from.z)` whose ascent == D → `z+1`
+2. **Descend via dest**: cardinal slope at `(to.x, to.y, from.z-1)` opposing D → `z-1`
+3. **Descend off source**: cardinal slope at `(from.x, from.y, from.z-1)` opposing D → `z-1`
+4. **All other cases** (perpendicular, back-face, flat, corner slope) → pass through at z unchanged
 
-Traversing a slope sideways (perpendicular to its ascent direction) is blocked.
-Only slopes connect z-levels; there is no jumping or free vertical movement.
+There is no jump or free vertical movement; only slopes connect z-levels.
+
+**Visual z:** entity render height uses visual z, not logical z. Cardinal slope
+occupants render at z=0.5 (mid-ramp) regardless of their logical z, for smooth
+visual transitions. Lerped between source and destination visual z each frame.
 
 **Rendering: oblique/dimetric projection**
 
 ```
-screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_W
-screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H - tile_z * Z_STEP
+screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_SIZE * zoom
+screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H * zoom - (tile_z - cam.z) * Z_STEP * zoom
 ```
 
-- `TILE_W` = 32px (unchanged)
-- `TILE_H` ≈ 20px (squished to imply overhead angle)
-- `Z_STEP` ≈ 12px per z-level (tunable)
+- `TILE_SIZE` = 32px, `TILE_H` = 20px (squished), `Z_STEP` = 12px (all unzoomed)
 
-Draw order (back-to-front): sort draw calls by `world_y` ascending, then by
-`world_z` ascending within the same y-row. This ensures the bridge renders visually
-above the chasm floor automatically.
+Draw order (back-to-front): sort by `world_y` ascending, then `world_z` ascending.
 
-**Cliff faces:** when a tile at `(x, y, z)` is elevated relative to the tile at
-`(x, y+1, z-1)` (the tile to its south, one level below), draw a vertical
-"wall strip" on the south face — the difference in screen_y between the two tiles
-filled with a darker variant of the tile's colour. This is what gives elevation
-the solid, 3D appearance of Pokémon Gen 4.
+**Cliff faces:** when a tile south of an elevated tile is at z=0, draw a vertical
+strip (55% darkened) between them on the south face — gives the Pokémon Gen 4 look.
 
-**Camera z:** `Camera` gains a `float z` component. The camera tracks the player's
-z the same way it tracks x/y — exponential lerp, snap on grid switch.
+**Sprite/shadow anchor:** sprite bottom sits at tile centre; shadow ellipse is
+centred at tile centre. Facing indicator centred on sprite body.
+
+**Camera z:** `Camera` gains `float z`. Tracks player visual z — exponential lerp
+each frame, snaps instantly on grid switch.
 
 ---
 

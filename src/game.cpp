@@ -48,10 +48,13 @@ void Game::subscribeEvents(Grid& grid) {
 // Returns z=1 if the tile at (x,y) is adjacent to a slope whose high edge
 // faces it (i.e. it sits atop a raised platform), otherwise z=0.
 static int terrainZ(const Terrain& t, int x, int y) {
-    return (t.shapeAt({x, y + 1, 0}) == TileShape::SlopeN ||
-            t.shapeAt({x, y - 1, 0}) == TileShape::SlopeS ||
-            t.shapeAt({x - 1, y, 0}) == TileShape::SlopeE ||
-            t.shapeAt({x + 1, y, 0}) == TileShape::SlopeW) ? 1 : 0;
+    auto s = [&](int nx, int ny) { return t.shapeAt({nx, ny, 0}); };
+    bool elev =
+        s(x, y+1) == TileShape::SlopeN  || s(x, y+1) == TileShape::SlopeNE || s(x, y+1) == TileShape::SlopeNW ||
+        s(x, y-1) == TileShape::SlopeS  || s(x, y-1) == TileShape::SlopeSE || s(x, y-1) == TileShape::SlopeSW ||
+        s(x-1, y) == TileShape::SlopeE  || s(x-1, y) == TileShape::SlopeNE || s(x-1, y) == TileShape::SlopeSE ||
+        s(x+1, y) == TileShape::SlopeW  || s(x+1, y) == TileShape::SlopeNW || s(x+1, y) == TileShape::SlopeSW;
+    return elev ? 1 : 0;
 }
 
 Game::Game() {

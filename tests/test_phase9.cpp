@@ -241,6 +241,16 @@ TEST_CASE("walk: mixed cliff face east — cardinal then corner slope") {
     CHECK(p[3] == TilePos{3,1,0});
 }
 
+TEST_CASE("walk: step back off slope tile descends to ground") {
+    // After ascending onto the slope tile itself (z=1), moving back in the
+    // descent direction should return to ground, not float at z=1.
+    Terrain t;
+    t.setShape({0,1,0}, TileShape::SlopeN);
+    auto p = walkPath(t, {0,2,0}, {Direction::N, Direction::S});
+    CHECK(p[1] == TilePos{0,1,1});  // ascended onto slope tile
+    CHECK(p[2] == TilePos{0,2,0});  // stepped back off, returned to ground
+}
+
 TEST_CASE("walk: full traverse — up slope, along top, down other side") {
     // SlopeN at y=1 (ascend going N), SlopeS at y=-1 (descend going N).
     Terrain t;

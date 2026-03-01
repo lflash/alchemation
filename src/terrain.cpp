@@ -95,21 +95,29 @@ void Terrain::generateSlopes(int radius, int safeRadius) {
         for (int x = -radius; x <= radius; ++x) {
             if (isHigh(x, y)) continue;  // slopes go on low tiles only
 
-            // Count high cardinal neighbours and remember the direction.
-            int       highCount = 0;
-            TileShape slope     = TileShape::Flat;
+            bool hN = isHigh(x, y - 1);
+            bool hS = isHigh(x, y + 1);
+            bool hE = isHigh(x + 1, y);
+            bool hW = isHigh(x - 1, y);
+            int  n  = (hN ? 1 : 0) + (hS ? 1 : 0) + (hE ? 1 : 0) + (hW ? 1 : 0);
 
-            auto check = [&](int nx, int ny, TileShape s) {
-                if (isHigh(nx, ny)) { ++highCount; slope = s; }
-            };
-            check(x, y - 1, TileShape::SlopeN);  // high to north → ramp faces N
-            check(x, y + 1, TileShape::SlopeS);  // high to south → ramp faces S
-            check(x + 1, y, TileShape::SlopeE);  // high to east  → ramp faces E
-            check(x - 1, y, TileShape::SlopeW);  // high to west  → ramp faces W
+            TileShape slope = TileShape::Flat;
+            if (n == 1) {
+                // Cardinal ramp — single high neighbour.
+                if      (hN) slope = TileShape::SlopeN;
+                else if (hS) slope = TileShape::SlopeS;
+                else if (hE) slope = TileShape::SlopeE;
+                else         slope = TileShape::SlopeW;
+            } else if (n == 2) {
+                // Corner ramp — two perpendicular high neighbours.
+                if      (hN && hE) slope = TileShape::SlopeNE;
+                else if (hN && hW) slope = TileShape::SlopeNW;
+                else if (hS && hE) slope = TileShape::SlopeSE;
+                else if (hS && hW) slope = TileShape::SlopeSW;
+                // Opposite pairs (ridge/pass) → leave flat.
+            }
 
-            // Only place a slope when exactly one cardinal neighbour is high;
-            // corners and ridges stay flat (cliff face covers the drop).
-            if (highCount == 1)
+            if (slope != TileShape::Flat)
                 setShape({x, y, 0}, slope);
         }
     }
@@ -124,9 +132,8 @@ namespace {
             case TileShape::SlopeS: return Direction::S;
             case TileShape::SlopeE: return Direction::E;
             case TileShape::SlopeW: return Direction::W;
-            case TileShape::Flat:   return std::nullopt;
+            default:                return std::nullopt;  // Flat + corner slopes
         }
-        return std::nullopt;
     }
 
     bool oppositeDir(Direction a, Direction b) {
@@ -154,12 +161,17 @@ std::optional<TilePos> resolveZ(TilePos from, TilePos to, const Terrain& terrain
     if (a_z) {
         if (*a_z == dir)
             return TilePos{to.x, to.y, from.z + 1};   // ascending
-        return std::nullopt;                           // perpendicular or back face
+        return to;                                     // perpendicular/back-face: pass through at z
     }
 
     // Flat at destination z: check for descent ramp one level below
     if (a_zm1 && oppositeDir(*a_zm1, dir))
-        return TilePos{to.x, to.y, from.z - 1};       // descending
+        return TilePos{to.x, to.y, from.z - 1};       // descending via destination slope
+
+    // Still flat: check if we're stepping backward off the source slope
+    auto a_src = slopeAscent(terrain.shapeAt({from.x, from.y, from.z - 1}));
+    if (a_src && oppositeDir(*a_src, dir))
+        return TilePos{to.x, to.y, from.z - 1};       // descending off source slope
 
     return to;  // flat: z unchanged
 }

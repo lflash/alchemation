@@ -63,6 +63,7 @@ public:
     // Draws a sprite at a tile position.
     // renderPos is the interpolated visual position (tile units, XY only).
     // renderZ is the interpolated z (for oblique vertical offset).
+    void drawShadow(Vec2f renderPos, float renderZ);
     void drawSprite(Vec2f renderPos, float renderZ, EntityType type);
 
     void endFrame();

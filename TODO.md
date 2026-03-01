@@ -150,53 +150,58 @@ Tests are written alongside the system they cover.
 
 ---
 
-## Phase 9 — Verticality
+## Phase 9 — Verticality ✓
 
 Add z-coordinate to tiles and entities. Slope tiles are the only way to transition
 between z-levels. Rendering switches to oblique/dimetric projection.
 
-### Core data changes
-- [ ] `TilePos` gains `int z`: `struct TilePos { int x, y, z; };`
-- [ ] `TilePosHash` updated for 3D key
-- [ ] `Entity::pos` and `Entity::destination` include z
-- [ ] `TileShape` enum: `Flat | SlopeN | SlopeS | SlopeE | SlopeW`
-- [ ] `Terrain` stores shape per tile; `shapeAt(TilePos)` accessor
-- [ ] `SpatialGrid` keyed on 3D `TilePos`
-- [ ] Save format v3: includes z in all TilePos fields
+### Core data changes ✓
+- [x] `TilePos` gains `int z`: `struct TilePos { int x, y, z; };`
+- [x] `TilePosHash` updated for 3D key
+- [x] `Entity::pos` and `Entity::destination` include z
+- [x] `TileShape` enum: `Flat | SlopeN | SlopeS | SlopeE | SlopeW | SlopeNE | SlopeNW | SlopeSE | SlopeSW`
+- [x] `Terrain` stores shape per tile; `shapeAt(TilePos)` accessor
+- [x] `SpatialGrid` keyed on 3D `TilePos`
+- [x] Save format v4: includes z in all TilePos fields + shape overrides
 
-### Movement
-- [ ] Movement resolver (`resolveMoves`) checks slope to determine destination z
-  - Slope in direction D at (x', y', z) → arrive at z+1
-  - Slope in opposite of D at (x', y', z-1) → arrive at z-1
-  - Perpendicular to slope direction → blocked
-  - Flat tile at (x', y', z) → arrive at z unchanged
-  - No tile reachable → blocked
-- [ ] Goblin wander respects slope rules
-- [ ] Agent VM moves respect slope rules
-- [ ] Bounds clamping in bounded rooms is XY-only (z free within room)
+### Movement ✓
+- [x] `resolveZ(from, to, terrain)` determines destination z from slope rules:
+  - Cardinal slope at dest z matching movement dir → arrive at z+1
+  - Cardinal slope at dest z-1 opposing movement dir → arrive at z-1
+  - Cardinal slope at from z-1 opposing movement dir → descend off source slope
+  - All other cases (perpendicular, back-face, flat) → pass through at z unchanged
+- [x] Goblin wander respects slope rules
+- [x] Agent VM moves respect slope rules
+- [x] Bounds clamping in bounded rooms is XY-only (z free within room)
 
-### Terrain tools
+### Terrain tools ✓
+- [x] `Terrain::generateSlopes(radius, safeRadius)` — auto-generates cardinal and corner
+      slope tiles from Perlin height threshold (called on world terrain at startup)
 - [ ] Place slope tile with directional key combo (design TBD)
 - [ ] Dig works per z-level (only affects tile at entity's z)
-- [ ] Perlin height optionally seeds initial z-levels (world generation)
 
-### Rendering
-- [ ] Switch `toPixelY` to oblique formula: `baseY - tile_z * Z_STEP`
-- [ ] `TILE_H` < `TILE_W` (tiles squished vertically, e.g. 32×20)
-- [ ] `Z_STEP` constant (pixels per z-level, e.g. 12)
-- [ ] Draw order: sort by `world_y` ascending, then `world_z` ascending within same y
-- [ ] Cliff faces: south-side wall strip when tile at (x,y,z) is above (x,y+1,z-1)
-- [ ] Cliff face colour: darker variant of the tile's surface colour
-- [ ] Slope tile renders as diagonal ramp face (parallelogram)
-- [ ] Camera gains `float z` component; tracks player z with same lerp/snap logic
+### Rendering ✓
+- [x] `toPixelY` uses oblique formula: `baseY + (tile_y - cam.y)*TILE_H - (tile_z - cam.z)*Z_STEP`
+- [x] `TILE_H = 20`, `TILE_W = 32`, `Z_STEP = 12` (all unzoomed)
+- [x] Draw order: sort by `world_y` ascending, then `world_z` ascending within same y
+- [x] Cliff faces: south-side wall strip (55% darkened) at elevated→ground boundary
+- [x] Cardinal slope tiles rendered as a sloped quad (one high corner, painter's algorithm)
+- [x] Corner slope tiles (SlopeNE/NW/SE/SW) rendered with one raised corner
+- [x] Elevated flat tiles drawn at z=1 via `isElev()` adjacency check
+- [x] Camera gains `float z` component; tracks player visual z with lerp/snap logic
+- [x] Visual z: cardinal slope occupants render at z=0.5 (mid-ramp), not their logical z
+- [x] Entity shadow: semi-transparent grey ellipse centred at tile centre
+- [x] Sprite anchor: bottom of sprite at tile centre; facing arrow centred on sprite body
+- [x] Grass colour: flat checkerboard (no Perlin noise) for clearer z-level visibility
 
-### Tests
-- [ ] `TilePos` hash includes z — (1,2,3) and (1,2,4) are distinct keys
-- [ ] Movement onto slope in ascent direction → z+1
-- [ ] Movement onto slope in descent direction → z-1
-- [ ] Movement perpendicular to slope → blocked
-- [ ] Movement to tile with no floor at entity's z → blocked (cliff)
-- [ ] Two entities at same (x,y) but different z do not collide
+### Tests ✓ (173/173 passing)
+- [x] `TilePos` hash includes z — (1,2,3) and (1,2,4) are distinct keys
+- [x] Movement onto slope in ascent direction → z+1
+- [x] Movement onto slope in descent direction → z-1
+- [x] Step back off slope tile → descend to ground
+- [x] Movement perpendicular/back-face to slope → pass through at z unchanged
+- [x] Two entities at same (x,y) but different z do not collide
+- [x] `walkPath` helper + 9 multi-step scenario tests (ascend, descend, traverse, corner)
 
 ---
 

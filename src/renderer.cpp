@@ -126,6 +126,21 @@ void Renderer::drawTerrain(const Terrain& terrain) {
         SDL_RenderGeometry(sdl, nullptr, verts, 4, idx, 6);
     };
 
+    // Corner slopes: each corner z specified individually.
+    auto drawCorner = [&](int x, int y, float zNW, float zNE, float zSE, float zSW, SDL_Color col) {
+        SDL_FPoint nw = { (float)toPixelX(x),   (float)toPixelY(y,   zNW) };
+        SDL_FPoint ne = { (float)toPixelX(x+1),  (float)toPixelY(y,   zNE) };
+        SDL_FPoint se = { (float)toPixelX(x+1),  (float)toPixelY(y+1, zSE) };
+        SDL_FPoint sw = { (float)toPixelX(x),    (float)toPixelY(y+1, zSW) };
+        SDL_Color  c  = col;
+        SDL_Vertex verts[4] = {
+            { nw, c, {0,0} }, { ne, c, {0,0} },
+            { se, c, {0,0} }, { sw, c, {0,0} },
+        };
+        int idx[6] = { 0,1,2, 0,2,3 };
+        SDL_RenderGeometry(sdl, nullptr, verts, 4, idx, 6);
+    };
+
     // Same but E/W slopes: NW(x,y,zW), NE(x+1,y,zE), SE(x+1,y+1,zE), SW(x,y+1,zW)
     auto drawQuadEW = [&](int x, int y, float zW, float zE, SDL_Color col) {
         SDL_FPoint nw = { (float)toPixelX(x),   (float)toPixelY(y,   zW) };
@@ -144,10 +159,16 @@ void Renderer::drawTerrain(const Terrain& terrain) {
     // True if tile (x,y) is adjacent to a slope whose high edge faces it —
     // i.e. the tile sits atop a raised platform.
     auto isElev = [&](int x, int y) -> bool {
-        return terrain.shapeAt({x, y+1, 0}) == TileShape::SlopeN ||
-               terrain.shapeAt({x, y-1, 0}) == TileShape::SlopeS ||
-               terrain.shapeAt({x-1, y, 0}) == TileShape::SlopeE ||
-               terrain.shapeAt({x+1, y, 0}) == TileShape::SlopeW;
+        TileShape s;
+        s = terrain.shapeAt({x, y+1, 0});
+        if (s == TileShape::SlopeN || s == TileShape::SlopeNE || s == TileShape::SlopeNW) return true;
+        s = terrain.shapeAt({x, y-1, 0});
+        if (s == TileShape::SlopeS || s == TileShape::SlopeSE || s == TileShape::SlopeSW) return true;
+        s = terrain.shapeAt({x-1, y, 0});
+        if (s == TileShape::SlopeE || s == TileShape::SlopeNE || s == TileShape::SlopeSE) return true;
+        s = terrain.shapeAt({x+1, y, 0});
+        if (s == TileShape::SlopeW || s == TileShape::SlopeNW || s == TileShape::SlopeSW) return true;
+        return false;
     };
 
     auto darken = [](SDL_Color c, float f) -> SDL_Color {
@@ -170,7 +191,9 @@ void Renderer::drawTerrain(const Terrain& terrain) {
             // already handles the visual ramp, so skip that case.
             if (!thisVoid && !northVoid
                 && isElev(x, y-1) && !isElev(x, y)
-                && terrain.shapeAt({x, y, 0}) != TileShape::SlopeN)
+                && terrain.shapeAt({x, y, 0}) != TileShape::SlopeN
+                && terrain.shapeAt({x, y, 0}) != TileShape::SlopeNE
+                && terrain.shapeAt({x, y, 0}) != TileShape::SlopeNW)
             {
                 int cliffTop = toPixelY(y, 1.0f);
                 int cliffBot = toPixelY(y, 0.0f);
@@ -214,6 +237,11 @@ void Renderer::drawTerrain(const Terrain& terrain) {
                 case TileShape::SlopeW:
                     drawQuadEW(x, y, 1.0f, 0.0f, color); // W edge at z+1, E at z
                     break;
+                // Corner slopes: one corner elevated, other three at ground.
+                case TileShape::SlopeNE: drawCorner(x,y, 0,1,0,0, color); break;
+                case TileShape::SlopeNW: drawCorner(x,y, 1,0,0,0, color); break;
+                case TileShape::SlopeSE: drawCorner(x,y, 0,0,1,0, color); break;
+                case TileShape::SlopeSW: drawCorner(x,y, 0,0,0,1, color); break;
             }
 
             // ── Elevated flat copy ────────────────────────────────────────────
@@ -228,14 +256,45 @@ void Renderer::drawTerrain(const Terrain& terrain) {
     }
 }
 
+void Renderer::drawShadow(Vec2f renderPos, float renderZ) {
+    float ts  = TILE_SIZE * camera_.zoom;
+    float tsH = TILE_H    * camera_.zoom;
+    float cx  = toPixelX(renderPos.x) + ts  * 0.5f;
+    float cy  = toPixelY(renderPos.y, renderZ) + tsH * 0.5f;
+    float rx  = ts  * 0.35f;
+    float ry  = tsH * 0.22f;
+
+    constexpr int N = 24;
+    SDL_Vertex verts[N + 1];
+    int        idx[N * 3];
+
+    SDL_Color col = { 0, 0, 0, 90 };
+    verts[0] = { { cx, cy }, col, { 0, 0 } };
+    for (int i = 0; i < N; ++i) {
+        float angle = 2.0f * static_cast<float>(M_PI) * i / N;
+        verts[i + 1] = {
+            { cx + rx * std::cos(angle), cy + ry * std::sin(angle) },
+            col, { 0, 0 }
+        };
+        int next = (i + 1) % N;
+        idx[i*3 + 0] = 0;
+        idx[i*3 + 1] = i + 1;
+        idx[i*3 + 2] = next + 1;
+    }
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_RenderGeometry(sdl, nullptr, verts, N + 1, idx, N * 3);
+}
+
 void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type) {
     SDL_Texture* tex = sprites.get(type);
     if (!tex) return;
 
     int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
+    int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
     SDL_Rect dst = {
         toPixelX(renderPos.x),
-        toPixelY(renderPos.y, renderZ),
+        toPixelY(renderPos.y, renderZ) + iH / 2 - iTs,
         iTs,
         iTs
     };
@@ -264,10 +323,8 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
                  static_cast<uint8_t>(b), 255 };
     }
 
-    // World: Perlin height maps to green channel.
-    auto g = static_cast<int>(128.0f + height * 56.0f);
-    g = std::clamp(g, 64, 220);
-    if ((pos.x + pos.y) % 2 == 0) g = std::min(g + 6, 255);
+    // World: flat green with a subtle checkerboard to show tile boundaries.
+    int g = ((pos.x + pos.y) % 2 == 0) ? 134 : 120;
     return { 0, static_cast<uint8_t>(g), 0, 255 };
 }
 
@@ -289,9 +346,10 @@ int Renderer::toPixelY(float tileY, float tileZ) const {
 // ─── HUD & Text ──────────────────────────────────────────────────────────────
 
 void Renderer::drawFacingIndicator(Vec2f renderPos, float renderZ, Direction facing) {
-    float ts = TILE_SIZE * camera_.zoom;
-    float cx = toPixelX(renderPos.x) + ts * 0.5f;
-    float cy = toPixelY(renderPos.y, renderZ) + ts * 0.5f;
+    float ts  = TILE_SIZE * camera_.zoom;
+    float tsH = TILE_H    * camera_.zoom;
+    float cx  = toPixelX(renderPos.x) + ts  * 0.5f;
+    float cy  = toPixelY(renderPos.y, renderZ) + tsH * 0.5f - ts * 0.5f;
 
     // Unit vector for each direction
     float dx = 0.0f, dy = 0.0f;
