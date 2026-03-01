@@ -33,10 +33,19 @@ public:
     void tick(const Input& input, Tick currentTick);
 
     // Accessors for the renderer.
-    const Terrain& terrain()     const { return activeGrid().terrain; }
-    int            playerMana()  const;
-    bool           isRecording() const { return recorder_.isRecording(); }
-    bool           inStudio()    const { return activeGridID_ == GRID_STUDIO; }
+    const Terrain& terrain()          const { return activeGrid().terrain; }
+    int            playerMana()       const;
+    bool           isRecording()      const { return recorder_.isRecording(); }
+    bool           inStudio()         const { return activeGridID_ == GRID_STUDIO; }
+
+    // Player position accessors for camera tracking.
+    TilePos playerPos()         const;
+    TilePos playerDestination() const;
+    float   playerMoveT()       const;
+
+    // Returns true (and clears the flag) if the active grid switched this tick.
+    // Used by main.cpp to snap the camera without lerping.
+    bool consumeGridSwitch() { bool v = gridJustSwitched_; gridJustSwitched_ = false; return v; }
 
     // Entities in the active grid, sorted by layer — for rendering.
     std::vector<const Entity*> drawOrder() const;
@@ -47,6 +56,8 @@ private:
     GridID   activeGridID_    = GRID_WORLD;
     EntityID playerID_        = INVALID_ENTITY;
     TilePos  playerWorldPos_  = {0, 0};   // saved on entering studio
+
+    bool      gridJustSwitched_ = false;
 
     Recorder  recorder_;
     RoutineVM vm_;

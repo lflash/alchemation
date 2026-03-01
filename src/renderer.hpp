@@ -3,6 +3,7 @@
 #include "irenderer.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
 #include <unordered_map>
 #include <string>
 
@@ -30,9 +31,10 @@ private:
 
 class Renderer : public IRenderer {
 public:
-    static constexpr int TILE_SIZE   = 32;
-    static constexpr int GRID_WIDTH  = 20;
-    static constexpr int GRID_HEIGHT = 20;
+    static constexpr int TILE_SIZE    = 32;
+    // Viewport dimensions in pixels (fixed window size).
+    static constexpr int VIEWPORT_W   = 640;
+    static constexpr int VIEWPORT_H   = 640;
 
     Renderer();
     ~Renderer();
@@ -40,6 +42,9 @@ public:
     // Non-copyable
     Renderer(const Renderer&)            = delete;
     Renderer& operator=(const Renderer&) = delete;
+
+    // Must be called once per frame before any draw calls.
+    void setCamera(const Camera& cam) { camera_ = cam; }
 
     void beginFrame();
     void setTitle(const std::string& title);
@@ -51,14 +56,24 @@ public:
 
     void endFrame();
 
+    // Draws the controls reference panel in the top-right corner.
+    // Call after drawTerrain/drawSprite, before endFrame().
+    void drawControlsMenu();
+
 private:
     SDL_Window*   window;
     SDL_Renderer* sdl;
     SpriteCache   sprites;
+    Camera        camera_;   // updated each frame via setCamera()
+    TTF_Font*     font_;
 
     SDL_Color tileColor(float height, TilePos pos, TileType type) const;
 
-    // Convert tile units to screen pixels (tile (0,0) maps to screen centre).
+    // Convert a world tile coordinate to screen pixels.
+    // (camera_.pos is the tile at screen centre.)
     int toPixelX(float tileX) const;
     int toPixelY(float tileY) const;
+
+    // Render a UTF-8 string at screen pixel (x, y).
+    void drawText(const std::string& text, int x, int y, SDL_Color col) const;
 };

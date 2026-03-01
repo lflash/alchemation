@@ -3,6 +3,7 @@
 
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 // ─── Sprite paths ─────────────────────────────────────────────────────────────
@@ -42,18 +43,21 @@ SDL_Texture* SpriteCache::get(EntityType type) const {
 
 // ─── Renderer ────────────────────────────────────────────────────────────────
 
-Renderer::Renderer() : sprites(nullptr) {
+Renderer::Renderer() : sprites(nullptr), font_(nullptr) {
     if (SDL_Init(SDL_INIT_VIDEO) != 0)
         throw std::runtime_error(SDL_GetError());
 
     if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG))
         throw std::runtime_error(IMG_GetError());
 
+    if (TTF_Init() != 0)
+        throw std::runtime_error(TTF_GetError());
+
     window = SDL_CreateWindow(
         "Grid Game",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-        GRID_WIDTH  * TILE_SIZE,
-        GRID_HEIGHT * TILE_SIZE,
+        VIEWPORT_W,
+        VIEWPORT_H,
         SDL_WINDOW_SHOWN
     );
     if (!window) throw std::runtime_error(SDL_GetError());
@@ -64,9 +68,15 @@ Renderer::Renderer() : sprites(nullptr) {
 
     sprites = SpriteCache(sdl);
     sprites.loadAll();
+
+    font_ = TTF_OpenFont("assets/fonts/DejaVuSansMono.ttf", 13);
+    if (!font_)
+        std::fprintf(stderr, "Warning: could not load font: %s\n", TTF_GetError());
 }
 
 Renderer::~Renderer() {
+    if (font_) TTF_CloseFont(font_);
+    TTF_Quit();
     SDL_DestroyRenderer(sdl);
     SDL_DestroyWindow(window);
     IMG_Quit();
@@ -83,18 +93,26 @@ void Renderer::beginFrame() {
 }
 
 void Renderer::drawTerrain(const Terrain& terrain) {
-    const int halfW = GRID_WIDTH  / 2;
-    const int halfH = GRID_HEIGHT / 2;
+    float ts  = TILE_SIZE * camera_.zoom;
+    int   iTs = static_cast<int>(std::ceil(ts));
 
-    for (int y = -halfH; y < halfH; y++) {
-        for (int x = -halfW; x < halfW; x++) {
-            TilePos  p     = {x, y};
-            float    h     = terrain.heightAt(p);
-            TileType type  = terrain.typeAt(p);
-            SDL_Color color = tileColor(h, p, type);
+    // Compute which tile columns/rows are visible.
+    float halfW = (VIEWPORT_W / 2.0f) / ts;
+    float halfH = (VIEWPORT_H / 2.0f) / ts;
+    int minX = static_cast<int>(std::floor(camera_.pos.x - halfW)) - 1;
+    int maxX = static_cast<int>(std::ceil (camera_.pos.x + halfW)) + 1;
+    int minY = static_cast<int>(std::floor(camera_.pos.y - halfH)) - 1;
+    int maxY = static_cast<int>(std::ceil (camera_.pos.y + halfH)) + 1;
+
+    for (int y = minY; y <= maxY; ++y) {
+        for (int x = minX; x <= maxX; ++x) {
+            TilePos   p     = {x, y};
+            float     h     = terrain.heightAt(p);
+            TileType  ttype = terrain.typeAt(p);
+            SDL_Color color = tileColor(h, p, ttype);
 
             SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
-            SDL_Rect rect = { toPixelX(x), toPixelY(y), TILE_SIZE, TILE_SIZE };
+            SDL_Rect rect = { toPixelX(x), toPixelY(y), iTs, iTs };
             SDL_RenderFillRect(sdl, &rect);
         }
     }
@@ -104,11 +122,12 @@ void Renderer::drawSprite(Vec2f renderPos, EntityType type) {
     SDL_Texture* tex = sprites.get(type);
     if (!tex) return;
 
+    int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
     SDL_Rect dst = {
         toPixelX(renderPos.x),
         toPixelY(renderPos.y),
-        TILE_SIZE,
-        TILE_SIZE
+        iTs,
+        iTs
     };
     SDL_RenderCopy(sdl, tex, nullptr, &dst);
 }
@@ -133,9 +152,88 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
 }
 
 int Renderer::toPixelX(float tileX) const {
-    return static_cast<int>((tileX + GRID_WIDTH  / 2.0f) * TILE_SIZE);
+    float ts = TILE_SIZE * camera_.zoom;
+    return static_cast<int>(std::round(VIEWPORT_W / 2.0f + (tileX - camera_.pos.x) * ts));
 }
 
 int Renderer::toPixelY(float tileY) const {
-    return static_cast<int>((tileY + GRID_HEIGHT / 2.0f) * TILE_SIZE);
+    float ts = TILE_SIZE * camera_.zoom;
+    return static_cast<int>(std::round(VIEWPORT_H / 2.0f + (tileY - camera_.pos.y) * ts));
+}
+
+// ─── Text & UI ───────────────────────────────────────────────────────────────
+
+void Renderer::drawText(const std::string& text, int x, int y, SDL_Color col) const {
+    if (!font_ || text.empty()) return;
+    SDL_Surface* surf = TTF_RenderUTF8_Blended(font_, text.c_str(), col);
+    if (!surf) return;
+    SDL_Texture* tex = SDL_CreateTextureFromSurface(sdl, surf);
+    SDL_FreeSurface(surf);
+    if (!tex) return;
+    int w, h;
+    SDL_QueryTexture(tex, nullptr, nullptr, &w, &h);
+    SDL_Rect dst = {x, y, w, h};
+    SDL_RenderCopy(sdl, tex, nullptr, &dst);
+    SDL_DestroyTexture(tex);
+}
+
+void Renderer::drawControlsMenu() {
+    constexpr int PAD  = 12;
+    constexpr int LINE = 18;
+    constexpr int W    = 308;
+    constexpr int H    = 322;
+    constexpr int X    = VIEWPORT_W - W - 10;
+    constexpr int Y    = 10;
+
+    // Semi-transparent background
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 10, 10, 10, 195);
+    SDL_Rect panel = {X, Y, W, H};
+    SDL_RenderFillRect(sdl, &panel);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+
+    // Border
+    SDL_SetRenderDrawColor(sdl, 90, 90, 90, 255);
+    SDL_RenderDrawRect(sdl, &panel);
+
+    SDL_Color title  = {220, 210,  80, 255};
+    SDL_Color key    = {200, 200, 200, 255};
+    SDL_Color action = {140, 200, 140, 255};
+    SDL_Color dim    = { 80,  80,  80, 255};
+
+    int tx = X + PAD;
+    int ty = Y + PAD;
+
+    // Title — centred
+    drawText("C O N T R O L S", X + 62, ty, title);
+    ty += LINE + 4;
+
+    auto sep = [&]() {
+        SDL_SetRenderDrawColor(sdl, dim.r, dim.g, dim.b, dim.a);
+        SDL_RenderDrawLine(sdl, X + 5, ty + 4, X + W - 5, ty + 4);
+        ty += 12;
+    };
+
+    auto row = [&](const char* k, const char* a) {
+        drawText(k, tx,        ty, key);
+        drawText(a, tx + 148,  ty, action);
+        ty += LINE;
+    };
+
+    sep();
+    row("WASD",          "Move");
+    row("Shift + WASD",  "Strafe");
+    row("F",             "Dig ahead");
+    row("C",             "Plant mushroom");
+    row("R",             "Toggle recording");
+    row("Q",             "Cycle recording");
+    row("E",             "Deploy agent");
+    row("Tab",           "Toggle studio");
+    sep();
+    row("Arrows",        "Pan camera");
+    row("Backspace",     "Re-centre");
+    row("Ctrl + Scroll", "Zoom");
+    sep();
+    row("H",             "Toggle this menu");
+    row("Esc",           "Quit");
 }

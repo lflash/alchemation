@@ -25,6 +25,18 @@ struct Bounds {
     Vec2f min, max;   // in tile units
 };
 
+// ─── Camera ──────────────────────────────────────────────────────────────────
+//
+// Viewport state for the renderer. pos is the world-space tile coordinate at
+// the centre of the screen; zoom scales TILE_SIZE pixels per tile.
+// Owned by main.cpp, passed to the renderer each frame via setCamera().
+
+struct Camera {
+    Vec2f pos    = {0.0f, 0.0f};   // current smoothed position (tile coords)
+    Vec2f target = {0.0f, 0.0f};   // lerp target
+    float zoom   = 1.0f;           // multiplier on TILE_SIZE
+};
+
 // ─── ID types ────────────────────────────────────────────────────────────────
 
 using EntityID    = uint32_t;

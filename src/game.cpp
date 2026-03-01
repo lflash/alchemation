@@ -66,6 +66,21 @@ int Game::playerMana() const {
     return p ? p->mana : 0;
 }
 
+TilePos Game::playerPos() const {
+    const Entity* p = registry_.get(playerID_);
+    return p ? p->pos : TilePos{0, 0};
+}
+
+TilePos Game::playerDestination() const {
+    const Entity* p = registry_.get(playerID_);
+    return p ? p->destination : TilePos{0, 0};
+}
+
+float Game::playerMoveT() const {
+    const Entity* p = registry_.get(playerID_);
+    return p ? p->moveT : 0.0f;
+}
+
 // ─── Scheduler ───────────────────────────────────────────────────────────────
 
 void Game::tickScheduler(Tick currentTick) {
@@ -129,6 +144,7 @@ void Game::tickPlayerInput(const Input& input) {
                            registry_, playerWorldPos_);
             activeGridID_ = GRID_WORLD;
         }
+        gridJustSwitched_ = true;
         // Re-fetch player pointer — it's still valid but grid context changed.
         player = registry_.get(playerID_);
     }

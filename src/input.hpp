@@ -3,7 +3,12 @@
 #include <SDL2/SDL.h>
 #include <unordered_set>
 
-enum class Key { W, A, S, D, E, F, C, R, Q, Escape, Shift, Tab };
+enum class Key {
+    W, A, S, D, E, F, C, R, Q, H,
+    Escape, Shift, Tab,
+    ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
+    Ctrl, Backspace
+};
 
 class Input {
 public:
@@ -18,9 +23,14 @@ public:
     bool pressed(Key k)  const;   // key went down this frame (not on repeat)
     bool released(Key k) const;   // key went up this frame
 
+    // Signed scroll accumulator for the current frame (positive = scroll up).
+    // Reset to zero in beginFrame(). Caller checks held(Key::Ctrl) separately.
+    int scroll() const { return scrollDelta_; }
+
 private:
     std::unordered_set<SDL_Keycode> current;
     std::unordered_set<SDL_Keycode> previous;
+    int scrollDelta_ = 0;
 
     static SDL_Keycode toSDL(Key k);
 };
