@@ -4,6 +4,39 @@
 #include "spatial.hpp"
 #include "entity.hpp"
 #include <algorithm>
+#include <initializer_list>
+#include <vector>
+
+// ─── walkPath helper ─────────────────────────────────────────────────────────
+//
+// Simulates entity movement through terrain using resolveZ only (no collision).
+// Returns each position after applying the corresponding move; the initial
+// position is element [0], after move[0] is element [1], etc.
+
+static TilePos step(Direction d) {
+    switch (d) {
+        case Direction::N: return {0,-1,0};
+        case Direction::S: return {0, 1,0};
+        case Direction::E: return {1, 0,0};
+        case Direction::W: return {-1,0,0};
+        default:           return {0, 0,0};
+    }
+}
+
+static std::vector<TilePos> walkPath(
+    const Terrain& terrain, TilePos start,
+    std::initializer_list<Direction> moves)
+{
+    std::vector<TilePos> path = {start};
+    TilePos pos = start;
+    for (Direction d : moves) {
+        TilePos tentative = pos + step(d);
+        auto result = resolveZ(pos, tentative, terrain);
+        if (result) pos = *result;
+        path.push_back(pos);
+    }
+    return path;
+}
 
 // ─── resolveZ ────────────────────────────────────────────────────────────────
 
@@ -36,20 +69,25 @@ TEST_CASE("resolveZ: descending slope at z-1 -> z-1") {
     CHECK(dest->z == 0);
 }
 
-TEST_CASE("resolveZ: perpendicular slope -> blocked (nullopt)") {
+TEST_CASE("resolveZ: perpendicular slope -> pass through at z unchanged") {
     Terrain t;
-    // SlopeN at destination: ascends North. Moving East is perpendicular -> blocked.
+    // SlopeN at destination: ascends North. Moving East is perpendicular ->
+    // entity enters the tile but does not ascend (z unchanged).
     t.setShape({1, 0, 0}, TileShape::SlopeN);
     auto dest = resolveZ({0, 0, 0}, {1, 0, 0}, t);  // moving E
-    CHECK(!dest.has_value());
+    REQUIRE(dest.has_value());
+    CHECK(dest->z == 0);
+    CHECK(dest->x == 1);
 }
 
-TEST_CASE("resolveZ: back face of slope -> blocked (nullopt)") {
+TEST_CASE("resolveZ: back face of slope -> pass through at z unchanged") {
     Terrain t;
-    // SlopeN ascends North. Moving South into it hits the back face -> blocked.
+    // SlopeN ascends North. Moving South into it from the high side ->
+    // entity enters the tile but does not descend (no ramp below at z-1).
     t.setShape({0, 0, 0}, TileShape::SlopeN);
     auto dest = resolveZ({0, -1, 0}, {0, 0, 0}, t);  // moving S
-    CHECK(!dest.has_value());
+    REQUIRE(dest.has_value());
+    CHECK(dest->z == 0);
 }
 
 TEST_CASE("resolveZ: diagonal move ignores slope (no z change, no block)") {
@@ -127,4 +165,90 @@ TEST_CASE("entities at same (x,y,z) still collide") {
 
     auto allowed = resolveMoves(intentions, spatial, registry);
     CHECK(!allowed.count(mover));  // blocked — same z level
+}
+
+// ─── walkPath scenarios ───────────────────────────────────────────────────────
+
+TEST_CASE("walk: ascend SlopeN heading north") {
+    // Layout: flat ground at y=2, SlopeN at y=1, elevated flat at y=0.
+    // Ascending the slope should jump from z=0 to z=1.
+    Terrain t;
+    t.setShape({0,1,0}, TileShape::SlopeN);
+    auto p = walkPath(t, {0,2,0}, {Direction::N, Direction::N});
+    // after 1st N: on slope tile, z=1
+    CHECK(p[1] == TilePos{0,1,1});
+    // after 2nd N: flat tile above slope, still z=1
+    CHECK(p[2] == TilePos{0,0,1});
+}
+
+TEST_CASE("walk: descend via SlopeN (approach from north at z=1)") {
+    // Entity on elevated tile walks south toward SlopeN, should descend to z=0.
+    Terrain t;
+    t.setShape({0,1,0}, TileShape::SlopeN);
+    // Start at elevated tile, walk south twice
+    auto p = walkPath(t, {0,0,1}, {Direction::S, Direction::S});
+    // after 1st S: SlopeN at (0,1), from z=1 heading S → a_zm1=SlopeN(=N), oppositeDir(N,S)=true → z=0
+    CHECK(p[1] == TilePos{0,1,0});
+    // after 2nd S: flat ground
+    CHECK(p[2] == TilePos{0,2,0});
+}
+
+TEST_CASE("walk: east through a row of SlopeN tiles stays at z=0") {
+    // Walking east along the foot of a north cliff — should pass through freely.
+    Terrain t;
+    t.setShape({0,1,0}, TileShape::SlopeN);
+    t.setShape({1,1,0}, TileShape::SlopeN);
+    t.setShape({2,1,0}, TileShape::SlopeN);
+    auto p = walkPath(t, {0,1,0}, {Direction::E, Direction::E});
+    CHECK(p[1] == TilePos{1,1,0});
+    CHECK(p[2] == TilePos{2,1,0});
+}
+
+TEST_CASE("walk: east along elevated plateau at z=1") {
+    // Once on top, walking east across flat elevated tiles should stay at z=1.
+    Terrain t;
+    t.setShape({0,1,0}, TileShape::SlopeN);  // ramp to get up
+    // Elevated tiles above are plain Flat at z=0 (their elevation is visual only)
+    auto p = walkPath(t, {0,0,1}, {Direction::E, Direction::E});
+    CHECK(p[1] == TilePos{1,0,1});
+    CHECK(p[2] == TilePos{2,0,1});
+}
+
+TEST_CASE("walk: corner slope SlopeNE passable from east") {
+    Terrain t;
+    t.setShape({0,0,0}, TileShape::SlopeNE);
+    auto p = walkPath(t, {1,0,0}, {Direction::W});
+    CHECK(p[1] == TilePos{0,0,0});  // entered at z=0, no block
+}
+
+TEST_CASE("walk: corner slope SlopeNE passable from south") {
+    Terrain t;
+    t.setShape({0,0,0}, TileShape::SlopeNE);
+    auto p = walkPath(t, {0,1,0}, {Direction::N});
+    CHECK(p[1] == TilePos{0,0,0});
+}
+
+TEST_CASE("walk: mixed cliff face east — cardinal then corner slope") {
+    // Simulates the inconsistency: a cliff base row with alternating slope types.
+    // Walking east through SlopeN then SlopeNE should both pass at z=0.
+    Terrain t;
+    t.setShape({0,1,0}, TileShape::SlopeN);   // cardinal — perpendicular block?
+    t.setShape({1,1,0}, TileShape::SlopeNE);  // corner   — always passable
+    t.setShape({2,1,0}, TileShape::SlopeN);   // cardinal again
+    auto p = walkPath(t, {0,1,0}, {Direction::E, Direction::E, Direction::E});
+    CHECK(p[1] == TilePos{1,1,0});
+    CHECK(p[2] == TilePos{2,1,0});
+    CHECK(p[3] == TilePos{3,1,0});
+}
+
+TEST_CASE("walk: full traverse — up slope, along top, down other side") {
+    // SlopeN at y=1 (ascend going N), SlopeS at y=-1 (descend going N).
+    Terrain t;
+    t.setShape({ 0, 1, 0}, TileShape::SlopeN);
+    t.setShape({ 0,-1, 0}, TileShape::SlopeS);
+    auto p = walkPath(t, {0,2,0}, {Direction::N, Direction::N, Direction::N, Direction::N});
+    CHECK(p[1] == TilePos{ 0, 1, 1});  // ascended
+    CHECK(p[2] == TilePos{ 0, 0, 1});  // plateau
+    CHECK(p[3] == TilePos{ 0,-1, 0});  // descended via SlopeS
+    CHECK(p[4] == TilePos{ 0,-2, 0});  // ground on far side
 }
