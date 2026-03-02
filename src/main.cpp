@@ -141,23 +141,14 @@ int main() {
             camera.zoom  = std::clamp(camera.zoom, ZOOM_MIN, ZOOM_MAX);
         }
 
-        // Visual z: cardinal slope tiles render at 0.5 (mid-ramp), not at their logical z.
-        auto visualZ = [&](TilePos pos) -> float {
-            TileShape s = game.terrain().shapeAt({pos.x, pos.y, 0});
-            if (s == TileShape::SlopeN || s == TileShape::SlopeS ||
-                s == TileShape::SlopeE || s == TileShape::SlopeW)
-                return 0.5f;
-            return static_cast<float>(pos.z);
-        };
-
         // Camera target = player's current render position + manual offset.
         Vec2f playerRenderPos = lerp(
             toVec(game.playerPos()),
             toVec(game.playerDestination()),
             game.playerMoveT()
         );
-        float playerRenderZ = lerp(visualZ(game.playerPos()),
-                                   visualZ(game.playerDestination()),
+        float playerRenderZ = lerp(static_cast<float>(game.playerPos().z),
+                                   static_cast<float>(game.playerDestination().z),
                                    game.playerMoveT());
         camera.target  = { playerRenderPos.x + camOffset.x,
                            playerRenderPos.y + camOffset.y };
@@ -179,7 +170,7 @@ int main() {
 
         for (const Entity* ent : game.drawOrder()) {
             Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
-            float renderZ   = lerp(visualZ(ent->pos), visualZ(ent->destination), ent->moveT);
+            float renderZ   = lerp(static_cast<float>(ent->pos.z), static_cast<float>(ent->destination.z), ent->moveT);
             renderer.drawShadow(renderPos, renderZ);
             renderer.drawSprite(renderPos, renderZ, ent->type);
             if (ent->type != EntityType::Mushroom)

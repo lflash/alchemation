@@ -45,18 +45,6 @@ void Game::subscribeEvents(Grid& grid) {
 
 // ─── Construction ─────────────────────────────────────────────────────────────
 
-// Returns z=1 if the tile at (x,y) is adjacent to a slope whose high edge
-// faces it (i.e. it sits atop a raised platform), otherwise z=0.
-static int terrainZ(const Terrain& t, int x, int y) {
-    auto s = [&](int nx, int ny) { return t.shapeAt({nx, ny, 0}); };
-    bool elev =
-        s(x, y+1) == TileShape::SlopeN  || s(x, y+1) == TileShape::SlopeNE || s(x, y+1) == TileShape::SlopeNW ||
-        s(x, y-1) == TileShape::SlopeS  || s(x, y-1) == TileShape::SlopeSE || s(x, y-1) == TileShape::SlopeSW ||
-        s(x-1, y) == TileShape::SlopeE  || s(x-1, y) == TileShape::SlopeNE || s(x-1, y) == TileShape::SlopeSE ||
-        s(x+1, y) == TileShape::SlopeW  || s(x+1, y) == TileShape::SlopeNW || s(x+1, y) == TileShape::SlopeSW;
-    return elev ? 1 : 0;
-}
-
 Game::Game() {
     grids_.try_emplace(GRID_WORLD,  GRID_WORLD);
     grids_.try_emplace(GRID_STUDIO, GRID_STUDIO);
@@ -64,16 +52,10 @@ Game::Game() {
     subscribeEvents(grids_.at(GRID_WORLD));
     subscribeEvents(grids_.at(GRID_STUDIO));
 
-    // Seed slopes from Perlin height. Safe radius keeps the origin flat so the
-    // player always spawns at z=0. Goblin spawn z is derived after generation.
-    Terrain& wt = grids_.at(GRID_WORLD).terrain;
-    wt.generateSlopes(64);
-
     playerID_ = registry_.spawn(EntityType::Player, {0, 0, 0});
     activeGrid().add(playerID_, *registry_.get(playerID_));
 
-    int       gz       = terrainZ(wt, 5, 5);
-    EntityID  goblinID = registry_.spawn(EntityType::Goblin, {5, 5, gz});
+    EntityID goblinID = registry_.spawn(EntityType::Goblin, {5, 5, 0});
     activeGrid().add(goblinID, *registry_.get(goblinID));
 }
 
@@ -267,11 +249,6 @@ void Game::tickPlayerInput(const Input& input) {
             newDest.y = std::clamp(newDest.y, 0, grid.height - 1);
         }
 
-        // Resolve z via slope rules; nullopt means slope blocks this move.
-        auto slopeDest = resolveZ(player->pos, newDest, grid.terrain);
-        if (slopeDest) {
-            newDest = *slopeDest;
-
         std::vector<MoveIntention> intentions = {{
             playerID_, player->pos, newDest, player->type, player->size
         }};
@@ -324,7 +301,6 @@ void Game::tickPlayerInput(const Input& input) {
                 break;
             }
         }
-        } // if (slopeDest)
     }
 
     // Terrain interaction
@@ -344,20 +320,6 @@ void Game::tickPlayerInput(const Input& input) {
         }
     }
 
-    // Z: cycle slope shape on tile ahead
-    if (input.pressed(Key::Z)) {
-        TilePos ahead2 = player->pos + dirToDelta(player->facing);
-        TileShape cur  = grid.terrain.shapeAt(ahead2);
-        TileShape next = TileShape::Flat;
-        switch (cur) {
-            case TileShape::Flat:   next = TileShape::SlopeN; break;
-            case TileShape::SlopeN: next = TileShape::SlopeE; break;
-            case TileShape::SlopeE: next = TileShape::SlopeS; break;
-            case TileShape::SlopeS: next = TileShape::SlopeW; break;
-            case TileShape::SlopeW: next = TileShape::Flat;   break;
-        }
-        grid.terrain.setShape(ahead2, next);
-    }
 
     // O: create portal + linked room ahead of player
     if (input.pressed(Key::O) && player) {
@@ -404,9 +366,6 @@ void Game::tickGoblinWander(Grid& grid) {
             newDest.x = std::clamp(newDest.x, 0, grid.width  - 1);
             newDest.y = std::clamp(newDest.y, 0, grid.height - 1);
         }
-        auto slopeDest = resolveZ(ent->pos, newDest, grid.terrain);
-        if (!slopeDest) continue;
-        newDest = *slopeDest;
         std::vector<MoveIntention> intentions = {{
             eid, ent->pos, newDest, ent->type, ent->size
         }};
@@ -436,9 +395,6 @@ void Game::tickVM(Grid& grid) {
             toRemove.push_back(id);
         } else if (res.wantMove) {
             TilePos newDest  = ent->pos + res.moveDelta;
-            auto slopeDest   = resolveZ(ent->pos, newDest, grid.terrain);
-            if (slopeDest) {
-                newDest = *slopeDest;
                 std::vector<MoveIntention> intentions = {{
                     id, ent->pos, newDest, ent->type, ent->size
                 }};
@@ -448,7 +404,6 @@ void Game::tickVM(Grid& grid) {
                     ent->facing      = toDirection(res.moveDelta);
                     audioEvents_.push_back(AudioEvent::AgentStep);
                 }
-            }
         }
     }
 
@@ -537,15 +492,6 @@ namespace {
             wr<uint8_t>(f, static_cast<uint8_t>(type));
         }
 
-        // Shape overrides
-        const auto& shp = grid.terrain.shapes();
-        wr<uint32_t>(f, static_cast<uint32_t>(shp.size()));
-        for (const auto& [pos, shape] : shp) {
-            wr<int32_t>(f, pos.x);
-            wr<int32_t>(f, pos.y);
-            wr<int32_t>(f, pos.z);
-            wr<uint8_t>(f, static_cast<uint8_t>(shape));
-        }
 
         // Entities (skip player and Poop)
         std::vector<EntityID> toSave;
@@ -573,7 +519,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 4);   // version 4
+    wr<uint8_t>(f, 5);   // version 5
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -622,7 +568,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 4) return false;
+    if (version != 5) return false;
 
     // Clear all state
     for (auto& [id, grid] : grids_) {
@@ -688,13 +634,6 @@ bool Game::load(const std::string& path) {
             grid.terrain.setType(pos, type);
         }
 
-        // Shape overrides
-        uint32_t shpCount = rd<uint32_t>(f);
-        for (uint32_t i = 0; i < shpCount; ++i) {
-            TilePos   pos   = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
-            TileShape shape = static_cast<TileShape>(rd<uint8_t>(f));
-            grid.terrain.setShape(pos, shape);
-        }
 
         // Entities
         uint32_t entCount = rd<uint32_t>(f);

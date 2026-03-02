@@ -58,15 +58,6 @@ enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
 enum class TileType  { Grass, BareEarth, Portal };
 
-// Geometric shape of a tile — determines vertical traversal.
-// Cardinal slopes: the named direction is the ascent direction.
-// Corner slopes: the named corner is elevated (z+1); other 3 corners at z.
-// Corner slopes are traversed as flat (no z change) but fill visual gaps.
-enum class TileShape {
-    Flat,
-    SlopeN, SlopeS, SlopeE, SlopeW,          // cardinal ramps
-    SlopeNE, SlopeNW, SlopeSE, SlopeSW        // corner ramps
-};
 
 // ─── Math helpers ────────────────────────────────────────────────────────────
 

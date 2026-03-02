@@ -110,67 +110,6 @@ void Renderer::drawTerrain(const Terrain& terrain) {
 
     bool bounded = (gridW_ > 0 && gridH_ > 0);
 
-    // Helper: pixel corners for tile (x, y) at given z levels per corner.
-    // Corners: NW(x,y,zN), NE(x+1,y,zN), SE(x+1,y+1,zS), SW(x,y+1,zS)
-    auto drawQuad = [&](int x, int y, float zN, float zS, SDL_Color col) {
-        SDL_FPoint nw = { (float)toPixelX(x),   (float)toPixelY(y,   zN) };
-        SDL_FPoint ne = { (float)toPixelX(x+1),  (float)toPixelY(y,   zN) };
-        SDL_FPoint se = { (float)toPixelX(x+1),  (float)toPixelY(y+1, zS) };
-        SDL_FPoint sw = { (float)toPixelX(x),    (float)toPixelY(y+1, zS) };
-        SDL_Color  c  = col;
-        SDL_Vertex verts[4] = {
-            { nw, c, {0,0} }, { ne, c, {0,0} },
-            { se, c, {0,0} }, { sw, c, {0,0} },
-        };
-        int idx[6] = { 0,1,2, 0,2,3 };
-        SDL_RenderGeometry(sdl, nullptr, verts, 4, idx, 6);
-    };
-
-    // Corner slopes: each corner z specified individually.
-    auto drawCorner = [&](int x, int y, float zNW, float zNE, float zSE, float zSW, SDL_Color col) {
-        SDL_FPoint nw = { (float)toPixelX(x),   (float)toPixelY(y,   zNW) };
-        SDL_FPoint ne = { (float)toPixelX(x+1),  (float)toPixelY(y,   zNE) };
-        SDL_FPoint se = { (float)toPixelX(x+1),  (float)toPixelY(y+1, zSE) };
-        SDL_FPoint sw = { (float)toPixelX(x),    (float)toPixelY(y+1, zSW) };
-        SDL_Color  c  = col;
-        SDL_Vertex verts[4] = {
-            { nw, c, {0,0} }, { ne, c, {0,0} },
-            { se, c, {0,0} }, { sw, c, {0,0} },
-        };
-        int idx[6] = { 0,1,2, 0,2,3 };
-        SDL_RenderGeometry(sdl, nullptr, verts, 4, idx, 6);
-    };
-
-    // Same but E/W slopes: NW(x,y,zW), NE(x+1,y,zE), SE(x+1,y+1,zE), SW(x,y+1,zW)
-    auto drawQuadEW = [&](int x, int y, float zW, float zE, SDL_Color col) {
-        SDL_FPoint nw = { (float)toPixelX(x),   (float)toPixelY(y,   zW) };
-        SDL_FPoint ne = { (float)toPixelX(x+1),  (float)toPixelY(y,   zE) };
-        SDL_FPoint se = { (float)toPixelX(x+1),  (float)toPixelY(y+1, zE) };
-        SDL_FPoint sw = { (float)toPixelX(x),    (float)toPixelY(y+1, zW) };
-        SDL_Color  c  = col;
-        SDL_Vertex verts[4] = {
-            { nw, c, {0,0} }, { ne, c, {0,0} },
-            { se, c, {0,0} }, { sw, c, {0,0} },
-        };
-        int idx[6] = { 0,1,2, 0,2,3 };
-        SDL_RenderGeometry(sdl, nullptr, verts, 4, idx, 6);
-    };
-
-    // True if tile (x,y) is adjacent to a slope whose high edge faces it —
-    // i.e. the tile sits atop a raised platform.
-    auto isElev = [&](int x, int y) -> bool {
-        TileShape s;
-        s = terrain.shapeAt({x, y+1, 0});
-        if (s == TileShape::SlopeN || s == TileShape::SlopeNE || s == TileShape::SlopeNW) return true;
-        s = terrain.shapeAt({x, y-1, 0});
-        if (s == TileShape::SlopeS || s == TileShape::SlopeSE || s == TileShape::SlopeSW) return true;
-        s = terrain.shapeAt({x-1, y, 0});
-        if (s == TileShape::SlopeE || s == TileShape::SlopeNE || s == TileShape::SlopeSE) return true;
-        s = terrain.shapeAt({x+1, y, 0});
-        if (s == TileShape::SlopeW || s == TileShape::SlopeNW || s == TileShape::SlopeSW) return true;
-        return false;
-    };
-
     auto darken = [](SDL_Color c, float f) -> SDL_Color {
         return { static_cast<uint8_t>(c.r * f),
                  static_cast<uint8_t>(c.g * f),
@@ -185,25 +124,7 @@ void Renderer::drawTerrain(const Terrain& terrain) {
             bool thisVoid  = bounded && (x < 0 || x >= gridW_ || y   < 0 || y   >= gridH_);
             bool northVoid = bounded && (x < 0 || x >= gridW_ || y-1 < 0 || y-1 >= gridH_);
 
-            // ── Cliff face ────────────────────────────────────────────────────
-            // Draw the south face of the northern tile when it is elevated and
-            // the current tile is at ground level.  SlopeN at the current tile
-            // already handles the visual ramp, so skip that case.
-            if (!thisVoid && !northVoid
-                && isElev(x, y-1) && !isElev(x, y)
-                && terrain.shapeAt({x, y, 0}) != TileShape::SlopeN
-                && terrain.shapeAt({x, y, 0}) != TileShape::SlopeNE
-                && terrain.shapeAt({x, y, 0}) != TileShape::SlopeNW)
-            {
-                int cliffTop = toPixelY(y, 1.0f);
-                int cliffBot = toPixelY(y, 0.0f);
-                SDL_Color northCol = tileColor(
-                    terrain.heightAt({x, y-1}), {x, y-1}, terrain.typeAt({x, y-1}));
-                SDL_Color cliffCol = darken(northCol, 0.55f);
-                SDL_Rect  cr = { toPixelX(x), cliffTop, iW, cliffBot - cliffTop };
-                SDL_SetRenderDrawColor(sdl, cliffCol.r, cliffCol.g, cliffCol.b, 255);
-                SDL_RenderFillRect(sdl, &cr);
-            }
+
 
             // ── Void tile ─────────────────────────────────────────────────────
             if (thisVoid) {
@@ -215,43 +136,12 @@ void Renderer::drawTerrain(const Terrain& terrain) {
 
             float     h     = terrain.heightAt(p);
             TileType  ttype = terrain.typeAt(p);
-            TileShape shape = terrain.shapeAt(p);
             SDL_Color color = tileColor(h, p, ttype);
 
-            switch (shape) {
-                case TileShape::Flat: {
-                    SDL_Rect rect = { toPixelX(x), toPixelY(y, 0.0f), iW, iH };
-                    SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
-                    SDL_RenderFillRect(sdl, &rect);
-                    break;
-                }
-                case TileShape::SlopeN:
-                    drawQuad(x, y, 1.0f, 0.0f, color);   // N edge at z+1, S at z
-                    break;
-                case TileShape::SlopeS:
-                    drawQuad(x, y, 0.0f, 1.0f, color);   // N edge at z, S at z+1
-                    break;
-                case TileShape::SlopeE:
-                    drawQuadEW(x, y, 0.0f, 1.0f, color); // W edge at z, E at z+1
-                    break;
-                case TileShape::SlopeW:
-                    drawQuadEW(x, y, 1.0f, 0.0f, color); // W edge at z+1, E at z
-                    break;
-                // Corner slopes: one corner elevated, other three at ground.
-                case TileShape::SlopeNE: drawCorner(x,y, 0,1,0,0, color); break;
-                case TileShape::SlopeNW: drawCorner(x,y, 1,0,0,0, color); break;
-                case TileShape::SlopeSE: drawCorner(x,y, 0,0,1,0, color); break;
-                case TileShape::SlopeSW: drawCorner(x,y, 0,0,0,1, color); break;
-            }
+            SDL_Rect rect = { toPixelX(x), toPixelY(y, 0.0f), iW, iH };
+            SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
+            SDL_RenderFillRect(sdl, &rect);
 
-            // ── Elevated flat copy ────────────────────────────────────────────
-            // Flat tiles adjacent to a slope top are drawn again at z=1 so they
-            // appear raised above the ground plane.
-            if (isElev(x, y) && shape == TileShape::Flat) {
-                SDL_Rect elevRect = { toPixelX(x), toPixelY(y, 1.0f), iW, iH };
-                SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
-                SDL_RenderFillRect(sdl, &elevRect);
-            }
         }
     }
 }
@@ -586,7 +476,6 @@ void Renderer::drawControlsMenu() {
     row("Q",             "Cycle recording");
     row("E",             "Deploy agent");
     row("O",             "Create room portal");
-    row("Z",             "Cycle slope ahead");
     row("Tab",           "Toggle studio");
     sep();
     row("Arrows",        "Pan camera");
