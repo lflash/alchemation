@@ -21,13 +21,19 @@ Terrain::Terrain() : impl(std::make_unique<Impl>()) {
 Terrain::~Terrain() = default;
 
 float Terrain::heightAt(TilePos p) const {
-    auto it = impl->heightCache.find(p);
+    // Normalise z to 0: height is a 2D (x, y) property.
+    TilePos key = {p.x, p.y, 0};
+    auto it = impl->heightCache.find(key);
     if (it != impl->heightCache.end())
         return it->second;
 
     float h = impl->noise.GetNoise(static_cast<float>(p.x), static_cast<float>(p.y));
-    impl->heightCache[p] = h;
+    impl->heightCache[key] = h;
     return h;
+}
+
+int Terrain::levelAt(TilePos p) const {
+    return static_cast<int>(std::round(heightAt(p) * 4));
 }
 
 TileType Terrain::typeAt(TilePos p) const {

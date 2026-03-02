@@ -96,19 +96,28 @@ void Renderer::beginFrame() {
 void Renderer::drawTerrain(const Terrain& terrain) {
     float tsW = TILE_SIZE * camera_.zoom;
     float tsH = TILE_H    * camera_.zoom;
+    float tsZ = Z_STEP    * camera_.zoom;
     int   iW  = static_cast<int>(std::ceil(tsW));
     int   iH  = static_cast<int>(std::ceil(tsH));
 
-    // Compute visible tile range. Use TILE_H for vertical coverage;
-    // add a few rows of headroom for elevated slopes.
+    // Minimum face width for east/west cliff strips (at least 1px, scales with zoom).
+    int faceW = std::max(1, static_cast<int>(camera_.zoom));
+
+    // Compute visible tile range. Extra headroom at top for elevated terrain.
     float halfW = (VIEWPORT_W / 2.0f) / tsW;
     float halfH = (VIEWPORT_H / 2.0f) / tsH;
     int minX = static_cast<int>(std::floor(camera_.pos.x - halfW)) - 1;
     int maxX = static_cast<int>(std::ceil (camera_.pos.x + halfW)) + 1;
-    int minY = static_cast<int>(std::floor(camera_.pos.y - halfH)) - 4;  // headroom for z
+    int minY = static_cast<int>(std::floor(camera_.pos.y - halfH)) - 6;  // headroom for tall terrain
     int maxY = static_cast<int>(std::ceil (camera_.pos.y + halfH)) + 1;
 
     bool bounded = (gridW_ > 0 && gridH_ > 0);
+
+    // Bounded rooms are flat (entity z never changes there); return 0 for all tiles.
+    auto levelOf = [&](int tx, int ty) -> int {
+        if (bounded) return 0;
+        return terrain.levelAt({tx, ty, 0});
+    };
 
     auto darken = [](SDL_Color c, float f) -> SDL_Color {
         return { static_cast<uint8_t>(c.r * f),
@@ -121,10 +130,7 @@ void Renderer::drawTerrain(const Terrain& terrain) {
         for (int x = minX; x <= maxX; ++x) {
             TilePos p = {x, y};
 
-            bool thisVoid  = bounded && (x < 0 || x >= gridW_ || y   < 0 || y   >= gridH_);
-            bool northVoid = bounded && (x < 0 || x >= gridW_ || y-1 < 0 || y-1 >= gridH_);
-
-
+            bool thisVoid = bounded && (x < 0 || x >= gridW_ || y < 0 || y >= gridH_);
 
             // ── Void tile ─────────────────────────────────────────────────────
             if (thisVoid) {
@@ -134,14 +140,79 @@ void Renderer::drawTerrain(const Terrain& terrain) {
                 continue;
             }
 
+            int       level = levelOf(x, y);
             float     h     = terrain.heightAt(p);
             TileType  ttype = terrain.typeAt(p);
             SDL_Color color = tileColor(h, p, ttype);
+            SDL_Color south = darken(color, 0.55f);
+            SDL_Color side  = darken(color, 0.45f);
 
-            SDL_Rect rect = { toPixelX(x), toPixelY(y, 0.0f), iW, iH };
+            int sx = toPixelX(x);
+            int sy = toPixelY(y, static_cast<float>(level));
+
+            // ── South cliff face ──────────────────────────────────────────────
+            // Fills the gap between this tile's bottom and the tile to the south.
+            // Height = diff * Z_STEP (always positive when this tile is higher).
+            {
+                int levelS = levelOf(x, y + 1);
+                int diff   = level - levelS;
+                if (diff > 0) {
+                    int fh = static_cast<int>(std::round(diff * tsZ));
+                    SDL_Rect face = { sx, sy + iH, iW, fh };
+                    SDL_SetRenderDrawColor(sdl, south.r, south.g, south.b, south.a);
+                    SDL_RenderFillRect(sdl, &face);
+                }
+            }
+
+            // ── East cliff face ───────────────────────────────────────────────
+            // Visible only when height diff is large enough that the tiles don't
+            // overlap (diff * Z_STEP > TILE_H). Drawn as a thin strip at the
+            // right edge of the elevated tile.
+            {
+                int levelE = levelOf(x + 1, y);
+                int fh     = static_cast<int>(std::round((level - levelE) * tsZ - tsH));
+                if (fh > 0) {
+                    SDL_Rect face = { sx + iW, sy + iH, faceW, fh };
+                    SDL_SetRenderDrawColor(sdl, side.r, side.g, side.b, side.a);
+                    SDL_RenderFillRect(sdl, &face);
+                }
+            }
+
+            // ── West cliff face ───────────────────────────────────────────────
+            {
+                int levelW = levelOf(x - 1, y);
+                int fh     = static_cast<int>(std::round((level - levelW) * tsZ - tsH));
+                if (fh > 0) {
+                    SDL_Rect face = { sx - faceW, sy + iH, faceW, fh };
+                    SDL_SetRenderDrawColor(sdl, side.r, side.g, side.b, side.a);
+                    SDL_RenderFillRect(sdl, &face);
+                }
+            }
+
+            // ── Tile top ──────────────────────────────────────────────────────
+            SDL_Rect rect = { sx, sy, iW, iH };
             SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
             SDL_RenderFillRect(sdl, &rect);
 
+            // ── Cliff edge lines ──────────────────────────────────────────────
+            // Dark line drawn on the tile surface along any edge where the
+            // terrain drops away — gives the cliff a crisp defined rim.
+            int       lt   = std::max(1, static_cast<int>(camera_.zoom));
+            SDL_Color edge = darken(color, 0.4f);
+            SDL_SetRenderDrawColor(sdl, edge.r, edge.g, edge.b, edge.a);
+
+            if (levelOf(x, y - 1) < level) {  // north edge
+                SDL_Rect r = { sx,           sy, iW, lt };
+                SDL_RenderFillRect(sdl, &r);
+            }
+            if (levelOf(x + 1, y) < level) {  // east edge
+                SDL_Rect r = { sx + iW - lt, sy, lt, iH };
+                SDL_RenderFillRect(sdl, &r);
+            }
+            if (levelOf(x - 1, y) < level) {  // west edge
+                SDL_Rect r = { sx,           sy, lt, iH };
+                SDL_RenderFillRect(sdl, &r);
+            }
         }
     }
 }

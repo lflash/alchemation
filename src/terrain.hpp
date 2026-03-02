@@ -10,7 +10,13 @@ public:
     ~Terrain();
 
     // Returns Perlin height in [-1, 1] for the given tile. Cached.
+    // Only the (x, y) components are used; z is ignored.
     float    heightAt(TilePos p) const;
+
+    // Returns integer height level for the given tile: round(heightAt * 4).
+    // Used for movement blocking: moves with |levelAt(dest) - levelAt(src)| > 1
+    // are blocked. Rendering uses the raw float instead.
+    int      levelAt(TilePos p) const;
 
     // Returns terrain type. Checks manual overrides first, defaults to Grass.
     TileType typeAt(TilePos p) const;

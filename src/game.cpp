@@ -52,11 +52,17 @@ Game::Game() {
     subscribeEvents(grids_.at(GRID_WORLD));
     subscribeEvents(grids_.at(GRID_STUDIO));
 
-    playerID_ = registry_.spawn(EntityType::Player, {0, 0, 0});
-    activeGrid().add(playerID_, *registry_.get(playerID_));
+    Grid& world = grids_.at(GRID_WORLD);
 
-    EntityID goblinID = registry_.spawn(EntityType::Goblin, {5, 5, 0});
-    activeGrid().add(goblinID, *registry_.get(goblinID));
+    TilePos playerStart = {0, 0, 0};
+    playerStart.z = world.terrain.levelAt(playerStart);
+    playerID_ = registry_.spawn(EntityType::Player, playerStart);
+    world.add(playerID_, *registry_.get(playerID_));
+
+    TilePos goblinStart = {5, 5, 0};
+    goblinStart.z = world.terrain.levelAt(goblinStart);
+    EntityID goblinID = registry_.spawn(EntityType::Goblin, goblinStart);
+    world.add(goblinID, *registry_.get(goblinID));
 }
 
 // ─── Top-level tick ──────────────────────────────────────────────────────────
@@ -243,11 +249,19 @@ void Game::tickPlayerInput(const Input& input) {
         if (!input.held(Key::Shift))
             player->facing = toDirection(delta);
 
+        // Resolve destination height. Bounded rooms are flat (z unchanged).
+        if (!grid.isBounded())
+            newDest.z = grid.terrain.levelAt(newDest);
+
         // Clamp to grid bounds if bounded (XY only — z free)
         if (grid.isBounded()) {
             newDest.x = std::clamp(newDest.x, 0, grid.width  - 1);
             newDest.y = std::clamp(newDest.y, 0, grid.height - 1);
         }
+
+        // Only attempt the move if terrain height difference is at most 1 level.
+        // (For bounded rooms delta.z == 0, so this check always passes there.)
+        if (std::abs(newDest.z - player->pos.z) <= 1) {
 
         std::vector<MoveIntention> intentions = {{
             playerID_, player->pos, newDest, player->type, player->size
@@ -301,6 +315,8 @@ void Game::tickPlayerInput(const Input& input) {
                 break;
             }
         }
+        } // height check
+
     }
 
     // Terrain interaction
@@ -366,6 +382,13 @@ void Game::tickGoblinWander(Grid& grid) {
             newDest.x = std::clamp(newDest.x, 0, grid.width  - 1);
             newDest.y = std::clamp(newDest.y, 0, grid.height - 1);
         }
+
+        // Resolve destination height and skip if too steep.
+        if (!grid.isBounded()) {
+            newDest.z = grid.terrain.levelAt(newDest);
+            if (std::abs(newDest.z - ent->pos.z) > 1) continue;
+        }
+
         std::vector<MoveIntention> intentions = {{
             eid, ent->pos, newDest, ent->type, ent->size
         }};
@@ -394,7 +417,13 @@ void Game::tickVM(Grid& grid) {
             registry_.destroy(id);
             toRemove.push_back(id);
         } else if (res.wantMove) {
-            TilePos newDest  = ent->pos + res.moveDelta;
+            TilePos newDest = ent->pos + res.moveDelta;
+
+            // Resolve destination height and skip if too steep.
+            if (!grid.isBounded())
+                newDest.z = grid.terrain.levelAt(newDest);
+
+            if (std::abs(newDest.z - ent->pos.z) <= 1) {
                 std::vector<MoveIntention> intentions = {{
                     id, ent->pos, newDest, ent->type, ent->size
                 }};
@@ -404,6 +433,7 @@ void Game::tickVM(Grid& grid) {
                     ent->facing      = toDirection(res.moveDelta);
                     audioEvents_.push_back(AudioEvent::AgentStep);
                 }
+            }
         }
     }
 
@@ -519,7 +549,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 5);   // version 5
+    wr<uint8_t>(f, 6);   // version 6
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -568,7 +598,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 5) return false;
+    if (version != 6) return false;
 
     // Clear all state
     for (auto& [id, grid] : grids_) {

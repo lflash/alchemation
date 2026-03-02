@@ -43,19 +43,24 @@ Dependencies: `libsdl2-dev`, `libsdl2-image-dev`, `cmake`
 These are the directions the design is heading. They are based on decisions made so
 far in conversation, but the user may revise any of them.
 
-- **Two coordinate types**: `TilePos {int x,y}` for game logic; `Vec2f {float x,y}`
-  for rendering interpolation only.
+- **Two coordinate types**: `TilePos {int x,y,z}` for game logic; `Vec2f {float x,y}`
+  for rendering interpolation only. `z` is an integer height level.
 - **Fixed 50 Hz timestep**; rendering runs uncapped and interpolates with `alpha`.
-- **Spatial grid + AABB**: broad phase via tile-resolution hash map, narrow phase via
-  AABB intersection. Sprites are smaller than tiles so tile-boundary collision is wrong.
+- **Spatial grid + AABB**: broad phase via tile-resolution hash map (keyed by full
+  `TilePos` including z), narrow phase via AABB intersection.
 - **Dual registration**: entities in motion register in both `pos` and `destination`
-  cells simultaneously. This is still being thought through.
+  cells simultaneously.
+- **Height-based movement blocking**: `terrain.levelAt(dest) = round(heightAt * 4)`.
+  A move is blocked if `|levelAt(dest) - levelAt(src)| > 1`. Bounded rooms are flat
+  (check does not apply).
 - **Collision resolution by `(mover, occupant)` type pair** — not a property of
   either entity alone.
 - **Single spatial grid per `Grid`** — not split by collision layer.
 - **Multiple `Grid` instances** are independent simulation spaces (main world, studio,
   interiors, parallel universes). Not collision layers.
-- **Recordings are `Instruction` streams** (`MOVE_REL`, `WAIT`, `DIG`, `PLANT`, etc.) executed by the Routine VM. A deployed Poop is a routine agent — an autonomous robot — not a projectile. All agent types share the same VM.
+- **Recordings are `Instruction` streams** (`MOVE_REL`, `WAIT`, `HALT`) executed by
+  the Routine VM. A deployed Poop is a routine agent — an autonomous robot — not a
+  projectile. All agent types share the same VM.
 - **Terrain type and stimuli** are fields on `TileGrid` tiles, not entities.
 - **Scheduler is a min-heap** ordered by tick.
 
@@ -78,7 +83,8 @@ feels wrong.
 | Action scheduler | `Scheduler` |
 | Input handler | `Input` |
 | Tile grid / world | `TileGrid` |
-| Per-tile field data | `TileFields` |
+| Terrain height (float, render) | `heightAt()` |
+| Terrain height (int, movement) | `levelAt()` |
 | Renderer interface | `IRenderer` |
 | Routine VM interpreter | `RoutineVM` |
 | Per-agent VM state | `AgentExecState` |
@@ -110,7 +116,7 @@ feels wrong.
 ```
 src/
   main.cpp
-  types.hpp                    ← TilePos, Vec2f, Bounds, TileFields, enums, lerp, toVec, TilePosHash, constants
+  types.hpp                    ← TilePos, Vec2f, Bounds, Camera, enums, lerp, toVec, TilePosHash, constants
   game.hpp / .cpp              ← Game, game loop, top-level tick
   tilegrid.hpp / .cpp          ← TileGrid (terrain type, height, stimulus fields)
   entity.hpp / .cpp            ← Entity, EntityRegistry          [Phase 2 — done]

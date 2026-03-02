@@ -71,7 +71,7 @@ without a true 3D engine.
 
 ```cpp
 struct TilePos { int x, y, z; };        // integer grid coordinate — game logic only
-                                         // z = vertical level (0 = ground)
+                                         // z = integer height level; 0 ≈ sea level
 struct Vec2f   { float x, y; };         // float render position — rendering only
 struct Bounds  { Vec2f min, max; };     // AABB hitbox in world space (XY only)
 struct Camera  { Vec2f pos; Vec2f target; float zoom; };  // smooth camera state
@@ -87,13 +87,6 @@ enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
 
 enum class TileType  { Grass, BareEarth, Portal };
-
-// Geometric shape of a tile — determines how entities traverse it vertically.
-// Cardinal slopes: SlopeN means walking North ascends by one z-level.
-// Corner slopes: SlopeNE has the NE corner raised; passable from all directions.
-enum class TileShape { Flat,
-                       SlopeN, SlopeS, SlopeE, SlopeW,
-                       SlopeNE, SlopeNW, SlopeSE, SlopeSW };
 
 enum class SFX {
     Step, Dig, Plant, CollectMushroom,
@@ -157,16 +150,11 @@ struct AgentExecState {
 
 constexpr int TILE_ENTITY_CAP = 8;
 
-struct TileFields {
-    TileType  type;
-    TileShape shape;     // geometric shape (flat or slope direction)
-    float     height;    // Perlin height, render shading only
-    float     fire;
-    float     cold;
-    float     water;
-    float     forceX;
-    float     forceY;
-};
+// Future: per-tile stimulus fields for agent reactions (not yet in code).
+// struct TileFields {
+//     TileType  type;
+//     float     fire, cold, water, forceX, forceY;
+// };
 ```
 
 ---
@@ -352,18 +340,16 @@ creation/load.
 ```cpp
 class Terrain {
     FastNoiseLite noise;
-    unordered_map<TilePos, float>    heightCache;   // Perlin, lazy-computed
+    unordered_map<TilePos, float>    heightCache;   // Perlin, lazy-computed (keyed at z=0)
     unordered_map<TilePos, TileType> typeOverrides;  // sparse; default = Grass
-    // (TileShape stored separately when verticality is added)
 };
 ```
 
-`heightAt(TilePos)` returns Perlin float in `[-1, 1]`, cached per tile.
-`typeAt(TilePos)` checks overrides, defaults to `Grass`.
+`heightAt(TilePos)` returns Perlin float in `[-1, 1]`, cached per (x, y) tile. Used by the renderer for visual shading only.
 
-With verticality, `TilePos` includes `z` and the Terrain becomes a sparse 3D
-volume: a tile only exists at `(x, y, z)` if explicitly placed. Most positions
-in a column are air.
+`levelAt(TilePos)` returns `round(heightAt * 4)` as an integer. This is the authoritative height for movement: a move is blocked if `|levelAt(dest) - levelAt(src)| > 1`. Bounded rooms have flat floors (no Perlin noise driving their height), so the check never fires there.
+
+`typeAt(TilePos)` checks overrides, defaults to `Grass`.
 
 ---
 
@@ -422,18 +408,17 @@ Abstracted behind `IRenderer`. Two implementations:
 screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_SIZE * zoom
 screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H * zoom - (tile_z - cam.z) * Z_STEP * zoom
 ```
-`TILE_SIZE=32`, `TILE_H=20`, `Z_STEP=12` (unzoomed). Draw order: sort by `world_y`
-ascending (back-to-front), then by `world_z` ascending within the same row.
-Elevated tiles show a south-facing cliff strip when the tile to their south is at
-a lower z.
+`TILE_SIZE=32`, `TILE_H=20`, `Z_STEP=12` (unzoomed). Terrain tiles are drawn at z=0.
+Entity render z interpolates `pos.z → destination.z` via `moveT`. Draw order: sort by
+`world_y` ascending (back-to-front), then by `world_z` ascending within the same row.
 
 **Bounded grid void:** tiles outside `[0,w)×[0,h)` render as dark void `(18,18,18)`.
 
 **Terrain colour:**
-- Grass: flat checkerboard `(0,134,0)` / `(0,120,0)` — no Perlin noise, for clear z-level visibility
+- Grass: flat checkerboard `(0,134,0)` / `(0,120,0)` — no Perlin shading, for clear tile visibility
 - BareEarth: flat brown `(139, 90, 43)`
 - Portal: purple `(160, 60, 220)`
-- Studio mode: muted blue-grey palette, height-varied
+- Studio mode: muted blue-grey palette, height-varied (uses raw Perlin float)
 
 **Facing indicator:** small filled triangle (SDL_RenderGeometry) at the edge of
 each non-Mushroom entity's tile, pointing in `facing` direction.
@@ -482,12 +467,12 @@ dropped in as a replacement (OGG with SDL2_mixer OGG support).
 
 ### Persistence
 
-Binary save format (version 4). Auto-loaded on startup, auto-saved on quit (Esc).
+Binary save format (version 6). Auto-loaded on startup, auto-saved on quit (Esc).
 
 **Format:**
 ```
 magic: "GRID" (4 bytes)
-version: uint32 = 2
+version: uint8 = 6
 activeGridID: uint32
 nextGridID: uint32
 
@@ -513,58 +498,32 @@ Version mismatch → load fails silently (no save file = fresh world).
 
 ---
 
-### Verticality (Phase 9 — implemented)
+### Height-based movement (Phase 9 — implemented)
 
-The world is a **sparse 3D volume**. Each `(x, y)` column can have surfaces at
-multiple z-levels simultaneously — e.g. a bridge at z=2 over a chasm floor at z=0,
-with air at z=1.
+`TilePos` carries an integer `z` coordinate representing the entity's height level.
+Terrain height is computed from Perlin noise and quantised: `levelAt(x, y) = round(heightAt * 4)`,
+giving levels roughly in the range `[-4, 4]`.
 
-**Data model:**
-- `TilePos { int x, y, z }` — z=0 is ground level
-- `TileShape` — `Flat`, four cardinal slopes, four corner slopes (see enum above)
-  - `SlopeN`: walking North ascends by one z-level (z+1); descend by walking South
-  - Corner slopes (`SlopeNE` etc.): one corner raised; passable from all directions
-- `Terrain::shapeAt(TilePos)` — sparse override map; default Flat
-- `Terrain::generateSlopes(radius, safeRadius)` — auto-generates slopes from Perlin
-  height: cardinal ramp where exactly one cardinal neighbour is high; corner ramp
-  where two perpendicular neighbours are high. Safe zone around origin stays flat.
-- `Entity::pos` and `Entity::destination` include z
-- `SpatialGrid` keys on `TilePos {x, y, z}`
+**Movement rule:** a move from `src` to `dest` is blocked if
+`|terrain.levelAt(dest) - terrain.levelAt(src)| > 1`. Steps of ±1 level are free.
+Bounded rooms (studio, interiors) are always flat — the height check does not apply there.
 
-**Movement with slopes — `resolveZ(from, to, terrain)`:**
+Entities track their current z in `pos.z` and their destination z in `destination.z`.
+On spawn (or first load), `pos.z` is set from `terrain.levelAt(pos)`. On each
+permitted step, `destination.z` is set to `terrain.levelAt(destination)` before
+`resolveMoves` is called, so the entity's z is always consistent with the terrain.
 
-Only cardinal moves interact with slopes. Given movement direction D:
+`SpatialGrid` keys on `TilePos {x, y, z}`, so entities on different z levels at the
+same (x, y) tile do not collide.
 
-1. **Ascend**: cardinal slope at `(to.x, to.y, from.z)` whose ascent == D → `z+1`
-2. **Descend via dest**: cardinal slope at `(to.x, to.y, from.z-1)` opposing D → `z-1`
-3. **Descend off source**: cardinal slope at `(from.x, from.y, from.z-1)` opposing D → `z-1`
-4. **All other cases** (perpendicular, back-face, flat, corner slope) → pass through at z unchanged
+**Rendering:** entity render height interpolates `pos.z → destination.z` via `moveT`,
+producing smooth visual vertical movement. `Camera.z` / `Camera.targetZ` track the
+player's interpolated z with the same exponential lerp used for XY, and snap
+instantly on grid switch.
 
-There is no jump or free vertical movement; only slopes connect z-levels.
-
-**Visual z:** entity render height uses visual z, not logical z. Cardinal slope
-occupants render at z=0.5 (mid-ramp) regardless of their logical z, for smooth
-visual transitions. Lerped between source and destination visual z each frame.
-
-**Rendering: oblique/dimetric projection**
-
-```
-screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_SIZE * zoom
-screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H * zoom - (tile_z - cam.z) * Z_STEP * zoom
-```
-
-- `TILE_SIZE` = 32px, `TILE_H` = 20px (squished), `Z_STEP` = 12px (all unzoomed)
-
-Draw order (back-to-front): sort by `world_y` ascending, then `world_z` ascending.
-
-**Cliff faces:** when a tile south of an elevated tile is at z=0, draw a vertical
-strip (55% darkened) between them on the south face — gives the Pokémon Gen 4 look.
-
-**Sprite/shadow anchor:** sprite bottom sits at tile centre; shadow ellipse is
-centred at tile centre. Facing indicator centred on sprite body.
-
-**Camera z:** `Camera` gains `float z`. Tracks player visual z — exponential lerp
-each frame, snaps instantly on grid switch.
+Terrain tiles are drawn at z=0 (flat projection). Entity screen position includes a
+z offset via the oblique formula; higher-z entities appear higher on screen. No cliff
+face strips are currently rendered.
 
 ---
 

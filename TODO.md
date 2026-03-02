@@ -128,7 +128,7 @@ Tests are written alongside the system they cover.
 - [x] Camera snaps instantly on grid switch (no lerp artefact)
 
 ### Persistent State ✓
-- [x] Binary save format v2: all grids, portals, terrain overrides, entities, recordings
+- [x] Binary save format v6: all grids, portals, terrain overrides, entities (with z), recordings
 - [x] Auto-save on quit (Esc); auto-load on startup
 - [x] Version check: mismatch → fresh world
 
@@ -150,65 +150,39 @@ Tests are written alongside the system they cover.
 
 ---
 
-## Phase 9 — Verticality ✓
+## Phase 9 — Height-based movement ✓
 
-Add z-coordinate to tiles and entities. Slope tiles are the only way to transition
-between z-levels. Rendering switches to oblique/dimetric projection.
+Add integer z-coordinate to `TilePos` and entities. Terrain height is quantised from
+Perlin noise (`levelAt = round(heightAt * 4)`). Movement is blocked if the height
+difference between source and destination exceeds 1 level. Rendering uses oblique
+projection so entities at higher z appear higher on screen.
 
 ### Core data changes ✓
 - [x] `TilePos` gains `int z`: `struct TilePos { int x, y, z; };`
 - [x] `TilePosHash` updated for 3D key
-- [x] `Entity::pos` and `Entity::destination` include z
-- [x] `TileShape` enum: `Flat | SlopeN | SlopeS | SlopeE | SlopeW | SlopeNE | SlopeNW | SlopeSE | SlopeSW`
-- [x] `Terrain` stores shape per tile; `shapeAt(TilePos)` accessor
-- [x] `SpatialGrid` keyed on 3D `TilePos`
-- [x] Save format v4: includes z in all TilePos fields + shape overrides
+- [x] `Entity::pos` and `Entity::destination` include z; set from `levelAt` on spawn
+- [x] `Terrain::levelAt(TilePos)` — `round(heightAt * 4)`, integer height for movement
+- [x] `SpatialGrid` keyed on 3D `TilePos`; entities at different z don't collide
+- [x] Save format v6: includes z in all TilePos fields
 
 ### Movement ✓
-- [x] `resolveZ(from, to, terrain)` determines destination z from slope rules:
-  - Cardinal slope at dest z matching movement dir → arrive at z+1
-  - Cardinal slope at dest z-1 opposing movement dir → arrive at z-1
-  - Cardinal slope at from z-1 opposing movement dir → descend off source slope
-  - All other cases (perpendicular, back-face, flat) → pass through at z unchanged
-- [x] Goblin wander respects slope rules
-- [x] Agent VM moves respect slope rules
-- [x] Bounds clamping in bounded rooms is XY-only (z free within room)
-
-### Terrain tools ✓
-- [x] `Terrain::generateSlopes(radius, safeRadius)` — auto-generates cardinal and corner
-      slope tiles from Perlin height threshold (called on world terrain at startup)
-- [ ] Place slope tile with directional key combo (design TBD)
-- [ ] Dig works per z-level (only affects tile at entity's z)
+- [x] Before each move, `destination.z = terrain.levelAt(destination)` (world grids only)
+- [x] Move blocked if `|destination.z - entity.pos.z| > 1`
+- [x] Applies to player, goblin wander, and routine VM moves
+- [x] Bounded rooms exempt (flat floor, z unchanged by movement)
 
 ### Rendering ✓
 - [x] `toPixelY` uses oblique formula: `baseY + (tile_y - cam.y)*TILE_H - (tile_z - cam.z)*Z_STEP`
 - [x] `TILE_H = 20`, `TILE_W = 32`, `Z_STEP = 12` (all unzoomed)
 - [x] Draw order: sort by `world_y` ascending, then `world_z` ascending within same y
-- [x] Cliff faces: south-side wall strip (55% darkened) at elevated→ground boundary
-- [x] Cardinal slope tiles rendered as a sloped quad (one high corner, painter's algorithm)
-- [x] Corner slope tiles (SlopeNE/NW/SE/SW) rendered with one raised corner
-- [x] Elevated flat tiles drawn at z=1 via `isElev()` adjacency check
-- [x] Camera gains `float z` component; tracks player visual z with lerp/snap logic
-- [x] Visual z: cardinal slope occupants render at z=0.5 (mid-ramp), not their logical z
-- [x] Entity shadow: semi-transparent grey ellipse centred at tile centre
-- [x] Sprite anchor: bottom of sprite at tile centre; facing arrow centred on sprite body
-- [x] Grass colour: flat checkerboard (no Perlin noise) for clearer z-level visibility
+- [x] Entity render z interpolates `pos.z → destination.z` via `moveT`
+- [x] Camera gains `float z` / `targetZ`; tracks player render z with lerp/snap logic
+- [x] Entity shadow and sprite anchored at tile centre; facing indicator centred on body
 
-### Known issues
-- [ ] **Side-on slope visual glitch**: `visualZ` returns 0.5 for any entity on a
-  cardinal slope tile, regardless of whether they ascended or just passed through
-  perpendicularly at z=0. An entity walking east along the foot of a north cliff
-  will visually float to mid-height. Fix requires distinguishing "climbed" vs
-  "traversed" slope occupancy — the right approach is not yet decided.
-
-### Tests ✓ (173/173 passing)
+### Tests ✓ (150/150 passing)
 - [x] `TilePos` hash includes z — (1,2,3) and (1,2,4) are distinct keys
-- [x] Movement onto slope in ascent direction → z+1
-- [x] Movement onto slope in descent direction → z-1
-- [x] Step back off slope tile → descend to ground
-- [x] Movement perpendicular/back-face to slope → pass through at z unchanged
 - [x] Two entities at same (x,y) but different z do not collide
-- [x] `walkPath` helper + 9 multi-step scenario tests (ascend, descend, traverse, corner)
+- [x] Entity at same (x,y,z) still collides
 
 ---
 
@@ -236,4 +210,3 @@ between z-levels. Rendering switches to oblique/dimetric projection.
 - [ ] Structures — houses (exterior + matching room grid), ruins, caves
 - [ ] Rivers — flow simulation from high to low height; water stimulus pre-seeded
 - [ ] Roads — connect structures; faster movement on road tiles
-- [ ] Z-terrain generation — Perlin height drives initial z-levels; cliffs and valleys
