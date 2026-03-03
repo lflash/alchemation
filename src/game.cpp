@@ -65,6 +65,33 @@ Game::Game() {
     goblinStart.z = world.terrain.levelAt(goblinStart);
     EntityID goblinID = registry_.spawn(EntityType::Goblin, goblinStart);
     world.add(goblinID, *registry_.get(goblinID));
+
+    // Helper: spawn a static entity at the correct terrain height.
+    auto spawnStatic = [&](EntityType type, int x, int y) {
+        TilePos p = {x, y, 0};
+        p.z = world.terrain.levelAt(p);
+        EntityID id = registry_.spawn(type, p);
+        world.add(id, *registry_.get(id));
+        return id;
+    };
+
+    // ── Fire demo ─────────────────────────────────────────────────────────────
+    // Campfire at {3,2} with a TreeStump and Log adjacent — they will ignite
+    // after ~5 seconds of continuous heat.
+    spawnStatic(EntityType::Campfire,  3,  2);
+    spawnStatic(EntityType::TreeStump, 4,  2);   // east of campfire
+    spawnStatic(EntityType::Log,       3,  3);   // south of campfire
+
+    // ── Voltage demo ──────────────────────────────────────────────────────────
+    // Battery at {-4,0} powers a puddle chain running east.
+    // Lightbulb at {-1,0} sits on the third puddle (2V) and will be lit.
+    // Second lightbulb at {3,0} is on plain grass — unlit.
+    spawnStatic(EntityType::Battery,   -4,  0);
+    world.terrain.setType({-3, 0}, TileType::Puddle);   // 4V
+    world.terrain.setType({-2, 0}, TileType::Puddle);   // 3V
+    world.terrain.setType({-1, 0}, TileType::Puddle);   // 2V
+    spawnStatic(EntityType::Lightbulb, -1,  0);   // on puddle → lit
+    spawnStatic(EntityType::Lightbulb,  3,  0);   // on grass  → unlit
 }
 
 // ─── Top-level tick ──────────────────────────────────────────────────────────
