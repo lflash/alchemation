@@ -125,7 +125,7 @@ TEST_CASE("drawSprite at tile (0,0) places char at buffer centre") {
     oss.str("");
     r.beginFrame();
     r.drawTerrain(terrain);
-    r.drawSprite({0.0f, 0.0f}, 0.0f, EntityType::Player);
+    r.drawSprite({0.0f, 0.0f}, 0.0f, EntityType::Player, INVALID_ENTITY, 0.0f);
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
@@ -140,7 +140,7 @@ TEST_CASE("drawSprite overwrites terrain char at same tile") {
     oss.str("");
     r.beginFrame();
     r.drawTerrain(terrain);
-    r.drawSprite({0.0f, 0.0f}, 0.0f, EntityType::Goblin);
+    r.drawSprite({0.0f, 0.0f}, 0.0f, EntityType::Goblin, INVALID_ENTITY, 0.0f);
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
@@ -155,7 +155,7 @@ TEST_CASE("drawSprite at non-origin tile maps to correct buffer position") {
     oss.str("");
     r.beginFrame();
     r.drawTerrain(terrain);
-    r.drawSprite({-5.0f, -3.0f}, 0.0f, EntityType::Mushroom);
+    r.drawSprite({-5.0f, -3.0f}, 0.0f, EntityType::Mushroom, INVALID_ENTITY, 0.0f);
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
@@ -172,7 +172,7 @@ TEST_CASE("drawSprite with interpolated position rounds to nearest tile") {
     r.beginFrame();
     r.drawTerrain(terrain);
     // 0.4 rounds to 0 → col 10, row 10
-    r.drawSprite({0.4f, 0.4f}, 0.0f, EntityType::Poop);
+    r.drawSprite({0.4f, 0.4f}, 0.0f, EntityType::Poop, INVALID_ENTITY, 0.0f);
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
@@ -187,7 +187,7 @@ TEST_CASE("out-of-bounds sprite is silently ignored") {
     oss.str("");
     r.beginFrame();
     r.drawTerrain(terrain);
-    r.drawSprite({100.0f, 100.0f}, 0.0f, EntityType::Player);
+    r.drawSprite({100.0f, 100.0f}, 0.0f, EntityType::Player, INVALID_ENTITY, 0.0f);
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
@@ -205,7 +205,7 @@ TEST_CASE("beginFrame clears sprite from previous frame") {
     oss.str("");
     r.beginFrame();
     r.drawTerrain(terrain);
-    r.drawSprite({0.0f, 0.0f}, 0.0f, EntityType::Player);
+    r.drawSprite({0.0f, 0.0f}, 0.0f, EntityType::Player, INVALID_ENTITY, 0.0f);
     r.endFrame();
 
     // Frame 2: draw terrain only — player should be gone

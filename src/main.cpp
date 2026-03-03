@@ -165,6 +165,7 @@ int main() {
         renderer.setStudioMode(game.inStudio());
         auto [bW, bH] = game.activeGridBounds();
         renderer.setGridBounds(bW, bH);
+        renderer.updateEffects(fdt);
         renderer.beginFrame();
         renderer.drawTerrain(game.terrain());
 
@@ -172,7 +173,7 @@ int main() {
             Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
             float renderZ   = lerp(static_cast<float>(ent->pos.z), static_cast<float>(ent->destination.z), ent->moveT);
             renderer.drawShadow(renderPos, renderZ);
-            renderer.drawSprite(renderPos, renderZ, ent->type, ent->lit);
+            renderer.drawSprite(renderPos, renderZ, ent->type, ent->id, ent->moveT, ent->lit);
             if (ent->type != EntityType::Mushroom  &&
                 ent->type != EntityType::Campfire  &&
                 ent->type != EntityType::TreeStump &&
@@ -180,6 +181,49 @@ int main() {
                 ent->type != EntityType::Battery   &&
                 ent->type != EntityType::Lightbulb)
                 renderer.drawFacingIndicator(renderPos, renderZ, ent->facing);
+        }
+
+        renderer.drawParticles();
+        renderer.drawDyingEntities();
+
+        // ── Visual events ─────────────────────────────────────────────────
+        for (const VisualEvent& ve : game.drainVisualEvents()) {
+            Vec2f vp = ve.pos;
+            float vz = ve.z;
+            switch (ve.type) {
+                case VisualEventType::Dig:
+                    renderer.spawnBurst(vp, vz, {139, 90, 43, 255},
+                                        8, 3.0f, 0.4f, 3.0f);
+                    break;
+                case VisualEventType::CollectMushroom:
+                    renderer.spawnBurst(vp, vz, {255, 220, 50, 255},
+                                        10, 4.0f, 0.5f, 3.0f);
+                    break;
+                case VisualEventType::DeployAgent:
+                    renderer.spawnBurst(vp, vz, {180, 180, 255, 255},
+                                        6, 2.0f, 0.3f, 4.0f);
+                    break;
+                case VisualEventType::GoblinHit:
+                    renderer.flashEntity(ve.entityID, {255, 80, 80, 255}, 6);
+                    renderer.triggerShake(4.0f);
+                    break;
+                case VisualEventType::GoblinDie:
+                    renderer.addDyingEntity(vp, vz, ve.entityType);
+                    renderer.spawnBurst(vp, vz, {200, 50, 50, 255},
+                                        12, 5.0f, 0.6f, 4.0f);
+                    renderer.triggerShake(6.0f);
+                    break;
+                case VisualEventType::PlayerLand:
+                    renderer.spawnBurst(vp, vz, {139, 90, 43, 200},
+                                        6, 2.0f, 0.3f, 2.0f);
+                    break;
+                case VisualEventType::PortalEnter:
+                    renderer.triggerFade(0.0f, 2.0f);
+                    break;
+                case VisualEventType::GridSwitch:
+                    renderer.triggerShake(8.0f);
+                    break;
+            }
         }
 
         // ── Audio ─────────────────────────────────────────────────────────

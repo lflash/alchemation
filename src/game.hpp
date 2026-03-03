@@ -24,6 +24,25 @@ enum class AudioEvent {
     GoblinHit, AgentStep,
 };
 
+// ─── VisualEvent ──────────────────────────────────────────────────────────────
+//
+// Parallel to AudioEvent: Game emits these; the renderer drains them each
+// frame and spawns particles / triggers screen-level effects accordingly.
+
+enum class VisualEventType {
+    Dig, CollectMushroom, DeployAgent,
+    GoblinHit, GoblinDie, PlayerLand,
+    PortalEnter, GridSwitch,
+};
+
+struct VisualEvent {
+    VisualEventType type;
+    Vec2f           pos;                              // world-space origin (tile units)
+    float           z          = 0.0f;               // world z at that position
+    EntityID        entityID   = INVALID_ENTITY;     // for flash effects (GoblinHit)
+    EntityType      entityType = EntityType::Player; // for dying-entity (GoblinDie)
+};
+
 // ─── RecordingInfo ────────────────────────────────────────────────────────────
 
 struct RecordingInfo {
@@ -101,6 +120,14 @@ public:
         return v;
     }
 
+    // Drains all visual events accumulated since the last call.  main.cpp
+    // translates these into renderer particle / flash / shake / fade calls.
+    std::vector<VisualEvent> drainVisualEvents() {
+        auto v = std::move(visualEvents_);
+        visualEvents_.clear();
+        return v;
+    }
+
     // Entities in the active grid, sorted by layer.
     std::vector<const Entity*> drawOrder() const;
 
@@ -125,7 +152,9 @@ private:
 
     Recorder  recorder_;
     RoutineVM vm_;
-    std::vector<AudioEvent> audioEvents_;
+    std::vector<AudioEvent>  audioEvents_;
+    std::vector<VisualEvent> visualEvents_;
+    int                      playerPrevZ_ = 0;
     std::unordered_map<EntityID, AgentExecState> agentStates_;
     std::unordered_map<EntityID, Recording>      agentRecordings_;
     size_t selectedRecording_ = 0;

@@ -198,13 +198,91 @@ projection so entities at higher z appear higher on screen.
 
 ---
 
+## Phase 10 — Animations & Visual Effects
+
+Sprite animation system and a general-purpose particle/effect layer. All effects
+are renderer-side only — game logic is unaffected. Effects are triggered by
+existing `AudioEvent`-style hooks or new `VisualEvent` equivalents emitted from
+`Game::tick()`.
+
+### Sprite animation
+- [ ] `AnimFrame` — sprite region (src rect) + duration in ticks
+- [ ] `Animation` — named sequence of `AnimFrame`s, looping or one-shot
+- [ ] `SpriteCache` extended: loads animation strips; keyed by `(EntityType, AnimState)`
+- [ ] `AnimState` enum — `Idle`, `Walk`, `Hit`, `Die` (extensible)
+- [ ] Per-entity animation state tracked in renderer (not game logic)
+- [ ] Frame advances each tick based on `moveT` / elapsed time
+- [ ] Idle animation: N-frame loop while entity is not moving
+- [ ] Walk animation: synced to movement (frame advances with `moveT`)
+
+### Entity effects
+- [ ] Hit flash — entity sprite tints white/red for a few frames on damage
+- [ ] Death fade — entity fades out over ~10 frames on despawn
+- [ ] Drop shadow — soft ellipse drawn beneath each entity, scaled by z height
+- [ ] Footstep dust — small particle burst when entity lands after a z-level change
+
+### Tile effects
+- [ ] Fire overlay — flickering animated tile overlay on burning tiles
+- [ ] Water ripple — looping ripple animation on water tiles
+- [ ] Portal shimmer — pulsing glow or spin drawn over portal tiles
+- [ ] Dig particles — dirt particle burst when player digs a tile
+
+### Pickup / interaction effects
+- [ ] Collect sparkle — radial particle burst when mushroom is collected
+- [ ] Mana float — small orb particle drifts up and fades on mana gain
+- [ ] Deploy puff — brief cloud animation when a poop agent is spawned
+
+### Screen-level effects
+- [ ] Screen shake — camera offset perturbed on heavy impact (goblin hit, height landing); decays each frame
+- [ ] Fade — black fade in/out on portal entry and grid switch
+
+### Procedural tile detail
+- [ ] Position-based decoration — hash or second Perlin layer on absolute (x, y) deterministically places small detail sprites on tiles (stones, flowers, moss, roots, cracks) without storing them
+- [ ] Neighbour-aware tile variants — renderer queries the 4 (or 8) adjacent tile types and selects the correct edge/corner sprite variant (e.g. grass-to-bare-earth transition, cliff edge caps)
+- [ ] Detail density by terrain type — grass gets flowers/stones; bare earth gets cracks/pebbles; each type has its own decoration palette and frequency
+- [ ] Detail sprites respect z-level — decorations are drawn at the tile's height, occluded correctly by the perspective projection
+
+### Atmospheric
+- [ ] Ambient particles — slowly drifting dust motes or leaves in world grid
+- [ ] Day/night tint — slow sinusoidal colour shift applied to terrain draw
+
+### Implementation notes
+- `ParticleSystem` owns a pool of particles: `{pos, vel, life, maxLife, colour, size}`
+- `Game::tick()` emits `VisualEvent`s (parallel to `AudioEvent`); renderer drains and spawns particles/effects
+- Screen shake state lives in renderer: `shakeAmount`, decays multiplicatively each frame
+- Fade state: `fadeAlpha` (0.0–1.0), driven by a timer set on grid-switch/portal events
+- Animation state per entity stored in `std::unordered_map<EntityID, AnimState>` in renderer
+
+### Tests
+- [ ] `AnimFrame` / `Animation` frame selection at given elapsed tick
+- [ ] One-shot animation clamps to last frame rather than looping
+- [ ] Particle lifetime: particle marked dead when `life <= 0`
+- [ ] Screen shake magnitude decays to zero within expected frame count
+
+---
+
 ## Backlog
+
+### Known Issues
+- [ ] Rendered tiles are not consistently sized — minor visual inconsistency in the perspective projection, low priority
+
+### Mouse Interaction
+- [ ] Tile picking — inverse perspective projection maps screen (x, y) + camera z to world `TilePos`; must account for zoom and camera offset
+- [ ] Entity picking — hit-test entities at the hovered tile in draw order (topmost first)
+- [ ] Hover highlight — translucent overlay drawn on the tile under the cursor; colour varies by tile type / interactability
+- [ ] Entity hover — distinct highlight (outline or tint) when cursor is over an entity; show name or stats tooltip
+- [ ] Hover visual effect — subtle pulse or shimmer animation on the highlighted tile (ties into Phase 10 effect system)
+- [ ] Left-click to move — player pathfinds or steps toward clicked tile
+- [ ] Left-click to interact — click an entity to trigger context action (collect mushroom, attack goblin, inspect chest)
+- [ ] Right-click context menu — small popup listing available actions for the tile or entity under cursor
+- [ ] Click ripple effect — brief expanding ring particle burst at the clicked world position
+- [ ] Middle-click / right-drag to pan — alternative to arrow-key camera pan
+- [ ] Cursor changes — OS cursor swaps (pointer → hand over interactable entity, crosshair over enemy)
 
 ### New Assets
 - [ ] Proper sprite art for all entity types (player, goblin, mushroom, poop)
 - [ ] Terrain tile sprites — textured tiles (grass, bare earth, stone, water)
 - [ ] Wall and structure tiles for room interiors
-- [ ] Animated sprites — idle/walk frames per entity type
 - [ ] Real audio — replace placeholder WAV with composed OGG tracks
 
 ### New Interactions

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 
 // ─── Sprite paths ─────────────────────────────────────────────────────────────
 
@@ -94,6 +95,7 @@ void Renderer::setTitle(const std::string& title) {
 }
 
 void Renderer::beginFrame() {
+    ++rendererTick_;
     SDL_SetRenderDrawColor(sdl, 0, 0, 0, 255);
     SDL_RenderClear(sdl);
 }
@@ -208,6 +210,41 @@ void Renderer::drawTerrain(const Terrain& terrain) {
                 SDL_Rect r = { sx, sy, sw, lt };
                 SDL_RenderFillRect(sdl, &r);
             }
+
+            // ── Procedural tile detail ────────────────────────────────────────
+            if (ttype == TileType::Grass) {
+                // ~12 % of grass tiles get a small flower or stone dot.
+                uint32_t h = static_cast<uint32_t>(x) * 2654435761u
+                           ^ static_cast<uint32_t>(y) * 2246822519u;
+                if ((h & 0xFF) < 30) {
+                    int dx = static_cast<int>((h >> 8)  & 0x1F) * sw / 32;
+                    int dy = static_cast<int>((h >> 13) & 0x0F) * iH / 16;
+                    bool isFlower = (h >> 17) & 1u;
+                    SDL_Color det;
+                    if (isFlower) {
+                        uint32_t hue = (h >> 18) & 0x3u;
+                        det = hue == 0 ? SDL_Color{255, 220,  50, 255}
+                            : hue == 1 ? SDL_Color{255, 120, 120, 255}
+                            :            SDL_Color{255, 255, 255, 255};
+                    } else {
+                        det = { 100, 90, 80, 255 };   // stone
+                    }
+                    SDL_Rect dot = { sx + dx, sy + dy, 2, 2 };
+                    SDL_SetRenderDrawColor(sdl, det.r, det.g, det.b, det.a);
+                    SDL_RenderFillRect(sdl, &dot);
+                }
+            } else if (ttype == TileType::BareEarth) {
+                // ~8 % of bare-earth tiles get a short crack line.
+                uint32_t h = static_cast<uint32_t>(x) * 3456789013u
+                           ^ static_cast<uint32_t>(y) * 1234567891u;
+                if ((h & 0xFF) < 20) {
+                    int dx  = static_cast<int>((h >> 8)  & 0x1F) * sw / 32;
+                    int dy  = static_cast<int>((h >> 13) & 0x0F) * iH / 16;
+                    int dx2 = dx + 3 + static_cast<int>((h >> 18) & 0x3u);
+                    SDL_SetRenderDrawColor(sdl, 100, 65, 30, 255);
+                    SDL_RenderDrawLine(sdl, sx + dx, sy + dy, sx + dx2, sy + dy + 1);
+                }
+            }
         }
     }
 }
@@ -242,21 +279,30 @@ void Renderer::drawShadow(Vec2f renderPos, float renderZ) {
     SDL_RenderGeometry(sdl, nullptr, verts, N + 1, idx, N * 3);
 }
 
-void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type, bool lit) {
+void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type,
+                           EntityID eid, float moveT, bool lit) {
     SDL_Texture* tex = sprites.get(type);
     if (!tex) return;
 
-    // Unlit lightbulb: dim the texture.
-    if (type == EntityType::Lightbulb && !lit)
+    // Hit flash: tint the sprite with the flash colour.
+    auto flashIt = entityFlashes_.find(eid);
+    if (flashIt != entityFlashes_.end()) {
+        const RGBA& fc = flashIt->second.color;
+        SDL_SetTextureColorMod(tex, fc.r, fc.g, fc.b);
+    } else if (type == EntityType::Lightbulb && !lit) {
         SDL_SetTextureColorMod(tex, 80, 80, 80);
-    else
+    } else {
         SDL_SetTextureColorMod(tex, 255, 255, 255);
+    }
+
+    // Walk bob: a small vertical hop at the mid-point of each step.
+    float bob = std::sin(moveT * static_cast<float>(M_PI)) * 2.0f * camera_.zoom;
 
     int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
     int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
     SDL_Rect dst = {
         toPixelX(renderPos.x, renderZ),
-        toPixelY(renderPos.y, renderZ) + iH / 2 - iTs,
+        toPixelY(renderPos.y, renderZ) + iH / 2 - iTs - static_cast<int>(bob),
         iTs,
         iTs
     };
@@ -264,26 +310,54 @@ void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type, bool 
 }
 
 void Renderer::endFrame() {
+    // Fade overlay (portal entry, grid switch).
+    if (fadeAlpha_ > 0.0f) {
+        SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(sdl, 0, 0, 0,
+            static_cast<uint8_t>(std::clamp(fadeAlpha_, 0.0f, 1.0f) * 255.0f));
+        SDL_Rect full = { 0, 0, VIEWPORT_W, VIEWPORT_H };
+        SDL_RenderFillRect(sdl, &full);
+        SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+    }
     SDL_RenderPresent(sdl);
 }
 
 SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
-    if (type == TileType::BareEarth)
-        return { 139, 90, 43, 255 };
+    // Slow day/night cycle: 300-second period, ±15% brightness.
+    float dayFactor = 0.85f + 0.15f * std::sin(dayNightT_ / 150.0f * static_cast<float>(M_PI));
 
-    if (type == TileType::Portal)
-        return { 160, 60, 220, 255 };
+    if (type == TileType::BareEarth)
+        return { static_cast<uint8_t>(139 * dayFactor),
+                 static_cast<uint8_t>(90  * dayFactor),
+                 static_cast<uint8_t>(43  * dayFactor), 255 };
+
+    if (type == TileType::Portal) {
+        // Shimmering purple pulse.
+        float pulse = 0.7f + 0.3f * std::sin(dayNightT_ * 3.0f
+                                              + pos.x * 0.7f + pos.y * 0.5f);
+        return { static_cast<uint8_t>(160 * pulse),
+                 static_cast<uint8_t>(60  * pulse),
+                 static_cast<uint8_t>(220 * pulse), 255 };
+    }
 
     if (type == TileType::Fire) {
-        // Flickery orange-red
-        int v = (pos.x * 13 + pos.y * 7) & 0x1F;   // cheap spatial variation
-        return { static_cast<uint8_t>(220 + v / 4),
-                 static_cast<uint8_t>(80  + v / 2),
+        // Flickery orange-red: spatial hash + time-based flicker.
+        int   v       = (pos.x * 13 + pos.y * 7) & 0x1F;
+        float flicker = 0.8f + 0.2f * std::sin(dayNightT_ * 20.0f
+                                                + pos.x + pos.y * 1.3f);
+        return { static_cast<uint8_t>((220 + v / 4) * flicker),
+                 static_cast<uint8_t>((80  + v / 2) * flicker),
                  0, 255 };
     }
 
-    if (type == TileType::Puddle)
-        return { 60, 100, 200, 255 };
+    if (type == TileType::Puddle) {
+        // Gentle ripple.
+        float ripple = 0.85f + 0.15f * std::sin(dayNightT_ * 4.0f
+                                                 + pos.x * 0.9f + pos.y * 1.1f);
+        return { static_cast<uint8_t>(60  * ripple),
+                 static_cast<uint8_t>(100 * ripple),
+                 static_cast<uint8_t>(200 * ripple), 255 };
+    }
 
     if (studioMode_) {
         // Muted blue-grey studio floor.
@@ -296,16 +370,16 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
                  static_cast<uint8_t>(b), 255 };
     }
 
-    // World: flat green with a subtle checkerboard to show tile boundaries.
+    // World: flat green with a subtle checkerboard + day/night tint.
     int g = ((pos.x + pos.y) % 2 == 0) ? 134 : 120;
-    return { 0, static_cast<uint8_t>(g), 0, 255 };
+    return { 0, static_cast<uint8_t>(g * dayFactor), 0, 255 };
 }
 
 int Renderer::toPixelX(float tileX, float tileZ) const {
     float ts = TILE_SIZE * camera_.zoom;
     float f  = 1.0f + (tileZ - camera_.z) / static_cast<float>(Z_PERSP);
     return static_cast<int>(std::round(
-        VIEWPORT_W / 2.0f + (tileX - camera_.pos.x) * ts * f
+        VIEWPORT_W / 2.0f + (tileX - camera_.pos.x) * ts * f + shakeOffX_
     ));
 }
 
@@ -317,7 +391,143 @@ int Renderer::toPixelY(float tileY, float tileZ) const {
         VIEWPORT_H / 2.0f
         + (tileY - camera_.pos.y) * tsH
         - (tileZ - camera_.z)     * step * f
+        + shakeOffY_
     ));
+}
+
+// ─── Visual effects ──────────────────────────────────────────────────────────
+
+void Renderer::updateEffects(float fdt) {
+    dayNightT_ += fdt;
+
+    // Advance particles; remove dead ones.
+    particles_.erase(
+        std::remove_if(particles_.begin(), particles_.end(),
+                       [fdt](Particle& p) { return !p.tick(fdt); }),
+        particles_.end());
+
+    // Screen shake: exponential decay + sinusoidal offset direction.
+    shakeAmt_ = shakeDecay(shakeAmt_, fdt);
+    shakeOffX_ = shakeAmt_ * std::cos(dayNightT_ * 53.0f);
+    shakeOffY_ = shakeAmt_ * std::sin(dayNightT_ * 47.0f);
+
+    // Fade: advance toward target and auto-reverse at full black.
+    if (fadeDelta_ != 0.0f) {
+        fadeAlpha_ += fadeDelta_ * fdt;
+        if (fadeDelta_ > 0.0f && fadeAlpha_ >= 1.0f) {
+            fadeAlpha_ = 1.0f;
+            fadeDelta_ = -fadeDelta_;   // reverse back to transparent
+        } else if (fadeDelta_ < 0.0f && fadeAlpha_ <= 0.0f) {
+            fadeAlpha_ = 0.0f;
+            fadeDelta_ = 0.0f;
+        }
+    }
+
+    // Flash timers: decrement and erase when expired.
+    std::vector<EntityID> expired;
+    for (auto& [eid, flash] : entityFlashes_)
+        if (--flash.ticksLeft <= 0) expired.push_back(eid);
+    for (EntityID eid : expired) entityFlashes_.erase(eid);
+
+    // Dying entities: fade out over their lifetime.
+    dying_.erase(
+        std::remove_if(dying_.begin(), dying_.end(),
+                       [fdt](DyingEntity& d) { d.life -= fdt; return d.life <= 0.0f; }),
+        dying_.end());
+
+    // Ambient dust motes (world only, capped at 150 particles).
+    if (!studioMode_ && particles_.size() < 150) {
+        dustAccum_ += fdt;
+        while (dustAccum_ > 0.15f) {
+            dustAccum_ -= 0.15f;
+            if (std::rand() % 5 == 0) {
+                Particle p;
+                p.pos = {
+                    camera_.pos.x + ((std::rand() % 220) / 10.0f - 11.0f),
+                    camera_.pos.y + ((std::rand() % 220) / 10.0f - 11.0f)
+                };
+                p.vel = {
+                    ((std::rand() % 60) - 30) / 200.0f,
+                    ((std::rand() % 60) - 50) / 200.0f   // slight upward drift
+                };
+                p.z       = camera_.z;
+                p.life    = 2.0f + (std::rand() % 200) / 100.0f;
+                p.maxLife = p.life;
+                p.size    = 1.0f + (std::rand() % 2);
+                p.color   = { 210, 230, 180, 60 };   // pale greenish mote
+                particles_.push_back(p);
+            }
+        }
+    }
+}
+
+void Renderer::spawnBurst(Vec2f pos, float z, RGBA color,
+                           int count, float speed, float lifeMax, float size) {
+    for (int i = 0; i < count; ++i) {
+        float angle = static_cast<float>(i) / count * 2.0f * static_cast<float>(M_PI);
+        float s = speed * (0.5f + (std::rand() % 100) / 100.0f);
+        Particle p;
+        p.pos     = pos;
+        p.vel     = { std::cos(angle) * s, std::sin(angle) * s };
+        p.z       = z;
+        p.life    = lifeMax * (0.5f + (std::rand() % 100) / 200.0f);
+        p.maxLife = p.life;
+        p.size    = size;
+        p.color   = color;
+        particles_.push_back(p);
+    }
+}
+
+void Renderer::triggerShake(float amount) {
+    shakeAmt_ = std::max(shakeAmt_, amount);
+}
+
+void Renderer::triggerFade(float startAlpha, float delta) {
+    fadeAlpha_ = startAlpha;
+    fadeDelta_ = delta;
+}
+
+void Renderer::flashEntity(EntityID eid, RGBA color, int ticks) {
+    entityFlashes_[eid] = { color, ticks };
+}
+
+void Renderer::addDyingEntity(Vec2f pos, float z, EntityType type, float lifeMax) {
+    dying_.push_back({ pos, z, type, lifeMax, lifeMax });
+}
+
+void Renderer::drawParticles() {
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    for (const Particle& p : particles_) {
+        float alpha = p.life / p.maxLife;
+        int   px = toPixelX(p.pos.x, p.z);
+        int   py = toPixelY(p.pos.y, p.z);
+        int   s  = std::max(1, static_cast<int>(p.size * camera_.zoom));
+        SDL_SetRenderDrawColor(sdl,
+            p.color.r, p.color.g, p.color.b,
+            static_cast<uint8_t>(p.color.a * alpha));
+        SDL_Rect r = { px - s / 2, py - s / 2, s, s };
+        SDL_RenderFillRect(sdl, &r);
+    }
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+}
+
+void Renderer::drawDyingEntities() {
+    for (const DyingEntity& d : dying_) {
+        SDL_Texture* tex = sprites.get(d.type);
+        if (!tex) continue;
+        float alpha = d.life / d.maxLife;
+        SDL_SetTextureAlphaMod(tex, static_cast<uint8_t>(255.0f * alpha));
+        SDL_SetTextureColorMod(tex, 255, 255, 255);
+        int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
+        int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
+        SDL_Rect dst = {
+            toPixelX(d.pos.x, d.z),
+            toPixelY(d.pos.y, d.z) + iH / 2 - iTs,
+            iTs, iTs
+        };
+        SDL_RenderCopy(sdl, tex, nullptr, &dst);
+        SDL_SetTextureAlphaMod(tex, 255);
+    }
 }
 
 // ─── HUD & Text ──────────────────────────────────────────────────────────────

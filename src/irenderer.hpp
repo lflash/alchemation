@@ -15,6 +15,7 @@ public:
 
     virtual void beginFrame()                               = 0;
     virtual void drawTerrain(const Terrain& terrain)        = 0;
-    virtual void drawSprite(Vec2f renderPos, float renderZ, EntityType type, bool lit = true) = 0;
+    virtual void drawSprite(Vec2f renderPos, float renderZ, EntityType type,
+                            EntityID eid, float moveT, bool lit = true) = 0;
     virtual void endFrame()                                 = 0;
 };

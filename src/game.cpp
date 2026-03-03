@@ -37,6 +37,8 @@ void Game::subscribeEvents(Grid& grid) {
             Entity* cand = registry_.get(cid);
             if (!cand || cand->type != EntityType::Mushroom) continue;
             player->mana += 3;
+            visualEvents_.push_back({ VisualEventType::CollectMushroom,
+                                      toVec(cand->pos), static_cast<float>(cand->pos.z) });
             g.remove(cid, *cand);
             registry_.destroy(cid);
             audioEvents_.push_back(AudioEvent::CollectMushroom);
@@ -130,6 +132,7 @@ void Game::applyPendingTransfer() {
             activeGridID_     = t.toGrid;
             gridJustSwitched_ = true;
             audioEvents_.push_back(AudioEvent::PortalEnter);
+            visualEvents_.push_back({ VisualEventType::PortalEnter, {0,0}, 0 });
         }
     }
     pendingTransfer_.reset();
@@ -244,6 +247,8 @@ void Game::tickPlayerInput(const Input& input) {
         agentStates_[pid]     = AgentExecState{};
         agentRecordings_[pid] = recorder_.recordings[selectedRecording_];
         audioEvents_.push_back(AudioEvent::DeployAgent);
+        visualEvents_.push_back({ VisualEventType::DeployAgent,
+                                  toVec(spawnPos), static_cast<float>(spawnPos.z) });
     }
 
     // Tab: toggle between world and studio
@@ -260,6 +265,7 @@ void Game::tickPlayerInput(const Input& input) {
         }
         gridJustSwitched_ = true;
         audioEvents_.push_back(AudioEvent::GridSwitch);
+        visualEvents_.push_back({ VisualEventType::GridSwitch, {0,0}, 0 });
         player = registry_.get(playerID_);
     }
 
@@ -312,11 +318,17 @@ void Game::tickPlayerInput(const Input& input) {
                 if (!overlaps(destBounds, boundsAt(cand->pos, cand->size))) continue;
 
                 cand->health -= player->mana;
+                Vec2f goblinVpos = toVec(cand->pos);
+                float goblinVz   = static_cast<float>(cand->pos.z);
                 audioEvents_.push_back(AudioEvent::GoblinHit);
                 if (cand->health <= 0) {
+                    visualEvents_.push_back({ VisualEventType::GoblinDie,
+                                             goblinVpos, goblinVz, cid, cand->type });
                     grid.remove(cid, *cand);
                     registry_.destroy(cid);
                 } else {
+                    visualEvents_.push_back({ VisualEventType::GoblinHit,
+                                             goblinVpos, goblinVz, cid });
                     TilePos pushBase = cand->isMoving() ? cand->destination : cand->pos;
                     TilePos pushDest = pushBase + delta;
                     if (cand->isMoving()) {
@@ -355,6 +367,8 @@ void Game::tickPlayerInput(const Input& input) {
     if (input.pressed(Key::F)) {
         grid.terrain.dig(ahead);
         audioEvents_.push_back(AudioEvent::Dig);
+        visualEvents_.push_back({ VisualEventType::Dig,
+                                  toVec(ahead), static_cast<float>(ahead.z) });
     }
 
     if (input.pressed(Key::C)) {
@@ -488,8 +502,15 @@ void Game::tickMovement(Grid& grid) {
             grid.spatial.move(eid, oldPos, ent->pos, ent->size);
             grid.events.emit({ EventType::Arrived, eid });
 
-            if (eid == playerID_)
+            if (eid == playerID_) {
                 audioEvents_.push_back(AudioEvent::PlayerStep);
+                if (ent->pos.z != playerPrevZ_) {
+                    visualEvents_.push_back({ VisualEventType::PlayerLand,
+                                             toVec(ent->pos),
+                                             static_cast<float>(ent->pos.z) });
+                }
+                playerPrevZ_ = ent->pos.z;
+            }
 
             // Portal check: any entity, only if no transfer already pending
             if (!pendingTransfer_) {

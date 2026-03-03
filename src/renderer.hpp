@@ -1,6 +1,7 @@
 #pragma once
 
 #include "irenderer.hpp"
+#include "effects.hpp"
 #include "game.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
@@ -10,6 +11,27 @@
 #include <vector>
 
 class Terrain;
+
+// ─── EntityFlash ─────────────────────────────────────────────────────────────
+//
+// Per-entity hit flash: tints the sprite for a few renderer frames.
+
+struct EntityFlash {
+    RGBA color;
+    int  ticksLeft;
+};
+
+// ─── DyingEntity ─────────────────────────────────────────────────────────────
+//
+// Cached entity data rendered with fading alpha after the entity is destroyed.
+
+struct DyingEntity {
+    Vec2f      pos;
+    float      z;
+    EntityType type;
+    float      life;
+    float      maxLife;
+};
 
 // ─── SpriteCache ─────────────────────────────────────────────────────────────
 
@@ -66,9 +88,38 @@ public:
     // renderPos is the interpolated visual position (tile units, XY only).
     // renderZ is the interpolated z (for oblique vertical offset).
     void drawShadow(Vec2f renderPos, float renderZ);
-    void drawSprite(Vec2f renderPos, float renderZ, EntityType type, bool lit = true);
+    void drawSprite(Vec2f renderPos, float renderZ, EntityType type,
+                    EntityID eid, float moveT, bool lit = true);
 
     void endFrame();
+
+    // ── Visual effects ────────────────────────────────────────────────────────
+    // Call updateEffects() once per render frame (before beginFrame) with the
+    // real-time delta so that particles/shake/fade advance at wall-clock speed.
+
+    void updateEffects(float fdt);
+
+    // Spawn a radial burst of particles at a world-tile position.
+    void spawnBurst(Vec2f pos, float z, RGBA color,
+                    int count, float speed, float lifeMax, float size);
+
+    // Trigger a camera shake of the given magnitude (decays exponentially).
+    void triggerShake(float amount);
+
+    // Start a fade (alpha 0→1 driven by delta, then auto-reverses).
+    void triggerFade(float startAlpha, float delta);
+
+    // Flash an entity sprite for the given number of renderer ticks.
+    void flashEntity(EntityID eid, RGBA color, int ticks);
+
+    // Cache an entity for a death-fade after it is destroyed.
+    void addDyingEntity(Vec2f pos, float z, EntityType type, float lifeMax = 0.35f);
+
+    // Draw all live particles (call after entity sprites, before HUD).
+    void drawParticles();
+
+    // Draw all fading death-sprites (call after drawParticles).
+    void drawDyingEntities();
 
     // Draws the always-on HUD (mana counter + recording indicator) top-left.
     void drawHUD(int mana, bool isRecording);
@@ -93,10 +144,24 @@ private:
     int           gridW_      = 0;   // 0 = unbounded
     int           gridH_      = 0;
 
+    // ── Effect state ──────────────────────────────────────────────────────────
+    std::vector<Particle>                           particles_;
+    std::unordered_map<EntityID, EntityFlash>       entityFlashes_;
+    std::vector<DyingEntity>                        dying_;
+    float    shakeAmt_    = 0.0f;
+    float    shakeOffX_   = 0.0f;
+    float    shakeOffY_   = 0.0f;
+    float    fadeAlpha_   = 0.0f;
+    float    fadeDelta_   = 0.0f;
+    float    dayNightT_   = 0.0f;
+    float    dustAccum_   = 0.0f;
+    int      rendererTick_ = 0;
+
     SDL_Color tileColor(float height, TilePos pos, TileType type) const;
 
     // Convert world tile coordinates to screen pixels using one-point perspective.
     // Vertical world lines converge to a VP at (centre, Z_PERSP*Z_STEP px below centre).
+    // shakeOffX_/shakeOffY_ are added here so all draw calls benefit automatically.
     int toPixelX(float tileX, float tileZ = 0.0f) const;
     int toPixelY(float tileY, float tileZ = 0.0f) const;
 
