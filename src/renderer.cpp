@@ -10,10 +10,15 @@
 // ─── Sprite paths ─────────────────────────────────────────────────────────────
 
 static const std::unordered_map<EntityType, std::string> SPRITE_PATHS = {
-    { EntityType::Player,   "assets/sprites/player.png"   },
-    { EntityType::Goblin,   "assets/sprites/goblin.png"   },
-    { EntityType::Mushroom, "assets/sprites/mushroom.png" },
-    { EntityType::Poop,     "assets/sprites/poop.png"     },
+    { EntityType::Player,    "assets/sprites/player.png"     },
+    { EntityType::Goblin,    "assets/sprites/goblin.png"     },
+    { EntityType::Mushroom,  "assets/sprites/mushroom.png"   },
+    { EntityType::Poop,      "assets/sprites/poop.png"       },
+    { EntityType::Campfire,  "assets/sprites/campfire.png"   },
+    { EntityType::TreeStump, "assets/sprites/tree_stump.png" },
+    { EntityType::Log,       "assets/sprites/logs.png"       },
+    { EntityType::Battery,   "assets/sprites/battery.png"    },
+    { EntityType::Lightbulb, "assets/sprites/lightbulb.png"  },
 };
 
 // ─── SpriteCache ─────────────────────────────────────────────────────────────
@@ -237,9 +242,15 @@ void Renderer::drawShadow(Vec2f renderPos, float renderZ) {
     SDL_RenderGeometry(sdl, nullptr, verts, N + 1, idx, N * 3);
 }
 
-void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type) {
+void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type, bool lit) {
     SDL_Texture* tex = sprites.get(type);
     if (!tex) return;
+
+    // Unlit lightbulb: dim the texture.
+    if (type == EntityType::Lightbulb && !lit)
+        SDL_SetTextureColorMod(tex, 80, 80, 80);
+    else
+        SDL_SetTextureColorMod(tex, 255, 255, 255);
 
     int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
     int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
@@ -262,6 +273,17 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
 
     if (type == TileType::Portal)
         return { 160, 60, 220, 255 };
+
+    if (type == TileType::Fire) {
+        // Flickery orange-red
+        int v = (pos.x * 13 + pos.y * 7) & 0x1F;   // cheap spatial variation
+        return { static_cast<uint8_t>(220 + v / 4),
+                 static_cast<uint8_t>(80  + v / 2),
+                 0, 255 };
+    }
+
+    if (type == TileType::Puddle)
+        return { 60, 100, 200, 255 };
 
     if (studioMode_) {
         // Muted blue-grey studio floor.

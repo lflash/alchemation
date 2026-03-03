@@ -20,6 +20,7 @@ struct Entity {
     int        layer;        // draw order (lower drawn first)
     int        mana;
     int        health;
+    bool       lit = false;   // Lightbulb: true when powered (≥1V on puddle tile)
 
     bool isMoving() const { return pos != destination; }
     bool isIdle()   const { return pos == destination; }

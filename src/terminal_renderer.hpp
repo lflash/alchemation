@@ -23,7 +23,7 @@ public:
 
     void beginFrame()                                override;
     void drawTerrain(const Terrain& terrain)         override;
-    void drawSprite(Vec2f renderPos, float renderZ, EntityType type) override;
+    void drawSprite(Vec2f renderPos, float renderZ, EntityType type, bool lit = true) override;
     void endFrame()                                  override;
 
     // Pure functions — exposed for unit testing.

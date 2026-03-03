@@ -66,7 +66,7 @@ public:
     // renderPos is the interpolated visual position (tile units, XY only).
     // renderZ is the interpolated z (for oblique vertical offset).
     void drawShadow(Vec2f renderPos, float renderZ);
-    void drawSprite(Vec2f renderPos, float renderZ, EntityType type);
+    void drawSprite(Vec2f renderPos, float renderZ, EntityType type, bool lit = true);
 
     void endFrame();
 

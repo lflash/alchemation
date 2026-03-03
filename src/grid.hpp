@@ -48,6 +48,19 @@ public:
 
     std::vector<EntityID> entities;
 
+    // ── Fire simulation ───────────────────────────────────────────────────────
+    // tileFireExp:    ticks a Grass tile has been adjacent to fire (→ catches at 50)
+    // fireTileExpiry: tick at which each active Fire tile turns to BareEarth
+    // entityFireExp:  ticks a TreeStump/Log has been adjacent to fire (→ burns at 250)
+    // entityBurnEnd:  tick at which a burning entity is despawned (500 ticks after ignition)
+    std::unordered_map<TilePos, int,  TilePosHash> tileFireExp;
+    std::unordered_map<TilePos, Tick, TilePosHash> fireTileExpiry;
+    std::unordered_map<EntityID, int>              entityFireExp;
+    std::unordered_map<EntityID, Tick>             entityBurnEnd;
+
+    // ── Voltage (computed fresh each tick by BFS from Battery entities) ───────
+    std::unordered_map<TilePos, int, TilePosHash>  voltage;
+
     bool isBounded() const { return width > 0 && height > 0; }
     bool inBounds(TilePos p) const {
         return !isBounded() || (p.x >= 0 && p.x < width &&

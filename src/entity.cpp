@@ -5,10 +5,15 @@
 
 EntityConfig defaultConfig(EntityType type) {
     switch (type) {
-        case EntityType::Player:   return { 0.1f, {0.8f, 0.8f}, 0,  0 };
-        case EntityType::Goblin:   return { 0.1f, {0.8f, 0.8f}, 1,  5 };
-        case EntityType::Mushroom: return { 0.0f, {0.6f, 0.6f}, 2,  0 };
-        case EntityType::Poop:     return { 0.2f, {0.5f, 0.5f}, 1,  0 };
+        case EntityType::Player:    return { 0.1f, {0.8f, 0.8f}, 0,  0 };
+        case EntityType::Goblin:    return { 0.1f, {0.8f, 0.8f}, 1,  5 };
+        case EntityType::Mushroom:  return { 0.0f, {0.6f, 0.6f}, 2,  0 };
+        case EntityType::Poop:      return { 0.2f, {0.5f, 0.5f}, 1,  0 };
+        case EntityType::Campfire:  return { 0.0f, {0.8f, 0.8f}, 2,  0 };
+        case EntityType::TreeStump: return { 0.0f, {0.8f, 0.8f}, 2,  0 };
+        case EntityType::Log:       return { 0.0f, {0.8f, 0.8f}, 2,  0 };
+        case EntityType::Battery:   return { 0.0f, {0.6f, 0.6f}, 2,  0 };
+        case EntityType::Lightbulb: return { 0.0f, {0.6f, 0.6f}, 2,  0 };
     }
     return { 0.1f, {0.8f, 0.8f}, 0, 0 };
 }

@@ -172,8 +172,13 @@ int main() {
             Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
             float renderZ   = lerp(static_cast<float>(ent->pos.z), static_cast<float>(ent->destination.z), ent->moveT);
             renderer.drawShadow(renderPos, renderZ);
-            renderer.drawSprite(renderPos, renderZ, ent->type);
-            if (ent->type != EntityType::Mushroom)
+            renderer.drawSprite(renderPos, renderZ, ent->type, ent->lit);
+            if (ent->type != EntityType::Mushroom  &&
+                ent->type != EntityType::Campfire  &&
+                ent->type != EntityType::TreeStump &&
+                ent->type != EntityType::Log       &&
+                ent->type != EntityType::Battery   &&
+                ent->type != EntityType::Lightbulb)
                 renderer.drawFacingIndicator(renderPos, renderZ, ent->facing);
         }
 

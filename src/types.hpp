@@ -52,11 +52,12 @@ constexpr EntityID INVALID_ENTITY = 0;
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-enum class EntityType { Player, Goblin, Mushroom, Poop };
+enum class EntityType { Player, Goblin, Mushroom, Poop,
+                        Campfire, TreeStump, Log, Battery, Lightbulb };
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
-enum class TileType  { Grass, BareEarth, Portal };
+enum class TileType  { Grass, BareEarth, Portal, Fire, Puddle };
 
 
 // ─── Math helpers ────────────────────────────────────────────────────────────

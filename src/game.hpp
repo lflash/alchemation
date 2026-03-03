@@ -134,6 +134,8 @@ private:
     void tickGoblinWander(Grid& grid);
     void tickVM(Grid& grid);
     void tickMovement(Grid& grid);
+    void tickFire(Grid& grid, Tick currentTick);
+    void tickVoltage(Grid& grid);
 
     // Player input — only called for the active grid.
     void tickPlayerInput(const Input& input);
