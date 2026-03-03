@@ -85,8 +85,8 @@ void Game::tick(const Input& input, Tick currentTick) {
         tickGoblinWander(grid);
         tickVM(grid);
         tickMovement(grid);
-        tickFire(grid, currentTick);
-        tickVoltage(grid);
+        tickFire(grid, registry_, currentTick);
+        tickVoltage(grid, registry_);
         grid.events.flush();
     }
 }
@@ -481,7 +481,7 @@ void Game::tickMovement(Grid& grid) {
 // Grass adjacent to fire catches after 50 ticks and burns for 150 ticks → BareEarth.
 // TreeStump/Log adjacent to fire ignites after 250 ticks and despawns 500 ticks later.
 
-void Game::tickFire(Grid& grid, Tick currentTick) {
+void tickFire(Grid& grid, EntityRegistry& registry, Tick currentTick) {
     static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
 
     // 1. Expire fire tiles whose timer has elapsed → BareEarth.
@@ -502,9 +502,9 @@ void Game::tickFire(Grid& grid, Tick currentTick) {
         for (const auto& [eid, burnEnd] : grid.entityBurnEnd)
             if (currentTick >= burnEnd) done.push_back(eid);
         for (EntityID eid : done) {
-            Entity* e = registry_.get(eid);
+            Entity* e = registry.get(eid);
             if (e) grid.remove(eid, *e);
-            registry_.destroy(eid);
+            registry.destroy(eid);
             grid.entityBurnEnd.erase(eid);
             grid.entityFireExp.erase(eid);
         }
@@ -516,7 +516,7 @@ void Game::tickFire(Grid& grid, Tick currentTick) {
         for (const auto& d : kDirs4)
             heated.insert(pos + d);
     for (EntityID eid : grid.entities) {
-        const Entity* e = registry_.get(eid);
+        const Entity* e = registry.get(eid);
         if (!e || e->type != EntityType::Campfire) continue;
         for (const auto& d : kDirs4)
             heated.insert(e->pos + d);
@@ -532,7 +532,7 @@ void Game::tickFire(Grid& grid, Tick currentTick) {
     {
         std::vector<EntityID> cold;
         for (const auto& [eid, _] : grid.entityFireExp) {
-            const Entity* e = registry_.get(eid);
+            const Entity* e = registry.get(eid);
             if (!e || !heated.count(e->pos)) cold.push_back(eid);
         }
         for (EntityID eid : cold) grid.entityFireExp.erase(eid);
@@ -551,7 +551,7 @@ void Game::tickFire(Grid& grid, Tick currentTick) {
     // 6. Heat TreeStump/Log entities: accumulate exposure; start burning at 250 ticks.
     for (EntityID eid : grid.entities) {
         if (grid.entityBurnEnd.count(eid)) continue;   // already burning
-        Entity* e = registry_.get(eid);
+        Entity* e = registry.get(eid);
         if (!e) continue;
         if (e->type != EntityType::TreeStump && e->type != EntityType::Log) continue;
         if (!heated.count(e->pos)) continue;
@@ -567,7 +567,7 @@ void Game::tickFire(Grid& grid, Tick currentTick) {
 // Battery entities emit 5V. BFS propagates through adjacent Puddle tiles,
 // decrementing by 1 per hop. Lightbulb entities lit if their tile has ≥1V.
 
-void Game::tickVoltage(Grid& grid) {
+void tickVoltage(Grid& grid, EntityRegistry& registry) {
     grid.voltage.clear();
 
     static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
@@ -576,7 +576,7 @@ void Game::tickVoltage(Grid& grid) {
 
     // Seed from Battery entities: adjacent puddle tiles get 4V (5-1).
     for (EntityID eid : grid.entities) {
-        const Entity* e = registry_.get(eid);
+        const Entity* e = registry.get(eid);
         if (!e || e->type != EntityType::Battery) continue;
         for (const auto& d : kDirs4) {
             TilePos adj = e->pos + d;
@@ -605,7 +605,7 @@ void Game::tickVoltage(Grid& grid) {
 
     // Update Lightbulb lit state.
     for (EntityID eid : grid.entities) {
-        Entity* e = registry_.get(eid);
+        Entity* e = registry.get(eid);
         if (!e || e->type != EntityType::Lightbulb) continue;
         auto it = grid.voltage.find(e->pos);
         e->lit = (it != grid.voltage.end() && it->second >= 1);

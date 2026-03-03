@@ -33,6 +33,14 @@ struct RecordingInfo {
     bool        selected;
 };
 
+// ─── Fire & Voltage simulation ───────────────────────────────────────────────
+//
+// Free functions so they can be exercised directly in unit tests without a
+// full Game object. Game::tick() calls both for every non-paused grid.
+
+void tickFire(Grid& grid, EntityRegistry& registry, Tick currentTick);
+void tickVoltage(Grid& grid, EntityRegistry& registry);
+
 // ─── Grid ID constants ────────────────────────────────────────────────────────
 
 constexpr GridID GRID_WORLD  = 1;
@@ -134,8 +142,6 @@ private:
     void tickGoblinWander(Grid& grid);
     void tickVM(Grid& grid);
     void tickMovement(Grid& grid);
-    void tickFire(Grid& grid, Tick currentTick);
-    void tickVoltage(Grid& grid);
 
     // Player input — only called for the active grid.
     void tickPlayerInput(const Input& input);
