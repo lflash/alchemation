@@ -172,8 +172,14 @@ projection so entities at higher z appear higher on screen.
 - [x] Bounded rooms exempt (flat floor, z unchanged by movement)
 
 ### Rendering ✓
-- [x] `toPixelY` uses oblique formula: `baseY + (tile_y - cam.y)*TILE_H - (tile_z - cam.z)*Z_STEP`
-- [x] `TILE_H = 20`, `TILE_W = 32`, `Z_STEP = 12` (all unzoomed)
+- [x] One-point perspective: `f = 1 + (tileZ - cam.z) / Z_PERSP` (Z_PERSP=30)
+- [x] `screen_x = cx + (tileX - cam.x) * TILE_SIZE * zoom * f` — tiles widen with elevation
+- [x] `screen_y = cy + (tileY - cam.y) * TILE_H * zoom - (tileZ - cam.z) * Z_STEP * zoom * f`
+- [x] Parallax: higher tiles scroll faster by factor `f` when camera moves
+- [x] South cliff face: gap between tile bottom and south neighbour top (from toPixelY)
+- [x] East/west cliff faces: natural width-gap from perspective scale; east visible left of
+      screen centre, west visible right of centre
+- [x] `TILE_H = 20`, `TILE_SIZE = 32`, `Z_STEP = 12` (all unzoomed)
 - [x] Draw order: sort by `world_y` ascending, then `world_z` ascending within same y
 - [x] Entity render z interpolates `pos.z → destination.z` via `moveT`
 - [x] Camera gains `float z` / `targetZ`; tracks player render z with lerp/snap logic

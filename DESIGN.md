@@ -43,9 +43,11 @@ to be built from reusable components.
 A 2.5D tile-based game with smooth visual movement, a multi-world system, a movement
 recording/playback mechanic, and a vertical terrain system. Written in C++ with SDL2.
 
-Rendering uses an **oblique/dimetric projection** (Pokémon Gen 4 style): tiles are
-wider than tall on screen, and Z-elevation shifts tiles straight up, giving depth
-without a true 3D engine.
+Rendering uses a **one-point perspective projection** (Pokémon Gen 4 style): the
+camera looks mostly downward with a slight southward tilt. Vertical world lines
+(cliff and building edges) converge toward a single vanishing point well below the
+screen. This gives correct parallax scrolling, natural east/west cliff face
+visibility, and accurate perspective scaling without a full 3D engine.
 
 ---
 
@@ -403,12 +405,28 @@ Abstracted behind `IRenderer`. Two implementations:
 - **`Renderer`** (SDL2) — primary target; sprite blitting, tile shading, UI overlay
 - **`TerminalRenderer`** — ANSI/ASCII; no SDL dependency
 
-**Projection (oblique/dimetric, Pokémon Gen 4 style):**
+**Projection (one-point perspective, Pokémon Gen 4 style):**
+
+Vertical world lines converge to a vanishing point at `(screen_cx, screen_cy + Z_PERSP*Z_STEP)`,
+i.e. `Z_PERSP` z-levels below the camera's ground reference — well below the visible screen.
+
+The perspective scale factor for a tile at height `tileZ`:
 ```
-screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_SIZE * zoom
-screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H * zoom - (tile_z - cam.z) * Z_STEP * zoom
+f = 1 + (tileZ - cam.z) / Z_PERSP
+
+screen_x = VIEWPORT_W/2 + (tile_x - cam.x) * TILE_SIZE * zoom * f
+screen_y = VIEWPORT_H/2 + (tile_y - cam.y) * TILE_H * zoom
+                         - (tile_z - cam.z) * Z_STEP  * zoom * f
 ```
-`TILE_SIZE=32`, `TILE_H=20`, `Z_STEP=12` (unzoomed). Terrain tiles are drawn at z=0.
+Constants: `TILE_SIZE=32`, `TILE_H=20`, `Z_STEP=12`, `Z_PERSP=30` (unzoomed).
+
+Key properties:
+- **Parallax**: tiles at higher z scroll faster when the camera moves (by factor `f`)
+- **East/west faces**: at any cliff edge, the higher tile's apparent width (`TILE_SIZE * f`)
+  is wider than at the lower level, creating a natural gap — east face visible left of
+  screen centre, west face right of centre
+- **Ground plane**: rendered orthographically (`f ≈ 1` for tiles near `cam.z`)
+
 Entity render z interpolates `pos.z → destination.z` via `moveT`. Draw order: sort by
 `world_y` ascending (back-to-front), then by `world_z` ascending within the same row.
 
@@ -521,9 +539,10 @@ producing smooth visual vertical movement. `Camera.z` / `Camera.targetZ` track t
 player's interpolated z with the same exponential lerp used for XY, and snap
 instantly on grid switch.
 
-Terrain tiles are drawn at z=0 (flat projection). Entity screen position includes a
-z offset via the oblique formula; higher-z entities appear higher on screen. No cliff
-face strips are currently rendered.
+Terrain tiles are drawn at their integer z level using the one-point perspective
+projection. South cliff faces fill the vertical gap below elevated tiles; east and
+west cliff faces emerge naturally from the perspective-scaled width difference between
+adjacent tiles at different heights.
 
 ---
 

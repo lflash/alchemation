@@ -63,6 +63,10 @@ far in conversation, but the user may revise any of them.
   projectile. All agent types share the same VM.
 - **Terrain type and stimuli** are fields on `TileGrid` tiles, not entities.
 - **Scheduler is a min-heap** ordered by tick.
+- **One-point perspective projection**: `f = 1 + (tileZ - cam.z) / Z_PERSP` (Z_PERSP=30).
+  `screen_x = cx + (tileX - cam.x) * TILE_SIZE * zoom * f`. Vertical world lines converge
+  to a VP below the screen. East/west cliff faces emerge naturally from the width gap;
+  south faces filled explicitly. Gives correct parallax scrolling.
 
 ## Naming Conventions
 

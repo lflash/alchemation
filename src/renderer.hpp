@@ -35,7 +35,9 @@ class Renderer : public IRenderer {
 public:
     static constexpr int TILE_SIZE    = 32;    // width of one tile (pixels, unzoomed)
     static constexpr int TILE_H       = 20;    // height of one tile (oblique squish)
-    static constexpr int Z_STEP       = 12;    // pixels per z-level (unzoomed)
+    static constexpr int Z_STEP       = 12;    // pixels per z-level, vertical (unzoomed)
+    static constexpr int Z_PERSP      = 30;    // virtual camera height in z-levels; controls
+                                               // perspective strength (VP = Z_PERSP*Z_STEP px below centre)
     // Viewport dimensions in pixels (fixed window size).
     static constexpr int VIEWPORT_W   = 640;
     static constexpr int VIEWPORT_H   = 640;
@@ -93,9 +95,9 @@ private:
 
     SDL_Color tileColor(float height, TilePos pos, TileType type) const;
 
-    // Convert world tile coordinates to screen pixels.
-    // toPixelY uses oblique projection: higher z = higher on screen.
-    int toPixelX(float tileX) const;
+    // Convert world tile coordinates to screen pixels using one-point perspective.
+    // Vertical world lines converge to a VP at (centre, Z_PERSP*Z_STEP px below centre).
+    int toPixelX(float tileX, float tileZ = 0.0f) const;
     int toPixelY(float tileY, float tileZ = 0.0f) const;
 
     // Render a UTF-8 string at screen pixel (x, y).

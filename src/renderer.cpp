@@ -96,24 +96,18 @@ void Renderer::beginFrame() {
 void Renderer::drawTerrain(const Terrain& terrain) {
     float tsW = TILE_SIZE * camera_.zoom;
     float tsH = TILE_H    * camera_.zoom;
-    float tsZ = Z_STEP    * camera_.zoom;
-    int   iW  = static_cast<int>(std::ceil(tsW));
     int   iH  = static_cast<int>(std::ceil(tsH));
 
-    // Minimum face width for east/west cliff strips (at least 1px, scales with zoom).
-    int faceW = std::max(1, static_cast<int>(camera_.zoom));
-
-    // Compute visible tile range. Extra headroom at top for elevated terrain.
+    // Visible tile range. Extra vertical headroom for elevated terrain.
     float halfW = (VIEWPORT_W / 2.0f) / tsW;
     float halfH = (VIEWPORT_H / 2.0f) / tsH;
-    int minX = static_cast<int>(std::floor(camera_.pos.x - halfW)) - 1;
-    int maxX = static_cast<int>(std::ceil (camera_.pos.x + halfW)) + 1;
-    int minY = static_cast<int>(std::floor(camera_.pos.y - halfH)) - 6;  // headroom for tall terrain
+    int minX = static_cast<int>(std::floor(camera_.pos.x - halfW)) - 2;
+    int maxX = static_cast<int>(std::ceil (camera_.pos.x + halfW)) + 2;
+    int minY = static_cast<int>(std::floor(camera_.pos.y - halfH)) - 6;
     int maxY = static_cast<int>(std::ceil (camera_.pos.y + halfH)) + 1;
 
     bool bounded = (gridW_ > 0 && gridH_ > 0);
 
-    // Bounded rooms are flat (entity z never changes there); return 0 for all tiles.
     auto levelOf = [&](int tx, int ty) -> int {
         if (bounded) return 0;
         return terrain.levelAt({tx, ty, 0});
@@ -134,45 +128,51 @@ void Renderer::drawTerrain(const Terrain& terrain) {
 
             // ── Void tile ─────────────────────────────────────────────────────
             if (thisVoid) {
-                SDL_Rect rect = { toPixelX(x), toPixelY(y), iW, iH };
+                int sx = toPixelX(x, 0.0f);
+                int sw = toPixelX(x + 1, 0.0f) - sx;
+                SDL_Rect rect = { sx, toPixelY(y, 0.0f), sw, iH };
                 SDL_SetRenderDrawColor(sdl, 18, 18, 18, 255);
                 SDL_RenderFillRect(sdl, &rect);
                 continue;
             }
 
             int       level = levelOf(x, y);
+            float     lf    = static_cast<float>(level);
             float     h     = terrain.heightAt(p);
             TileType  ttype = terrain.typeAt(p);
             SDL_Color color = tileColor(h, p, ttype);
             SDL_Color south = darken(color, 0.55f);
             SDL_Color side  = darken(color, 0.45f);
 
-            int sx = toPixelX(x);
-            int sy = toPixelY(y, static_cast<float>(level));
+            int sx = toPixelX(x,     lf);
+            int sy = toPixelY(y,     lf);
+            int sw = toPixelX(x + 1, lf) - sx;  // apparent width from perspective scaling
 
             // ── South cliff face ──────────────────────────────────────────────
-            // Fills the gap between this tile's bottom and the tile to the south.
-            // Height = diff * Z_STEP (always positive when this tile is higher).
+            // Gap between this tile's bottom edge and the top of the tile to the
+            // south — computed directly from the projection, no manual diff*step.
             {
                 int levelS = levelOf(x, y + 1);
-                int diff   = level - levelS;
-                if (diff > 0) {
-                    int fh = static_cast<int>(std::round(diff * tsZ));
-                    SDL_Rect face = { sx, sy + iH, iW, fh };
+                int sy_s   = toPixelY(y + 1, static_cast<float>(levelS));
+                int fh     = sy_s - (sy + iH);
+                if (fh > 0) {
+                    SDL_Rect face = { sx, sy + iH, sw, fh };
                     SDL_SetRenderDrawColor(sdl, south.r, south.g, south.b, south.a);
                     SDL_RenderFillRect(sdl, &face);
                 }
             }
 
             // ── East cliff face ───────────────────────────────────────────────
-            // Visible only when height diff is large enough that the tiles don't
-            // overlap (diff * Z_STEP > TILE_H). Drawn as a thin strip at the
-            // right edge of the elevated tile.
+            // With perspective scaling, elevated tiles appear wider (larger f).
+            // Tiles left of centre: high tile extends left → gap opens on right.
+            // Tiles right of centre: high tile extends right → west face opens instead.
             {
                 int levelE = levelOf(x + 1, y);
-                int fh     = static_cast<int>(std::round((level - levelE) * tsZ - tsH));
-                if (fh > 0) {
-                    SDL_Rect face = { sx + iW, sy + iH, faceW, fh };
+                int ex     = sx + sw;                              // right edge of this tile
+                int ex_e   = toPixelX(x + 1, static_cast<float>(levelE));  // left edge of eastern tile
+                int fw     = ex_e - ex;
+                if (fw > 0) {
+                    SDL_Rect face = { ex, sy, fw, iH };
                     SDL_SetRenderDrawColor(sdl, side.r, side.g, side.b, side.a);
                     SDL_RenderFillRect(sdl, &face);
                 }
@@ -181,36 +181,26 @@ void Renderer::drawTerrain(const Terrain& terrain) {
             // ── West cliff face ───────────────────────────────────────────────
             {
                 int levelW = levelOf(x - 1, y);
-                int fh     = static_cast<int>(std::round((level - levelW) * tsZ - tsH));
-                if (fh > 0) {
-                    SDL_Rect face = { sx - faceW, sy + iH, faceW, fh };
+                int wx_w   = toPixelX(x, static_cast<float>(levelW));  // right edge of western tile
+                int fw     = sx - wx_w;
+                if (fw > 0) {
+                    SDL_Rect face = { wx_w, sy, fw, iH };
                     SDL_SetRenderDrawColor(sdl, side.r, side.g, side.b, side.a);
                     SDL_RenderFillRect(sdl, &face);
                 }
             }
 
             // ── Tile top ──────────────────────────────────────────────────────
-            SDL_Rect rect = { sx, sy, iW, iH };
+            SDL_Rect rect = { sx, sy, sw, iH };
             SDL_SetRenderDrawColor(sdl, color.r, color.g, color.b, color.a);
             SDL_RenderFillRect(sdl, &rect);
 
-            // ── Cliff edge lines ──────────────────────────────────────────────
-            // Dark line drawn on the tile surface along any edge where the
-            // terrain drops away — gives the cliff a crisp defined rim.
-            int       lt   = std::max(1, static_cast<int>(camera_.zoom));
-            SDL_Color edge = darken(color, 0.4f);
-            SDL_SetRenderDrawColor(sdl, edge.r, edge.g, edge.b, edge.a);
-
-            if (levelOf(x, y - 1) < level) {  // north edge
-                SDL_Rect r = { sx,           sy, iW, lt };
-                SDL_RenderFillRect(sdl, &r);
-            }
-            if (levelOf(x + 1, y) < level) {  // east edge
-                SDL_Rect r = { sx + iW - lt, sy, lt, iH };
-                SDL_RenderFillRect(sdl, &r);
-            }
-            if (levelOf(x - 1, y) < level) {  // west edge
-                SDL_Rect r = { sx,           sy, lt, iH };
+            // ── North edge line ───────────────────────────────────────────────
+            if (levelOf(x, y - 1) < level) {
+                int       lt   = std::max(1, static_cast<int>(camera_.zoom));
+                SDL_Color edge = darken(color, 0.4f);
+                SDL_SetRenderDrawColor(sdl, edge.r, edge.g, edge.b, edge.a);
+                SDL_Rect r = { sx, sy, sw, lt };
                 SDL_RenderFillRect(sdl, &r);
             }
         }
@@ -220,7 +210,7 @@ void Renderer::drawTerrain(const Terrain& terrain) {
 void Renderer::drawShadow(Vec2f renderPos, float renderZ) {
     float ts  = TILE_SIZE * camera_.zoom;
     float tsH = TILE_H    * camera_.zoom;
-    float cx  = toPixelX(renderPos.x) + ts  * 0.5f;
+    float cx  = toPixelX(renderPos.x, renderZ) + ts  * 0.5f;
     float cy  = toPixelY(renderPos.y, renderZ) + tsH * 0.5f;
     float rx  = ts  * 0.35f;
     float ry  = tsH * 0.22f;
@@ -254,7 +244,7 @@ void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type) {
     int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
     int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
     SDL_Rect dst = {
-        toPixelX(renderPos.x),
+        toPixelX(renderPos.x, renderZ),
         toPixelY(renderPos.y, renderZ) + iH / 2 - iTs,
         iTs,
         iTs
@@ -289,18 +279,22 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
     return { 0, static_cast<uint8_t>(g), 0, 255 };
 }
 
-int Renderer::toPixelX(float tileX) const {
+int Renderer::toPixelX(float tileX, float tileZ) const {
     float ts = TILE_SIZE * camera_.zoom;
-    return static_cast<int>(std::round(VIEWPORT_W / 2.0f + (tileX - camera_.pos.x) * ts));
+    float f  = 1.0f + (tileZ - camera_.z) / static_cast<float>(Z_PERSP);
+    return static_cast<int>(std::round(
+        VIEWPORT_W / 2.0f + (tileX - camera_.pos.x) * ts * f
+    ));
 }
 
 int Renderer::toPixelY(float tileY, float tileZ) const {
-    float tsH  = TILE_H  * camera_.zoom;
-    float step = Z_STEP  * camera_.zoom;
+    float tsH  = TILE_H * camera_.zoom;
+    float step = Z_STEP * camera_.zoom;
+    float f    = 1.0f + (tileZ - camera_.z) / static_cast<float>(Z_PERSP);
     return static_cast<int>(std::round(
         VIEWPORT_H / 2.0f
         + (tileY - camera_.pos.y) * tsH
-        - (tileZ - camera_.z)     * step
+        - (tileZ - camera_.z)     * step * f
     ));
 }
 
@@ -309,7 +303,7 @@ int Renderer::toPixelY(float tileY, float tileZ) const {
 void Renderer::drawFacingIndicator(Vec2f renderPos, float renderZ, Direction facing) {
     float ts  = TILE_SIZE * camera_.zoom;
     float tsH = TILE_H    * camera_.zoom;
-    float cx  = toPixelX(renderPos.x) + ts  * 0.5f;
+    float cx  = toPixelX(renderPos.x, renderZ) + ts  * 0.5f;
     float cy  = toPixelY(renderPos.y, renderZ) + tsH * 0.5f - ts * 0.5f;
 
     // Unit vector for each direction
