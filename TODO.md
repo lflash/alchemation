@@ -114,7 +114,7 @@ Tests are written alongside the system they cover.
 - [x] Bounded room: void tiles (dark) rendered outside `[0,w)×[0,h)`
 - [x] Goblin and player clamped to grid bounds in bounded grids
 
-**Tests** ✓ (147/147 passing)
+**Tests** ✓ (all passing)
 
 ---
 
@@ -185,10 +185,16 @@ projection so entities at higher z appear higher on screen.
 - [x] Camera gains `float z` / `targetZ`; tracks player render z with lerp/snap logic
 - [x] Entity shadow and sprite anchored at tile centre; facing indicator centred on body
 
-### Tests ✓ (150/150 passing)
+### Tests ✓ (159/159 passing)
 - [x] `TilePos` hash includes z — (1,2,3) and (1,2,4) are distinct keys
 - [x] Two entities at same (x,y) but different z do not collide
 - [x] Entity at same (x,y,z) still collides
+- [x] `heightAt` ignores z coordinate
+- [x] `levelAt` formula: `round(heightAt * 4)`, consistency, z-invariance
+- [x] `SpatialGrid::query` z-plane filtering (returns at matching z, excludes others)
+- [x] Player z matches terrain level at spawn
+- [x] Player destination z set from terrain when initiating a move
+- [x] Player blocked from stepping to tile with height diff > 1 (integration)
 
 ---
 

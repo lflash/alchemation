@@ -61,7 +61,7 @@ far in conversation, but the user may revise any of them.
 - **Recordings are `Instruction` streams** (`MOVE_REL`, `WAIT`, `HALT`) executed by
   the Routine VM. A deployed Poop is a routine agent — an autonomous robot — not a
   projectile. All agent types share the same VM.
-- **Terrain type and stimuli** are fields on `TileGrid` tiles, not entities.
+- **Terrain type and stimuli** are fields on `Terrain` tiles, not entities.
 - **Scheduler is a min-heap** ordered by tick.
 - **One-point perspective projection**: `f = 1 + (tileZ - cam.z) / Z_PERSP` (Z_PERSP=30).
   `screen_x = cx + (tileX - cam.x) * TILE_SIZE * zoom * f`. Vertical world lines converge
@@ -86,7 +86,7 @@ feels wrong.
 | Event type enum | `EventType` |
 | Action scheduler | `Scheduler` |
 | Input handler | `Input` |
-| Tile grid / world | `TileGrid` |
+| Tile grid / world | `Grid` |
 | Terrain height (float, render) | `heightAt()` |
 | Terrain height (int, movement) | `levelAt()` |
 | Renderer interface | `IRenderer` |
@@ -122,7 +122,7 @@ src/
   main.cpp
   types.hpp                    ← TilePos, Vec2f, Bounds, Camera, enums, lerp, toVec, TilePosHash, constants
   game.hpp / .cpp              ← Game, game loop, top-level tick
-  tilegrid.hpp / .cpp          ← TileGrid (terrain type, height, stimulus fields)
+  terrain.hpp / .cpp           ← Terrain (Perlin + sparse overrides)
   entity.hpp / .cpp            ← Entity, EntityRegistry          [Phase 2 — done]
   input.hpp / .cpp             ← Input snapshot                  [Phase 2 — done]
   spatial.hpp / .cpp           ← SpatialGrid                     [Phase 3]
@@ -139,9 +139,8 @@ vendor/
   FastNoiseLite.h        ← single-header Perlin noise
   doctest.h              ← single-header test framework
 tests/
-  test_phase1.cpp        ← TilePos, lerp, TileGrid tests
+  test_phase1.cpp        ← TilePos, lerp, Terrain tests
   test_phase2.cpp        ← Entity, EntityRegistry, Input, stepMovement tests
 assets/
   sprites/               ← PNGs copied from Python project
-  entities.json          ← entity type config [not yet written]
 ```
