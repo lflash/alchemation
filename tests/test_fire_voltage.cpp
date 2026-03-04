@@ -387,3 +387,119 @@ TEST_CASE("voltage map is cleared and recomputed each tick") {
     tickVoltage(grid, reg);
     CHECK(!grid.voltage.count({1, 0}));
 }
+
+// ─── burning flag ─────────────────────────────────────────────────────────────
+
+TEST_CASE("entity burning flag is false before ignition threshold") {
+    EntityRegistry reg;
+    Grid grid(GRID_WORLD);
+
+    addEntity(grid, reg, EntityType::Campfire,  {0, 0});
+    EntityID stump = addEntity(grid, reg, EntityType::TreeStump, {1, 0});
+
+    for (Tick t = 0; t < 249; ++t)
+        tickFire(grid, reg, t);
+
+    CHECK(reg.get(stump)->burning == false);
+}
+
+TEST_CASE("entity burning flag is true after ignition") {
+    EntityRegistry reg;
+    Grid grid(GRID_WORLD);
+
+    addEntity(grid, reg, EntityType::Campfire,  {0, 0});
+    EntityID stump = addEntity(grid, reg, EntityType::TreeStump, {1, 0});
+
+    for (Tick t = 0; t < 250; ++t)
+        tickFire(grid, reg, t);
+
+    REQUIRE(reg.get(stump) != nullptr);
+    CHECK(reg.get(stump)->burning == true);
+}
+
+TEST_CASE("burning flag persists on subsequent ticks") {
+    EntityRegistry reg;
+    Grid grid(GRID_WORLD);
+
+    EntityID stump = addEntity(grid, reg, EntityType::TreeStump, {0, 0});
+    grid.entityBurnEnd[stump] = 9999;
+    reg.get(stump)->burning = true;
+
+    // Run several ticks well before burn-end — entity stays alive and burning.
+    for (Tick t = 0; t < 10; ++t)
+        tickFire(grid, reg, t);
+
+    REQUIRE(reg.get(stump) != nullptr);
+    CHECK(reg.get(stump)->burning == true);
+}
+
+// ─── electrified flag ─────────────────────────────────────────────────────────
+
+TEST_CASE("entity on uncharged grass is not electrified") {
+    EntityRegistry reg;
+    Grid grid(GRID_WORLD);
+
+    EntityID goblin = addEntity(grid, reg, EntityType::Goblin, {3, 3});
+    tickVoltage(grid, reg);
+    CHECK(reg.get(goblin)->electrified == false);
+}
+
+TEST_CASE("entity on charged puddle is electrified") {
+    EntityRegistry reg;
+    Grid grid(GRID_WORLD);
+
+    addEntity(grid, reg, EntityType::Battery, {0, 0});
+    grid.terrain.setType({1, 0}, TileType::Puddle);
+    EntityID goblin = addEntity(grid, reg, EntityType::Goblin, {1, 0});
+
+    tickVoltage(grid, reg);
+
+    CHECK(reg.get(goblin)->electrified == true);
+}
+
+TEST_CASE("entity on uncharged puddle (out of range) is not electrified") {
+    EntityRegistry reg;
+    Grid grid(GRID_WORLD);
+
+    addEntity(grid, reg, EntityType::Battery, {0, 0});
+    for (int x = 1; x <= 5; ++x)
+        grid.terrain.setType({x, 0}, TileType::Puddle);
+    EntityID goblin = addEntity(grid, reg, EntityType::Goblin, {5, 0});
+
+    tickVoltage(grid, reg);
+
+    CHECK(reg.get(goblin)->electrified == false);
+}
+
+TEST_CASE("electrified flag clears when battery is removed") {
+    EntityRegistry reg;
+    Grid grid(GRID_WORLD);
+
+    EntityID bat    = addEntity(grid, reg, EntityType::Battery, {0, 0});
+    grid.terrain.setType({1, 0}, TileType::Puddle);
+    EntityID goblin = addEntity(grid, reg, EntityType::Goblin, {1, 0});
+
+    tickVoltage(grid, reg);
+    CHECK(reg.get(goblin)->electrified == true);
+
+    Entity* b = reg.get(bat);
+    grid.remove(bat, *b);
+    reg.destroy(bat);
+
+    tickVoltage(grid, reg);
+    CHECK(reg.get(goblin)->electrified == false);
+}
+
+TEST_CASE("lightbulb uses lit flag, not electrified") {
+    EntityRegistry reg;
+    Grid grid(GRID_WORLD);
+
+    addEntity(grid, reg, EntityType::Battery, {0, 0});
+    grid.terrain.setType({1, 0}, TileType::Puddle);
+    EntityID bulb = addEntity(grid, reg, EntityType::Lightbulb, {1, 0});
+
+    tickVoltage(grid, reg);
+
+    CHECK(reg.get(bulb)->lit         == true);
+    CHECK(reg.get(bulb)->electrified == false);  // Lightbulb is exempt
+}

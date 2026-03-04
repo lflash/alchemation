@@ -606,6 +606,7 @@ void tickFire(Grid& grid, EntityRegistry& registry, Tick currentTick) {
         if (++grid.entityFireExp[eid] >= 250) {
             grid.entityBurnEnd[eid] = currentTick + 500;
             grid.entityFireExp.erase(eid);
+            e->burning = true;
         }
     }
 }
@@ -651,12 +652,16 @@ void tickVoltage(Grid& grid, EntityRegistry& registry) {
         }
     }
 
-    // Update Lightbulb lit state.
+    // Update Lightbulb lit state and electrified flag for all other entities.
     for (EntityID eid : grid.entities) {
         Entity* e = registry.get(eid);
-        if (!e || e->type != EntityType::Lightbulb) continue;
+        if (!e) continue;
         auto it = grid.voltage.find(e->pos);
-        e->lit = (it != grid.voltage.end() && it->second >= 1);
+        bool charged = (it != grid.voltage.end() && it->second >= 1);
+        if (e->type == EntityType::Lightbulb)
+            e->lit = charged;
+        else
+            e->electrified = charged;
     }
 }
 

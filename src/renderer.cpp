@@ -398,6 +398,7 @@ int Renderer::toPixelY(float tileY, float tileZ) const {
 // ─── Visual effects ──────────────────────────────────────────────────────────
 
 void Renderer::updateEffects(float fdt) {
+    lastFdt_   = fdt;
     dayNightT_ += fdt;
 
     // Advance particles; remove dead ones.
@@ -493,6 +494,75 @@ void Renderer::flashEntity(EntityID eid, RGBA color, int ticks) {
 
 void Renderer::addDyingEntity(Vec2f pos, float z, EntityType type, float lifeMax) {
     dying_.push_back({ pos, z, type, lifeMax, lifeMax });
+}
+
+void Renderer::drawEntityEffects(Vec2f pos, float z, bool burning, bool electrified) {
+    if (!burning && !electrified) return;
+
+    // Sprite rect — matches the destination rect used in drawSprite.
+    int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
+    int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
+    SDL_Rect rect = {
+        toPixelX(pos.x, z),
+        toPixelY(pos.y, z) + iH / 2 - iTs,
+        iTs, iTs
+    };
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+
+    if (burning) {
+        // Orange overlay, subtle pulse.
+        float pulse = 0.6f + 0.4f * std::sin(dayNightT_ * 12.0f + pos.x + pos.y);
+        SDL_SetRenderDrawColor(sdl, 255, 100, 0,
+                               static_cast<uint8_t>(80.0f * pulse));
+        SDL_RenderFillRect(sdl, &rect);
+
+        // Rising fire sparks (~15/sec).
+        if (lastFdt_ > 0.0f &&
+            (std::rand() % static_cast<int>(1.0f / (15.0f * lastFdt_) + 1)) == 0) {
+            Particle p;
+            p.pos   = pos;
+            p.vel   = { ((std::rand() % 100) - 50) / 200.0f,   // slight x drift
+                        -0.4f - (std::rand() % 60) / 100.0f }; // upward
+            p.z     = z;
+            p.life  = 0.25f + (std::rand() % 25) / 100.0f;
+            p.maxLife = p.life;
+            p.size  = 2.0f + (std::rand() % 3);
+            // Alternate orange / red / yellow sparks.
+            int hue = std::rand() % 3;
+            p.color = hue == 0 ? RGBA{255, 160,  30, 220}
+                    : hue == 1 ? RGBA{255,  60,   0, 200}
+                    :            RGBA{255, 220,  80, 200};
+            particles_.push_back(p);
+        }
+    }
+
+    if (electrified) {
+        // Cyan overlay, fast flicker.
+        float flicker = 0.5f + 0.5f * std::sin(dayNightT_ * 40.0f + pos.x * 3.0f);
+        SDL_SetRenderDrawColor(sdl, 80, 200, 255,
+                               static_cast<uint8_t>(90.0f * flicker));
+        SDL_RenderFillRect(sdl, &rect);
+
+        // Random-direction electric sparks (~12/sec).
+        if (lastFdt_ > 0.0f &&
+            (std::rand() % static_cast<int>(1.0f / (12.0f * lastFdt_) + 1)) == 0) {
+            float angle = (std::rand() % 628) / 100.0f;  // 0..2π
+            float speed = 2.0f + (std::rand() % 200) / 100.0f;
+            Particle p;
+            p.pos     = pos;
+            p.vel     = { std::cos(angle) * speed, std::sin(angle) * speed };
+            p.z       = z;
+            p.life    = 0.08f + (std::rand() % 12) / 100.0f;
+            p.maxLife = p.life;
+            p.size    = 1.5f + (std::rand() % 2);
+            p.color   = (std::rand() % 2) ? RGBA{180, 230, 255, 240}
+                                          : RGBA{255, 255, 255, 255};
+            particles_.push_back(p);
+        }
+    }
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
 }
 
 void Renderer::drawParticles() {

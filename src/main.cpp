@@ -174,6 +174,7 @@ int main() {
             float renderZ   = lerp(static_cast<float>(ent->pos.z), static_cast<float>(ent->destination.z), ent->moveT);
             renderer.drawShadow(renderPos, renderZ);
             renderer.drawSprite(renderPos, renderZ, ent->type, ent->id, ent->moveT, ent->lit);
+            renderer.drawEntityEffects(renderPos, renderZ, ent->burning, ent->electrified);
             if (ent->type != EntityType::Mushroom  &&
                 ent->type != EntityType::Campfire  &&
                 ent->type != EntityType::TreeStump &&

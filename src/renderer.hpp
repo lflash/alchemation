@@ -115,6 +115,10 @@ public:
     // Cache an entity for a death-fade after it is destroyed.
     void addDyingEntity(Vec2f pos, float z, EntityType type, float lifeMax = 0.35f);
 
+    // Draw persistent per-entity effects (fire overlay + sparks, electric overlay + sparks).
+    // Call once per entity, after drawSprite, using the same renderPos/renderZ.
+    void drawEntityEffects(Vec2f pos, float z, bool burning, bool electrified);
+
     // Draw all live particles (call after entity sprites, before HUD).
     void drawParticles();
 
@@ -155,6 +159,7 @@ private:
     float    fadeDelta_   = 0.0f;
     float    dayNightT_   = 0.0f;
     float    dustAccum_   = 0.0f;
+    float    lastFdt_     = 0.0f;
     int      rendererTick_ = 0;
 
     SDL_Color tileColor(float height, TilePos pos, TileType type) const;
