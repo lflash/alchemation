@@ -302,6 +302,14 @@ existing `AudioEvent`-style hooks or new `VisualEvent` equivalents emitted from
 - [ ] Rebind UI — highlight a binding row, press any key/button to assign it; detect conflicts and warn; reset-to-default option
 - [ ] Binding persistence — save/load bindings alongside save.dat (or a separate `settings.dat`); fall back to defaults if file absent or malformed
 
+### Localisation
+- [ ] String table — all in-game text (HUD labels, panel headings, keybinding names, recording default names, tooltip/context strings) moved out of source into a locale file (e.g. `assets/locale/en.ini`); source references strings by key only
+- [ ] `Locale` class — loads a locale file at startup, exposes `get(key)` returning `const std::string&`; falls back to English key string if a key is missing so untranslated builds still run
+- [ ] Language setting — added to the settings menu (alongside key remapping); lists available locale files discovered in `assets/locale/`; takes effect immediately without restart
+- [ ] Locale persistence — selected language stored in `settings.dat`; loaded on startup before any text is rendered
+- [ ] Font coverage — SDL_ttf font replaced with one that covers the full Latin extended range and common non-Latin scripts (e.g. Noto Sans); fallback chain for missing glyphs
+- [ ] RTL support (stretch) — layout mirroring for right-to-left languages (Arabic, Hebrew); text drawn right-aligned in panels
+
 ### World Generation
 - [ ] Biome map — second Perlin layer drives region type (forest, plains, swamp, desert)
 - [ ] Procedural entity spawning — goblins in clusters, mushroom patches in forest
