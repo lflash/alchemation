@@ -138,6 +138,10 @@ public:
     // Draws the controls reference panel in the top-right corner.
     void drawControlsMenu();
 
+    // Draws the key-rebind panel.  selectedRow is the highlighted Action index
+    // (0-based, matching enum order).  listening = waiting for a new keypress.
+    void drawRebindPanel(const InputMap& map, int selectedRow, bool listening);
+
 private:
     SDL_Window*   window;
     SDL_Renderer* sdl;

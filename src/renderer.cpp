@@ -51,7 +51,7 @@ SDL_Texture* SpriteCache::get(EntityType type) const {
 // ─── Renderer ────────────────────────────────────────────────────────────────
 
 Renderer::Renderer() : sprites(nullptr), font_(nullptr) {
-    if (SDL_Init(SDL_INIT_VIDEO) != 0)
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0)
         throw std::runtime_error(SDL_GetError());
 
     if (!(IMG_Init(IMG_INIT_PNG) & IMG_INIT_PNG))
@@ -851,5 +851,92 @@ void Renderer::drawControlsMenu() {
     sep();
     row("H",             "Toggle this menu");
     row("I",             "Recordings panel");
+    row("K",             "Key rebind panel");
     row("Esc",           "Quit");
+}
+
+void Renderer::drawRebindPanel(const InputMap& map, int selectedRow, bool listening) {
+    // Display label for each Action — must match Action enum order.
+    static constexpr const char* LABELS[INPUT_ACTION_COUNT] = {
+        "Move Up",          "Move Down",       "Move Left",        "Move Right",
+        "Strafe (hold)",
+        "Dig",              "Plant Mushroom",  "Place Portal",
+        "Record",           "Cycle Recording", "Deploy Agent",
+        "Switch Grid",
+        "Pan Up",           "Pan Down",        "Pan Left",         "Pan Right",
+        "Reset Camera",     "Zoom (hold)",
+        "Quit",             "Confirm",         "Toggle Controls",  "Toggle Recordings",
+        "Toggle Rebind",
+    };
+
+    constexpr int PAD  = 10;
+    constexpr int ROW  = 18;
+    constexpr int W    = 310;
+    const     int H    = PAD + 22 + 10 + INPUT_ACTION_COUNT * ROW + 10 + 20 + PAD;
+    constexpr int X    = VIEWPORT_W - W - 10;
+    constexpr int Y    = 10;
+    constexpr int KEYX = X + 178;   // left edge of the key-name column
+
+    // Background + border
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 10, 10, 10, 210);
+    SDL_Rect panel = {X, Y, W, H};
+    SDL_RenderFillRect(sdl, &panel);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(sdl, 90, 90, 90, 255);
+    SDL_RenderDrawRect(sdl, &panel);
+
+    SDL_Color titleCol  = {220, 210,  80, 255};
+    SDL_Color selLabel  = {255, 255, 255, 255};
+    SDL_Color normLabel = {140, 180, 140, 255};
+    SDL_Color selKey    = {220, 210, 100, 255};
+    SDL_Color normKey   = { 90,  90,  90, 255};
+    SDL_Color listenCol = { 80, 210, 230, 255};
+    SDL_Color arrowCol  = {100, 160, 220, 255};
+    SDL_Color dimCol    = { 70,  70,  70, 255};
+    SDL_Color hintCol   = {100, 140, 100, 255};
+
+    int ty = Y + PAD;
+
+    drawText("K E Y   B I N D I N G S", X + 40, ty, titleCol);
+    ty += 22;
+
+    SDL_SetRenderDrawColor(sdl, 70, 70, 70, 255);
+    SDL_RenderDrawLine(sdl, X + 5, ty + 4, X + W - 5, ty + 4);
+    ty += 10;
+
+    for (int i = 0; i < INPUT_ACTION_COUNT; ++i) {
+        bool sel = (i == selectedRow);
+
+        if (sel) {
+            SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(sdl, 40, 80, 150, 120);
+            SDL_Rect rowRect = {X + 2, ty - 1, W - 4, ROW};
+            SDL_RenderFillRect(sdl, &rowRect);
+            SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+            drawText("\xe2\x96\xb6", X + PAD, ty, arrowCol);  // ▶
+        }
+
+        drawText(LABELS[i], X + PAD + (sel ? 16 : 0), ty, sel ? selLabel : normLabel);
+
+        if (sel && listening) {
+            bool blink = (SDL_GetTicks64() / 400) % 2;
+            if (blink) drawText("[ any key ]", KEYX, ty, listenCol);
+        } else {
+            SDL_Keycode code = map.get(static_cast<Action>(i));
+            std::string kn   = (code != SDLK_UNKNOWN) ? SDL_GetKeyName(code) : "-";
+            drawText(kn, KEYX, ty, sel ? selKey : normKey);
+        }
+
+        ty += ROW;
+    }
+
+    SDL_SetRenderDrawColor(sdl, 70, 70, 70, 255);
+    SDL_RenderDrawLine(sdl, X + 5, ty + 4, X + W - 5, ty + 4);
+    ty += 10;
+
+    if (listening)
+        drawText("Esc  cancel", X + PAD, ty, hintCol);
+    else
+        drawText("\xe2\x86\x91\xe2\x86\x93 select   \xe2\x86\xb5 rebind   K close", X + PAD, ty, hintCol);
 }

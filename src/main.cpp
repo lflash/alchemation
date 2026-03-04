@@ -18,12 +18,17 @@ int main() {
     Game        game;
     AudioSystem audio;
 
-    constexpr const char* SAVE_PATH = "save.dat";
-    game.load(SAVE_PATH);   // no-op if file absent
+    constexpr const char* SAVE_PATH     = "save.dat";
+    constexpr const char* SETTINGS_PATH = "settings.dat";
+    game.load(SAVE_PATH);                          // no-op if file absent
+    input.setMap(InputMap::load(SETTINGS_PATH));   // falls back to defaults if absent
 
     // ── UI state ─────────────────────────────────────────────────────────────
     bool showControls   = false;
     bool showRecordings = false;
+    bool showRebind     = false;
+    int  rebindRow      = 0;
+    bool rebindListening = false;
     bool renamingScript = false;
     std::string renameBuffer;
     Input emptyInput;   // passed to game.tick() while rename is active
@@ -77,19 +82,54 @@ int main() {
                 }
             }
 
+            // Capture next keypress for rebinding
+            if (rebindListening && e.type == SDL_KEYDOWN && e.key.repeat == 0) {
+                SDL_Keycode k = e.key.keysym.sym;
+                if (k == SDLK_ESCAPE) {
+                    rebindListening = false;
+                } else {
+                    InputMap m = input.getMap();
+                    m.set(static_cast<Action>(rebindRow), k);
+                    input.setMap(m);
+                    rebindListening = false;
+                }
+                continue;
+            }
+
             input.handleEvent(e);
         }
 
-        if (input.pressed(Action::Quit)) { game.save(SAVE_PATH); quit = true; }
+        if (input.pressed(Action::Quit)) {
+            game.save(SAVE_PATH);
+            input.getMap().save(SETTINGS_PATH);
+            quit = true;
+        }
 
         // Panel toggles — mutually exclusive
         if (input.pressed(Action::ToggleControls)) {
             showControls   = !showControls;
             showRecordings = false;
+            showRebind     = false;
         }
         if (input.pressed(Action::ToggleRecordings)) {
             showRecordings = !showRecordings;
             showControls   = false;
+            showRebind     = false;
+        }
+        if (input.pressed(Action::ToggleRebind)) {
+            showRebind = !showRebind;
+            if (!showRebind) input.getMap().save(SETTINGS_PATH);
+            showControls   = false;
+            showRecordings = false;
+            rebindListening = false;
+        }
+        if (showRebind && !rebindListening) {
+            if (input.pressed(Action::PanUp))
+                rebindRow = (rebindRow - 1 + INPUT_ACTION_COUNT) % INPUT_ACTION_COUNT;
+            if (input.pressed(Action::PanDown))
+                rebindRow = (rebindRow + 1) % INPUT_ACTION_COUNT;
+            if (input.pressed(Action::Confirm))
+                rebindListening = true;
         }
 
         // Start rename when recordings panel is open and Enter pressed
@@ -269,6 +309,8 @@ int main() {
             renderer.drawRecordingsPanel(game.recordingList(), renamingScript, renameBuffer);
         else if (showControls)
             renderer.drawControlsMenu();
+        else if (showRebind)
+            renderer.drawRebindPanel(input.getMap(), rebindRow, rebindListening);
 
         renderer.endFrame();
     }
