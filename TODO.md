@@ -294,6 +294,14 @@ existing `AudioEvent`-style hooks or new `VisualEvent` equivalents emitted from
 - [ ] Routine-triggered terrain — wire DIG/PLANT opcodes in VM to Terrain calls
 - [ ] Conditional routines — JUMP_IF / JUMP_IF_NOT on fire/entity-ahead stimulus
 
+### Input & Controller Support
+- [ ] Key remapping — `InputMap` struct replaces hardcoded `Key` enum checks; bindings stored in a config file and editable at runtime
+- [ ] Gamepad support — SDL2 `SDL_GameController` API; analogue stick mapped to directional movement with deadzone; all actions bindable to buttons
+- [ ] Multiple controller profiles — player can switch between keyboard/gamepad at any time; last-used device takes priority
+- [ ] Settings menu — new in-game screen (toggled with a key, e.g. Escape → menu) listing current bindings; navigate with arrow keys or D-pad
+- [ ] Rebind UI — highlight a binding row, press any key/button to assign it; detect conflicts and warn; reset-to-default option
+- [ ] Binding persistence — save/load bindings alongside save.dat (or a separate `settings.dat`); fall back to defaults if file absent or malformed
+
 ### World Generation
 - [ ] Biome map — second Perlin layer drives region type (forest, plains, swamp, desert)
 - [ ] Procedural entity spawning — goblins in clusters, mushroom patches in forest
