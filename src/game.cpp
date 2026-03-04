@@ -219,7 +219,7 @@ void Game::tickPlayerInput(const Input& input) {
     Entity* player = registry_.get(playerID_);
 
     // r: toggle recording
-    if (input.pressed(Key::R)) {
+    if (input.pressed(Action::Record)) {
         if (recorder_.isRecording()) {
             recorder_.stop();
             selectedRecording_ = recorder_.recordings.size() - 1;
@@ -231,11 +231,11 @@ void Game::tickPlayerInput(const Input& input) {
     }
 
     // q: cycle selected recording
-    if (input.pressed(Key::Q) && !recorder_.recordings.empty())
+    if (input.pressed(Action::CycleRecording) && !recorder_.recordings.empty())
         selectedRecording_ = (selectedRecording_ + 1) % recorder_.recordings.size();
 
     // e: deploy selected recording as Poop agent in front of player
-    if (input.pressed(Key::E) && player &&
+    if (input.pressed(Action::Deploy) && player &&
         !recorder_.recordings.empty() &&
         selectedRecording_ < recorder_.recordings.size()) {
 
@@ -252,7 +252,7 @@ void Game::tickPlayerInput(const Input& input) {
     }
 
     // Tab: toggle between world and studio
-    if (input.pressed(Key::Tab) && player && player->isIdle()) {
+    if (input.pressed(Action::SwitchGrid) && player && player->isIdle()) {
         if (activeGridID_ == GRID_WORLD) {
             playerWorldPos_ = player->pos;
             transferEntity(playerID_, grids_.at(GRID_WORLD), grids_.at(GRID_STUDIO),
@@ -275,15 +275,15 @@ void Game::tickPlayerInput(const Input& input) {
 
     // Movement
     TilePos delta = {0, 0};
-    if (input.held(Key::W)) delta.y -= 1;
-    if (input.held(Key::S)) delta.y += 1;
-    if (input.held(Key::A)) delta.x -= 1;
-    if (input.held(Key::D)) delta.x += 1;
+    if (input.held(Action::MoveUp)) delta.y -= 1;
+    if (input.held(Action::MoveDown)) delta.y += 1;
+    if (input.held(Action::MoveLeft)) delta.x -= 1;
+    if (input.held(Action::MoveRight)) delta.x += 1;
 
     if (delta != TilePos{0, 0}) {
         TilePos   newDest      = player->pos + delta;
         Direction facingBefore = player->facing;
-        if (!input.held(Key::Shift))
+        if (!input.held(Action::Strafe))
             player->facing = toDirection(delta);
 
         // Resolve destination height. Bounded rooms are flat (z unchanged).
@@ -364,14 +364,14 @@ void Game::tickPlayerInput(const Input& input) {
 
     // Terrain interaction
     TilePos ahead = player->pos + dirToDelta(player->facing);
-    if (input.pressed(Key::F)) {
+    if (input.pressed(Action::Dig)) {
         grid.terrain.dig(ahead);
         audioEvents_.push_back(AudioEvent::Dig);
         visualEvents_.push_back({ VisualEventType::Dig,
                                   toVec(ahead), static_cast<float>(ahead.z) });
     }
 
-    if (input.pressed(Key::C)) {
+    if (input.pressed(Action::Plant)) {
         if (grid.terrain.typeAt(ahead) == TileType::BareEarth && player->mana >= 1) {
             EntityID mid = registry_.spawn(EntityType::Mushroom, ahead);
             grid.add(mid, *registry_.get(mid));
@@ -383,7 +383,7 @@ void Game::tickPlayerInput(const Input& input) {
 
 
     // O: create portal + linked room ahead of player
-    if (input.pressed(Key::O) && player) {
+    if (input.pressed(Action::PlacePortal) && player) {
         TilePos fwd = player->pos + dirToDelta(player->facing);
         // Only create if the tile is empty and not already a portal
         if (!grid.portals.count(fwd) &&

@@ -1,30 +1,29 @@
 #include "input.hpp"
 
-SDL_Keycode Input::toSDL(Key k) {
-    switch (k) {
-        case Key::W:         return SDLK_w;
-        case Key::A:         return SDLK_a;
-        case Key::S:         return SDLK_s;
-        case Key::D:         return SDLK_d;
-        case Key::E:         return SDLK_e;
-        case Key::F:         return SDLK_f;
-        case Key::C:         return SDLK_c;
-        case Key::R:         return SDLK_r;
-        case Key::Q:         return SDLK_q;
-        case Key::O:         return SDLK_o;
-        case Key::Z:         return SDLK_z;
-        case Key::H:         return SDLK_h;
-        case Key::I:         return SDLK_i;
-        case Key::Escape:    return SDLK_ESCAPE;
-        case Key::Enter:     return SDLK_RETURN;
-        case Key::Shift:     return SDLK_LSHIFT;
-        case Key::Tab:       return SDLK_TAB;
-        case Key::ArrowUp:   return SDLK_UP;
-        case Key::ArrowDown: return SDLK_DOWN;
-        case Key::ArrowLeft: return SDLK_LEFT;
-        case Key::ArrowRight:return SDLK_RIGHT;
-        case Key::Ctrl:      return SDLK_LCTRL;
-        case Key::Backspace: return SDLK_BACKSPACE;
+SDL_Keycode Input::toSDL(Action a) {
+    switch (a) {
+        case Action::MoveUp:           return SDLK_w;
+        case Action::MoveDown:         return SDLK_s;
+        case Action::MoveLeft:         return SDLK_a;
+        case Action::MoveRight:        return SDLK_d;
+        case Action::Strafe:           return SDLK_LSHIFT;
+        case Action::Dig:              return SDLK_f;
+        case Action::Plant:            return SDLK_c;
+        case Action::PlacePortal:      return SDLK_o;
+        case Action::Record:           return SDLK_r;
+        case Action::CycleRecording:   return SDLK_q;
+        case Action::Deploy:           return SDLK_e;
+        case Action::SwitchGrid:       return SDLK_TAB;
+        case Action::PanUp:            return SDLK_UP;
+        case Action::PanDown:          return SDLK_DOWN;
+        case Action::PanLeft:          return SDLK_LEFT;
+        case Action::PanRight:         return SDLK_RIGHT;
+        case Action::ResetCamera:      return SDLK_BACKSPACE;
+        case Action::ZoomModifier:     return SDLK_LCTRL;
+        case Action::Quit:             return SDLK_ESCAPE;
+        case Action::Confirm:          return SDLK_RETURN;
+        case Action::ToggleControls:   return SDLK_h;
+        case Action::ToggleRecordings: return SDLK_i;
     }
     return SDLK_UNKNOWN;
 }
@@ -51,16 +50,16 @@ void Input::handleEvent(const SDL_Event& e) {
         current.erase(key);
 }
 
-bool Input::held(Key k) const {
-    return current.count(toSDL(k)) > 0;
+bool Input::held(Action a) const {
+    return current.count(toSDL(a)) > 0;
 }
 
-bool Input::pressed(Key k) const {
-    SDL_Keycode code = toSDL(k);
+bool Input::pressed(Action a) const {
+    SDL_Keycode code = toSDL(a);
     return current.count(code) && !previous.count(code);
 }
 
-bool Input::released(Key k) const {
-    SDL_Keycode code = toSDL(k);
+bool Input::released(Action a) const {
+    SDL_Keycode code = toSDL(a);
     return !current.count(code) && previous.count(code);
 }

@@ -158,13 +158,13 @@ TEST_CASE("held() is true while key is down") {
     Input input;
     input.beginFrame();
     input.handleEvent(makeKeyDown(SDLK_w));
-    CHECK(input.held(Key::W));
+    CHECK(input.held(Action::MoveUp));
 }
 
 TEST_CASE("held() is false before key is pressed") {
     Input input;
     input.beginFrame();
-    CHECK(!input.held(Key::W));
+    CHECK(!input.held(Action::MoveUp));
 }
 
 TEST_CASE("held() is false after key is released") {
@@ -173,7 +173,7 @@ TEST_CASE("held() is false after key is released") {
     input.handleEvent(makeKeyDown(SDLK_w));
     input.beginFrame();
     input.handleEvent(makeKeyUp(SDLK_w));
-    CHECK(!input.held(Key::W));
+    CHECK(!input.held(Action::MoveUp));
 }
 
 TEST_CASE("pressed() is true only on the first frame a key is down") {
@@ -182,12 +182,12 @@ TEST_CASE("pressed() is true only on the first frame a key is down") {
     // Frame 1: key goes down
     input.beginFrame();
     input.handleEvent(makeKeyDown(SDLK_w));
-    CHECK(input.pressed(Key::W));
+    CHECK(input.pressed(Action::MoveUp));
 
     // Frame 2: key still held, no new event
     input.beginFrame();
-    CHECK(!input.pressed(Key::W));
-    CHECK(input.held(Key::W));
+    CHECK(!input.pressed(Action::MoveUp));
+    CHECK(input.held(Action::MoveUp));
 }
 
 TEST_CASE("pressed() ignores key-repeat events") {
@@ -203,8 +203,8 @@ TEST_CASE("pressed() ignores key-repeat events") {
 
     input.beginFrame();
     input.handleEvent(repeat);
-    CHECK(!input.pressed(Key::W));
-    CHECK(input.held(Key::W));
+    CHECK(!input.pressed(Action::MoveUp));
+    CHECK(input.held(Action::MoveUp));
 }
 
 TEST_CASE("released() is true only on the frame the key goes up") {
@@ -215,11 +215,11 @@ TEST_CASE("released() is true only on the frame the key goes up") {
 
     input.beginFrame();
     input.handleEvent(makeKeyUp(SDLK_s));
-    CHECK(input.released(Key::S));
+    CHECK(input.released(Action::MoveDown));
 
     // Released fires only once
     input.beginFrame();
-    CHECK(!input.released(Key::S));
+    CHECK(!input.released(Action::MoveDown));
 }
 
 TEST_CASE("multiple keys are tracked independently") {
@@ -228,17 +228,17 @@ TEST_CASE("multiple keys are tracked independently") {
     input.handleEvent(makeKeyDown(SDLK_w));
     input.handleEvent(makeKeyDown(SDLK_d));
 
-    CHECK(input.held(Key::W));
-    CHECK(input.held(Key::D));
-    CHECK(!input.held(Key::A));
+    CHECK(input.held(Action::MoveUp));
+    CHECK(input.held(Action::MoveRight));
+    CHECK(!input.held(Action::MoveLeft));
 
     input.beginFrame();
     input.handleEvent(makeKeyUp(SDLK_w));
 
-    CHECK(!input.held(Key::W));
-    CHECK(input.held(Key::D));
-    CHECK(input.released(Key::W));
-    CHECK(!input.released(Key::D));
+    CHECK(!input.held(Action::MoveUp));
+    CHECK(input.held(Action::MoveRight));
+    CHECK(input.released(Action::MoveUp));
+    CHECK(!input.released(Action::MoveRight));
 }
 
 // ─── toDirection ─────────────────────────────────────────────────────────────
@@ -261,18 +261,18 @@ TEST_CASE("toDirection maps diagonal deltas correctly") {
 
 static SDL_Event makeKeyDown(SDL_Keycode key);  // defined above
 
-TEST_CASE("held(Key::Shift) is true when left shift is down") {
+TEST_CASE("held(Action::Strafe) is true when left shift is down") {
     Input input;
     input.beginFrame();
     input.handleEvent(makeKeyDown(SDLK_LSHIFT));
-    CHECK(input.held(Key::Shift));
+    CHECK(input.held(Action::Strafe));
 }
 
-TEST_CASE("held(Key::Shift) is true when right shift is down") {
+TEST_CASE("held(Action::Strafe) is true when right shift is down") {
     Input input;
     input.beginFrame();
     input.handleEvent(makeKeyDown(SDLK_RSHIFT));
-    CHECK(input.held(Key::Shift));
+    CHECK(input.held(Action::Strafe));
 }
 
 // Mirrors the strafe logic from main.cpp: facing only updates when shift is not held.

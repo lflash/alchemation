@@ -3,11 +3,23 @@
 #include <SDL2/SDL.h>
 #include <unordered_set>
 
-enum class Key {
-    W, A, S, D, E, F, C, R, Q, O, Z, H, I,
-    Escape, Shift, Tab, Enter,
-    ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-    Ctrl, Backspace
+// Logical actions — what the player intends, not which physical key is pressed.
+// The mapping from Action to SDL_Keycode lives in InputMap (input_map.hpp).
+enum class Action {
+    // Movement
+    MoveUp, MoveDown, MoveLeft, MoveRight,
+    Strafe,          // hold to move without turning
+    // Terrain
+    Dig, Plant, PlacePortal,
+    // Recording / agents
+    Record, CycleRecording, Deploy,
+    // Grid
+    SwitchGrid,
+    // Camera
+    PanUp, PanDown, PanLeft, PanRight,
+    ResetCamera, ZoomModifier,
+    // UI
+    Quit, Confirm, ToggleControls, ToggleRecordings,
 };
 
 class Input {
@@ -19,9 +31,9 @@ public:
     // Call for each SDL_KEYDOWN / SDL_KEYUP event.
     void handleEvent(const SDL_Event& e);
 
-    bool held(Key k)     const;   // key is currently down
-    bool pressed(Key k)  const;   // key went down this frame (not on repeat)
-    bool released(Key k) const;   // key went up this frame
+    bool held(Action a)     const;   // key is currently down
+    bool pressed(Action a)  const;   // key went down this frame (not on repeat)
+    bool released(Action a) const;   // key went up this frame
 
     // Signed scroll accumulator for the current frame (positive = scroll up).
     // Reset to zero in beginFrame(). Caller checks held(Key::Ctrl) separately.
@@ -32,5 +44,5 @@ private:
     std::unordered_set<SDL_Keycode> previous;
     int scrollDelta_ = 0;
 
-    static SDL_Keycode toSDL(Key k);
+    static SDL_Keycode toSDL(Action a);
 };

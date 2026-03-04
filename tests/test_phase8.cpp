@@ -227,9 +227,9 @@ TEST_CASE("studio terrain is independent from world terrain") {
     CHECK(studio.terrain.typeAt({3, 3}) == TileType::Grass);
 }
 
-TEST_CASE("Key::Tab is recognised by Input") {
+TEST_CASE("Action::SwitchGrid is recognised by Input") {
     Input input;
     input.beginFrame();
     input.handleEvent(makeKeyDown(SDLK_TAB));
-    CHECK(input.pressed(Key::Tab));
+    CHECK(input.pressed(Action::SwitchGrid));
 }

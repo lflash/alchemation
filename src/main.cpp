@@ -80,20 +80,20 @@ int main() {
             input.handleEvent(e);
         }
 
-        if (input.pressed(Key::Escape)) { game.save(SAVE_PATH); quit = true; }
+        if (input.pressed(Action::Quit)) { game.save(SAVE_PATH); quit = true; }
 
         // Panel toggles — mutually exclusive
-        if (input.pressed(Key::H)) {
+        if (input.pressed(Action::ToggleControls)) {
             showControls   = !showControls;
             showRecordings = false;
         }
-        if (input.pressed(Key::I)) {
+        if (input.pressed(Action::ToggleRecordings)) {
             showRecordings = !showRecordings;
             showControls   = false;
         }
 
         // Start rename when recordings panel is open and Enter pressed
-        if (showRecordings && !renamingScript && input.pressed(Key::Enter)) {
+        if (showRecordings && !renamingScript && input.pressed(Action::Confirm)) {
             auto list = game.recordingList();
             for (const auto& r : list) {
                 if (r.selected) { renameBuffer = r.name; break; }
@@ -128,15 +128,15 @@ int main() {
         float fdt = static_cast<float>(dt);
 
         // Arrow keys pan the offset; Backspace re-centres.
-        if (input.held(Key::ArrowLeft))  camOffset.x -= PAN_SPEED * fdt;
-        if (input.held(Key::ArrowRight)) camOffset.x += PAN_SPEED * fdt;
-        if (input.held(Key::ArrowUp))    camOffset.y -= PAN_SPEED * fdt;
-        if (input.held(Key::ArrowDown))  camOffset.y += PAN_SPEED * fdt;
-        if (!renamingScript && input.pressed(Key::Backspace)) camOffset = {0.0f, 0.0f};
+        if (input.held(Action::PanLeft))  camOffset.x -= PAN_SPEED * fdt;
+        if (input.held(Action::PanRight)) camOffset.x += PAN_SPEED * fdt;
+        if (input.held(Action::PanUp))    camOffset.y -= PAN_SPEED * fdt;
+        if (input.held(Action::PanDown))  camOffset.y += PAN_SPEED * fdt;
+        if (!renamingScript && input.pressed(Action::ResetCamera)) camOffset = {0.0f, 0.0f};
 
         // Ctrl + scroll wheel → zoom around screen centre.
         int scroll = input.scroll();
-        if (input.held(Key::Ctrl) && scroll != 0) {
+        if (input.held(Action::ZoomModifier) && scroll != 0) {
             camera.zoom *= std::pow(ZOOM_STEP, static_cast<float>(scroll));
             camera.zoom  = std::clamp(camera.zoom, ZOOM_MIN, ZOOM_MAX);
         }
