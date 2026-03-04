@@ -1,35 +1,45 @@
 #include "input.hpp"
 
-SDL_Keycode Input::toSDL(Action a) {
-    switch (a) {
-        case Action::MoveUp:           return SDLK_w;
-        case Action::MoveDown:         return SDLK_s;
-        case Action::MoveLeft:         return SDLK_a;
-        case Action::MoveRight:        return SDLK_d;
-        case Action::Strafe:           return SDLK_LSHIFT;
-        case Action::Dig:              return SDLK_f;
-        case Action::Plant:            return SDLK_c;
-        case Action::PlacePortal:      return SDLK_o;
-        case Action::Record:           return SDLK_r;
-        case Action::CycleRecording:   return SDLK_q;
-        case Action::Deploy:           return SDLK_e;
-        case Action::SwitchGrid:       return SDLK_TAB;
-        case Action::PanUp:            return SDLK_UP;
-        case Action::PanDown:          return SDLK_DOWN;
-        case Action::PanLeft:          return SDLK_LEFT;
-        case Action::PanRight:         return SDLK_RIGHT;
-        case Action::ResetCamera:      return SDLK_BACKSPACE;
-        case Action::ZoomModifier:     return SDLK_LCTRL;
-        case Action::Quit:             return SDLK_ESCAPE;
-        case Action::Confirm:          return SDLK_RETURN;
-        case Action::ToggleControls:   return SDLK_h;
-        case Action::ToggleRecordings: return SDLK_i;
-    }
-    return SDLK_UNKNOWN;
+// ─── InputMap ────────────────────────────────────────────────────────────────
+
+SDL_Keycode InputMap::get(Action a) const {
+    auto it = bindings.find(a);
+    return it != bindings.end() ? it->second : SDLK_UNKNOWN;
 }
 
+InputMap InputMap::defaults() {
+    InputMap m;
+    m.bindings = {
+        { Action::MoveUp,           SDLK_w         },
+        { Action::MoveDown,         SDLK_s         },
+        { Action::MoveLeft,         SDLK_a         },
+        { Action::MoveRight,        SDLK_d         },
+        { Action::Strafe,           SDLK_LSHIFT    },
+        { Action::Dig,              SDLK_f         },
+        { Action::Plant,            SDLK_c         },
+        { Action::PlacePortal,      SDLK_o         },
+        { Action::Record,           SDLK_r         },
+        { Action::CycleRecording,   SDLK_q         },
+        { Action::Deploy,           SDLK_e         },
+        { Action::SwitchGrid,       SDLK_TAB       },
+        { Action::PanUp,            SDLK_UP        },
+        { Action::PanDown,          SDLK_DOWN      },
+        { Action::PanLeft,          SDLK_LEFT      },
+        { Action::PanRight,         SDLK_RIGHT     },
+        { Action::ResetCamera,      SDLK_BACKSPACE },
+        { Action::ZoomModifier,     SDLK_LCTRL     },
+        { Action::Quit,             SDLK_ESCAPE    },
+        { Action::Confirm,          SDLK_RETURN    },
+        { Action::ToggleControls,   SDLK_h         },
+        { Action::ToggleRecordings, SDLK_i         },
+    };
+    return m;
+}
+
+// ─── Input ───────────────────────────────────────────────────────────────────
+
 void Input::beginFrame() {
-    previous    = current;
+    previous_    = current_;
     scrollDelta_ = 0;
 }
 
@@ -39,27 +49,28 @@ void Input::handleEvent(const SDL_Event& e) {
         return;
     }
 
-    // Normalise modifier pairs so a single Key:: matches either physical key.
+    // Normalise modifier pairs so a single Action matches either physical key.
     SDL_Keycode key = e.key.keysym.sym;
     if (key == SDLK_RSHIFT) key = SDLK_LSHIFT;
     if (key == SDLK_RCTRL)  key = SDLK_LCTRL;
 
     if (e.type == SDL_KEYDOWN && e.key.repeat == 0)
-        current.insert(key);
+        current_.insert(key);
     else if (e.type == SDL_KEYUP)
-        current.erase(key);
+        current_.erase(key);
 }
 
 bool Input::held(Action a) const {
-    return current.count(toSDL(a)) > 0;
+    SDL_Keycode code = map_.get(a);
+    return code != SDLK_UNKNOWN && current_.count(code) > 0;
 }
 
 bool Input::pressed(Action a) const {
-    SDL_Keycode code = toSDL(a);
-    return current.count(code) && !previous.count(code);
+    SDL_Keycode code = map_.get(a);
+    return code != SDLK_UNKNOWN && current_.count(code) && !previous_.count(code);
 }
 
 bool Input::released(Action a) const {
-    SDL_Keycode code = toSDL(a);
-    return !current.count(code) && previous.count(code);
+    SDL_Keycode code = map_.get(a);
+    return code != SDLK_UNKNOWN && !current_.count(code) && previous_.count(code);
 }
