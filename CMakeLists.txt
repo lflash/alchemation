@@ -72,6 +72,7 @@ add_executable(tests
     tests/test_input_map.cpp
     tests/test_phase11.cpp
     tests/test_phase12.cpp
+    tests/test_phase13.cpp
     ${LOGIC_SOURCES}
 )
 

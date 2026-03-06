@@ -25,6 +25,12 @@ public:
     // for non-strafing movement but may differ when strafing).
     void recordMove(TilePos delta, Direction facingBeforeMove);
 
+    // Emit a WAIT (if any pause) then a DIG instruction.
+    void recordDig();
+
+    // Emit a WAIT (if any pause) then a PLANT instruction.
+    void recordPlant();
+
     // Append HALT and return the completed Recording. Resets internal state.
     Recording stop();
 

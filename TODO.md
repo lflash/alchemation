@@ -352,38 +352,44 @@ Implement the golem summoning system.
 
 ---
 
-## Phase 13 — Routine VM Expansion
+## Phase 13 — Routine VM Expansion ✓
 
 Extend the instruction set so agents can interact with terrain and react to stimuli.
 
-### Instruction format (decided)
-Flat struct — all fields always present, unused fields default to zero:
-`op`, `dir` (RelDir), `ticks` (WAIT), `addr` (JUMP/CALL), `cond` (Condition), `threshold`.
-Save format bumped to v7. Struct already updated in `routine.hpp`.
+### New opcodes ✓
+- [x] `DIG` — agent digs the tile in its facing direction; emits Dig audio + visual event
+- [x] `PLANT` — agent plants mushroom ahead if tile is `BareEarth`
+- [x] `JUMP addr` — unconditional jump to instruction index
+- [x] `JUMP_IF cond threshold addr` — jump if `stimulus[cond] > threshold`
+- [x] `JUMP_IF_NOT cond threshold addr` — jump if `stimulus[cond] <= threshold`
+- [x] `CALL addr` — push return address onto 8-slot call stack, jump to subroutine
+- [x] `RET` — pop call stack, jump back; unmatched RET halts safely
+- [x] Call stack overflow (depth > 8) halts safely
 
-### New opcodes
-- [ ] `DIG` — agent digs the tile in its facing direction (`terrain.dig(dest)`); mana cost applied
-- [ ] `PLANT` — agent plants mushroom ahead if tile is `BareEarth` and carried mana ≥ 1
-- [ ] `JUMP addr` — unconditional jump to instruction index
-- [ ] `JUMP_IF cond threshold addr` — jump if `stimulus[cond] > threshold`
-- [ ] `JUMP_IF_NOT cond threshold addr` — jump if `stimulus[cond] <= threshold`
-- [ ] `CALL addr` — push return address onto fixed-depth call stack (depth 8), jump to subroutine
-- [ ] `RET` — pop call stack, return to caller
-- [ ] `HALT` — agent becomes idle / despawns (already implemented)
+### Stimulus sampling ✓
+- [x] `tickVM` computes `uint8_t stimuli[8]` per agent before calling `vm_.step()`
+- [x] `Fire` — agent's current tile is `TileType::Fire`
+- [x] `Wet` — agent's current tile is `TileType::Puddle`
+- [x] `EntityAhead` — any entity occupies the tile directly ahead of the agent
+- [x] `AtEdge` — agent is on the boundary tile of a bounded grid
 
-### Condition enum
-- [ ] Stimulus sampling: each condition checks the agent's current tile (or tile ahead)
-      (`Condition` enum already defined in `routine.hpp` — see DESIGN.md § Data Types)
+### Recorder support ✓
+- [x] `Recorder::recordDig()` — emits WAIT (if paused) then DIG
+- [x] `Recorder::recordPlant()` — emits WAIT (if paused) then PLANT
+- [x] `tickPlayerInput` calls `recorder_.recordDig()` / `recordPlant()` when player acts
+- [x] Mana cost table complete: `DIG = 3`, `PLANT = 2`, `JUMP* = 0`, `CALL/RET = 0`
 
-### Recorder support
-- [ ] Recorder emits `DIG` / `PLANT` instructions when player digs / plants during recording
-- [ ] Mana cost table updated: `DIG = 3`, `PLANT = 2`, `JUMP* = 0`, `CALL/RET = 0`
-
-**Tests**
-- [ ] `DIG` opcode calls `terrain.dig()` at agent's facing tile
-- [ ] `JUMP` advances PC to correct address
-- [ ] `JUMP_IF FIRE` fires when tile has fire stimulus; skips when not
-- [ ] `CALL/RET` round-trip restores correct return address; overflow (depth 9) safe
+**Tests** ✓ (25 new tests)
+- [x] DIG/PLANT set correct VMResult fields, advance PC
+- [x] JUMP sets PC to target; backward jump works
+- [x] JUMP_IF: jumps when stimulus present; falls through when absent; null stimuli = all zero
+- [x] JUMP_IF_NOT: complement behaviour
+- [x] CALL: pushes return address, jumps to subroutine
+- [x] CALL/RET round-trip restores PC and leaves stack clean
+- [x] CALL overflow (depth 9) halts safely
+- [x] RET with empty stack halts safely
+- [x] Recorder recordDig/recordPlant: emit correct instruction sequences with WAIT
+- [x] instrCost for all new opcodes
 
 ---
 

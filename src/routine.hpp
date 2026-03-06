@@ -54,8 +54,12 @@ struct Instruction {
 // ─── AgentExecState ──────────────────────────────────────────────────────────
 
 struct AgentExecState {
+    static constexpr int CALL_STACK_DEPTH = 8;
+
     uint32_t pc        = 0;   // index into Recording::instructions
     uint32_t waitTicks = 0;   // remaining ticks on a WAIT
+    uint16_t callStack[CALL_STACK_DEPTH] = {};   // CALL return addresses
+    int      callDepth = 0;                      // current stack depth
 };
 
 // ─── Instruction cost table ───────────────────────────────────────────────────

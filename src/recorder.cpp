@@ -23,6 +23,24 @@ void Recorder::recordMove(TilePos delta, Direction facingBeforeMove) {
     current_.instructions.push_back({ .op = OpCode::MOVE_REL, .dir = rel });
 }
 
+void Recorder::recordDig() {
+    if (!recording_) return;
+    if (ticksSinceLastMove_ > 0) {
+        current_.instructions.push_back({ .op = OpCode::WAIT, .ticks = static_cast<uint16_t>(ticksSinceLastMove_) });
+        ticksSinceLastMove_ = 0;
+    }
+    current_.instructions.push_back({ .op = OpCode::DIG });
+}
+
+void Recorder::recordPlant() {
+    if (!recording_) return;
+    if (ticksSinceLastMove_ > 0) {
+        current_.instructions.push_back({ .op = OpCode::WAIT, .ticks = static_cast<uint16_t>(ticksSinceLastMove_) });
+        ticksSinceLastMove_ = 0;
+    }
+    current_.instructions.push_back({ .op = OpCode::PLANT });
+}
+
 Recording Recorder::stop() {
     current_.instructions.push_back({ .op = OpCode::HALT });
     current_.name = "Script " + std::to_string(recordings.size() + 1);

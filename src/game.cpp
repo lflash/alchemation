@@ -463,6 +463,7 @@ void Game::tickPlayerInput(const Input& input) {
     TilePos ahead = player->pos + dirToDelta(player->facing);
     if (input.pressed(Action::Dig)) {
         grid.terrain.dig(ahead);
+        recorder_.recordDig();
         audioEvents_.push_back(AudioEvent::Dig);
         visualEvents_.push_back({ VisualEventType::Dig,
                                   toVec(ahead), static_cast<float>(ahead.z) });
@@ -474,6 +475,7 @@ void Game::tickPlayerInput(const Input& input) {
             grid.add(mid, *registry_.get(mid));
             grid.terrain.restore(ahead);
             player->mana--;
+            recorder_.recordPlant();
             audioEvents_.push_back(AudioEvent::Plant);
         }
     }
@@ -574,7 +576,27 @@ void Game::tickVM(Grid& grid) {
         Entity* ent = registry_.get(id);
         if (!ent || !ent->isIdle()) continue;
 
-        VMResult res = vm_.step(state, agentRecordings_[id], ent->facing);
+        // Build stimulus vector for conditional jumps.
+        uint8_t stimuli[8] = {};
+        {
+            TileType tileHere = grid.terrain.typeAt(ent->pos);
+            if (tileHere == TileType::Fire)
+                stimuli[static_cast<int>(Condition::Fire)] = 1;
+            if (tileHere == TileType::Puddle)
+                stimuli[static_cast<int>(Condition::Wet)] = 1;
+
+            TilePos ahead = ent->pos + dirToDelta(ent->facing);
+            auto candidates = grid.spatial.query(boundsAt(ahead, {1.0f, 1.0f}), ahead.z);
+            if (!candidates.empty())
+                stimuli[static_cast<int>(Condition::EntityAhead)] = 1;
+
+            if (grid.isBounded() &&
+                (ent->pos.x == 0 || ent->pos.x == grid.width  - 1 ||
+                 ent->pos.y == 0 || ent->pos.y == grid.height - 1))
+                stimuli[static_cast<int>(Condition::AtEdge)] = 1;
+        }
+
+        VMResult res = vm_.step(state, agentRecordings_[id], ent->facing, stimuli);
 
         if (res.halt) {
             if (ent->type == EntityType::Poop) {
@@ -597,6 +619,20 @@ void Game::tickVM(Grid& grid) {
                     ent->facing      = toDirection(res.moveDelta);
                     audioEvents_.push_back(AudioEvent::AgentStep);
                 }
+            }
+        } else if (res.wantDig) {
+            TilePos target = ent->pos + dirToDelta(ent->facing);
+            grid.terrain.dig(target);
+            audioEvents_.push_back(AudioEvent::Dig);
+            visualEvents_.push_back({ VisualEventType::Dig,
+                                      toVec(target), static_cast<float>(target.z) });
+        } else if (res.wantPlant) {
+            TilePos target = ent->pos + dirToDelta(ent->facing);
+            if (grid.terrain.typeAt(target) == TileType::BareEarth) {
+                EntityID mid = registry_.spawn(EntityType::Mushroom, target);
+                grid.add(mid, *registry_.get(mid));
+                grid.terrain.restore(target);
+                audioEvents_.push_back(AudioEvent::Plant);
             }
         }
     }

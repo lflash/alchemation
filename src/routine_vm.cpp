@@ -1,7 +1,7 @@
 #include "routine_vm.hpp"
 
 VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
-                         Direction agentFacing) const {
+                         Direction agentFacing, const uint8_t* stimuli) const {
     if (rec.empty() || state.pc >= rec.instructions.size())
         return { .halt = true };
 
@@ -14,6 +14,7 @@ VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
     const Instruction& instr = rec.instructions[state.pc];
 
     switch (instr.op) {
+
         case OpCode::HALT:
             return { .halt = true };
 
@@ -27,6 +28,44 @@ VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
             ++state.pc;
             return { .halt = false, .wantMove = true, .moveDelta = delta };
         }
+
+        case OpCode::DIG:
+            ++state.pc;
+            return { .wantDig = true };
+
+        case OpCode::PLANT:
+            ++state.pc;
+            return { .wantPlant = true };
+
+        case OpCode::JUMP:
+            state.pc = instr.addr;
+            return {};
+
+        case OpCode::JUMP_IF: {
+            uint8_t val = stimuli ? stimuli[static_cast<int>(instr.cond)] : 0;
+            state.pc = (val > instr.threshold) ? instr.addr : state.pc + 1;
+            return {};
+        }
+
+        case OpCode::JUMP_IF_NOT: {
+            uint8_t val = stimuli ? stimuli[static_cast<int>(instr.cond)] : 0;
+            state.pc = (val <= instr.threshold) ? instr.addr : state.pc + 1;
+            return {};
+        }
+
+        case OpCode::CALL:
+            if (state.callDepth >= AgentExecState::CALL_STACK_DEPTH)
+                return { .halt = true };   // overflow — safe stop
+            state.callStack[state.callDepth++] = static_cast<uint16_t>(state.pc + 1);
+            state.pc = instr.addr;
+            return {};
+
+        case OpCode::RET:
+            if (state.callDepth == 0)
+                return { .halt = true };   // unmatched RET — safe stop
+            state.pc = state.callStack[--state.callDepth];
+            return {};
     }
+
     return { .halt = true };
 }
