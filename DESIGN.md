@@ -2,24 +2,26 @@
 
 ## Vision
 
-A simulation of thousands to millions of autonomous agents, each following routines
-and reacting to stimulus from their environment and from other agents. The long-term
-goal is a 2.5D game in the style of Pokémon — a rich, living world that feels
+An **automation game** in the Pokémon Gen 4 visual style — and a simulation of thousands to
+millions of autonomous agents, each following routines and reacting to stimuli from their
+environment. The player is an alchemist-summoner: they record routines, summon golems from raw
+materials in the world, and direct those golems to automate resource collection, terrain
+modification, and production chains. The long-term goal is a rich, living world that feels
 populated and alive.
 
-Agents perceive and react to environmental stimuli — fire, water, freezing, being
-pushed or pulled, and others to be defined. Stimuli are per-tile float fields: fire
-intensity, cold, water level, force vector, and so on. They propagate across the
-tile grid each tick (fire spreads, cold radiates, water flows, force transfers) and
-agents sample the tile they occupy to determine their reaction. Stimuli are not
-entities — they are properties of space, updated in parallel by the compute backend.
+Agents perceive and react to environmental stimuli mediated by an **alchemy engine** — eight base
+elements (Earth, Air, Water, Fire, Curse, Goo, Holy, Acid) that combine Doodle-God-style to
+produce new materials, effects, and entities. Stimuli are per-tile float fields (fire intensity,
+cold, wetness, voltage, wind) that propagate across the tile grid each tick. Agents sample the
+tile they occupy to determine their reaction. Stimuli are not entities — they are properties of
+space, updated in parallel by the compute backend.
 
-The simulation is designed to run in parallel on the GPU or integrated graphics —
-the agent count target (millions) makes CPU-serial execution infeasible. The
-architecture should be as system-agnostic as possible: no vendor-specific GPU APIs,
-no assumptions about dedicated hardware. The compute backend (GPU parallelism,
-spatial queries, scheduling) must remain decoupled from both the simulation logic
-and the renderer so it can be swapped or extended without rewriting either.
+The simulation is designed to eventually run in parallel on the GPU — the agent count
+target (millions) makes CPU-serial execution infeasible at scale. The current C++/SDL2
+implementation is a **feature prototype** on CPU. Once the feature set is fleshed out
+(post-Phase 20), a full redesign targeting GPU compute (Vulkan or similar) will replace
+it. The CPU prototype does not need to accommodate GPU constraints — just build features
+cleanly and iterate fast.
 
 Development proceeds in two initial phases:
 
@@ -33,10 +35,11 @@ renderer-agnostic and shared between both frontends.
 Agent behaviour is driven by **routines** — authored programs that agents execute
 instruction by instruction. A routine is not a high-level goal ("find food") but a
 precise sequence of actions ("go right, go forward, if fire > 0.5 go back, loop").
-The player records routines by playing, then assigns them to agents. Thousands of
-agents run the same routine in parallel on the GPU, each with their own program
-counter and local state. Routines can call subroutines, enabling complex behaviour
-to be built from reusable components.
+**Golems** execute routines recorded directly by the player. Other agent types (NPCs,
+enemies) run authored routines of greater complexity, but all use the same bytecode
+format and VM. Thousands of agents run the same routine in parallel on the GPU, each
+with their own program counter and local state. Routines can call subroutines, enabling
+complex behaviour to be built from reusable components.
 
 ## Overview
 
@@ -66,6 +69,40 @@ visibility, and accurate perspective scaling without a full 3D engine.
   A move that would exceed this cap is blocked.
 - **Three occupancy layers, independently managed.** Terrain type and stimulus fields
   are properties of tiles. Entities are a separate system. All three coexist freely.
+- **No inventory.** The player carries only mana. All resources exist as world tiles or entities.
+- **No weapons.** The player never deals damage directly. Golems, terrain, and environmental
+  effects are the only sources of damage.
+- **Player is the programmer.** Skill expression is in routine design and golem deployment, not
+  real-time combat.
+
+---
+
+## Game Design
+
+### Gameplay Loop
+
+```
+Collect resources → automate collection → expand territory →
+encounter new materials → summon new golem types →
+discover unconquerable areas → research alchemy combinations → repeat
+```
+
+Progress is gated by **discovery**, not grind. Each new material unlocks a new golem type with
+new capabilities. Unconquerable areas require specific golem types or alchemy combinations to
+access — creating a natural exploration-and-unlock structure.
+
+### Endgame
+
+The **Philosopher's Stone** is the terminal alchemy combination. Crafting it requires mastering
+the full combination tree. Once crafted, it enables the final act: entering the King's fortress
+and defeating the King via golems.
+
+### Entity Placeholders
+
+All current `EntityType` names (`Goblin`, `Mushroom`, `Poop`, `Campfire`, `TreeStump`, `Log`,
+`Battery`, `Lightbulb`) are temporary placeholders used during development. They will be renamed
+and replaced as the golem system and alchemy engine take shape. See `ENTITIES.md` for the master
+list.
 
 ---
 
@@ -83,13 +120,21 @@ using GridID      = uint32_t;
 using RecordingID = uint32_t;
 using Tick        = uint64_t;
 
-enum class EntityType { Player, Goblin, Mushroom, Poop };
+enum class EntityType {
+    Player, Goblin, Mushroom, Poop,
+    Campfire,    // static; spreads fire stimulus to adjacent tiles
+    TreeStump,   // burnable; ignites after fire exposure, despawns when burned
+    Log,         // burnable; same as TreeStump
+    Battery,     // static; emits 5V into adjacent Puddle tiles (BFS)
+    Lightbulb,   // static; glows when its tile has ≥1V
+};
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
 
-enum class TileType  { Grass, BareEarth, Portal };
+enum class TileType  { Grass, BareEarth, Portal, Fire, Puddle };
 
+// AudioSystem-internal playback enum (audio.hpp):
 enum class SFX {
     Step, Dig, Plant, CollectMushroom,
     RecordStart, RecordStop, DeployAgent,
@@ -104,6 +149,7 @@ enum class MusicLayer {
     RoomInterior,   // inside any bounded room grid
 };
 
+// Game-side event enum (game.hpp) — Game emits these; main.cpp maps them to SFX:
 enum class AudioEvent {
     PlayerStep, Dig, Plant, CollectMushroom,
     RecordStart, RecordStop, DeployAgent,
@@ -111,52 +157,54 @@ enum class AudioEvent {
     GoblinHit, AgentStep,
 };
 
+enum class VisualEventType {
+    Dig, CollectMushroom, DeployAgent,
+    GoblinHit, GoblinDie, PlayerLand,
+    PortalEnter, GridSwitch,
+};
+
+struct VisualEvent {
+    VisualEventType type;
+    Vec2f           pos;
+    float           z;
+    EntityID        entityID   = 0;
+    EntityType      entityType = EntityType::Player;
+};
+
 using RoutineID = uint32_t;
 
-enum class OpCode : uint8_t {
-    MOVE_REL,      // move one tile relative to facing (forward/back/left/right)
-    MOVE_ABS,      // move one tile in absolute direction (N/S/E/W)
-    FACE,          // set facing without moving
-    WAIT,          // pause for arg0 ticks
-    DIG,           // dig tile in facing direction
-    PLANT,         // plant mushroom in facing direction (costs 1 mana)
-    JUMP,          // unconditional jump to addr
-    JUMP_IF,       // jump to addr if stimulus[condition] > threshold
-    JUMP_IF_NOT,   // jump to addr if stimulus[condition] <= threshold
-    CALL,          // push return address, jump to subroutine
-    RET,           // pop call stack, return to caller
-    HALT,          // stop executing (agent becomes idle)
-};
-
-enum class Condition : uint8_t {
-    FIRE, COLD, WATER, FORCE_X, FORCE_Y, ENTITY_AHEAD, AT_EDGE
-};
-
-struct Instruction {
-    OpCode    op;
-    uint8_t   dir;        // Direction (for MOVE_REL, MOVE_ABS, FACE)
-    Condition condition;  // stimulus to test (for JUMP_IF / JUMP_IF_NOT)
-    float     threshold;  // stimulus threshold
-    uint32_t  addr;       // jump target or subroutine RoutineID (for CALL)
-};
-
-constexpr int CALL_STACK_DEPTH = 8;
-
 struct AgentExecState {
-    RoutineID routineID;
-    uint32_t  pc;
-    uint32_t  waitTicks;
-    uint32_t  callStack[CALL_STACK_DEPTH];
-    uint8_t   callDepth;
+    uint32_t pc;
+    uint32_t waitTicks;
+    // Future: call stack for CALL/RET (depth 8, GPU-safe fixed size)
+    // uint32_t callStack[8]; uint8_t callDepth;
 };
+
+// Stimulus conditions testable by JUMP_IF / JUMP_IF_NOT (defined in routine.hpp):
+enum class Condition : uint8_t { None, Fire, Wet, EntityAhead, AtEdge };
+// Note: Wet = stimulus (tile property); Water = fluid (separate dynamics system).
 
 constexpr int TILE_ENTITY_CAP = 8;
 
-// Future: per-tile stimulus fields for agent reactions (not yet in code).
-// struct TileFields {
-//     TileType  type;
-//     float     fire, cold, water, forceX, forceY;
-// };
+// Full opcode set (MOVE_REL/WAIT/HALT implemented; rest planned for Phase 13):
+enum class OpCode : uint8_t {
+    MOVE_REL, WAIT, HALT,
+    DIG, PLANT,
+    JUMP, JUMP_IF, JUMP_IF_NOT,
+    CALL, RET,
+};
+
+// Flat instruction struct — all fields always present, unused fields zero.
+// Mapping: MOVE_REL→dir | WAIT→ticks | DIG/PLANT→(none) |
+//          JUMP/CALL→addr | JUMP_IF/JUMP_IF_NOT→addr+cond+threshold | RET/HALT→(none)
+struct Instruction {
+    OpCode    op        = OpCode::HALT;
+    RelDir    dir       = RelDir::Forward;
+    uint16_t  ticks     = 0;
+    uint16_t  addr      = 0;
+    Condition cond      = Condition::None;
+    uint8_t   threshold = 0;
+};
 ```
 
 ---
@@ -188,17 +236,33 @@ each frame:
 
 ### Input
 
-Snapshots key state once per tick. Provides:
-- `bool held(Key)`     — key currently down
-- `bool pressed(Key)`  — key went down this tick (not on repeat)
-- `bool released(Key)` — key went up this tick
-- `int  scroll()`      — mouse wheel delta this frame (positive = up)
+`Input` snapshots both keyboard and gamepad state each tick. Provides:
+- `bool held(Action)`     — action is currently active (keyboard or gamepad)
+- `bool pressed(Action)`  — action went active this tick (not on repeat)
+- `bool released(Action)` — action went inactive this tick
+- `int  scroll()`         — mouse wheel delta this frame (positive = up)
+- `bool hasGamepad()`     — true when a controller is connected
 
-Keys: `W A S D E F C R Q O H I Tab Shift Escape Enter Backspace`
-      `ArrowUp ArrowDown ArrowLeft ArrowRight Ctrl`
+**Action enum** — logical intent, not physical key:
+`MoveUp MoveDown MoveLeft MoveRight Strafe Dig Plant PlacePortal Record CycleRecording Deploy SwitchGrid PanUp PanDown PanLeft PanRight ResetCamera ZoomModifier Quit Confirm ToggleControls ToggleRecordings ToggleRebind`
+
+**InputMap** — `unordered_map<Action, SDL_Keycode>`. `InputMap::defaults()` returns the
+standard WASD layout. `save(path)` / `load(path)` persist bindings as plain text
+(`ActionName=KeyName` per line, `SDL_GetKeyName` format). Loaded from `settings.dat`
+on startup; saved on quit alongside `save.dat`.
+
+**GamepadMap** — `unordered_map<Action, GamepadBinding>`. Each binding is a button, a
+positive-axis threshold, or a negative-axis threshold. Default layout: D-pad for
+movement, face buttons for actions, right stick for camera pan. Left stick
+unconditionally drives movement regardless of bindings.
+
+**Rebind panel** (`K`): in-game panel listing all 23 actions with their current key.
+Navigate with arrow keys; press Enter to capture the next keypress for the selected
+action. Changes saved to `settings.dat` when the panel is closed.
 
 No raw events leak into the game logic. Text input (rename mode) is handled
-separately in main.cpp via SDL_TEXTINPUT events, bypassing the Input snapshot.
+separately in `main.cpp` via `SDL_TEXTINPUT` events, bypassing the Input snapshot.
+Rebind capture mode similarly intercepts `SDL_KEYDOWN` before it reaches `Input`.
 
 ---
 
@@ -219,6 +283,11 @@ struct Entity {
     int        layer;        // draw order (lower = drawn first)
     int        mana;
     int        health;
+
+    // Stimulus-response flags (set each tick by tickFire / tickVoltage):
+    bool       lit         = false;  // Lightbulb: true when tile has ≥1V
+    bool       burning     = false;  // TreeStump/Log: true while in entityBurnEnd
+    bool       electrified = false;  // any entity: true while on a charged Puddle
 };
 ```
 
@@ -267,6 +336,26 @@ class Game {
 **All non-paused grids tick every frame.** Only the active grid is rendered.
 Player input is delivered only to the active grid's tick.
 
+**Passive grid simulation (Phase 18):** Interior grids (buildings, rooms) are small
+and their agents run looping routines. Rather than ticking them every frame, inactive
+grids operate in *passive mode*.
+
+**Trigger:** no player in grid → dehydrate. Player enters → hydrate. No distance budget,
+no manual flag — presence is the only criterion.
+
+**Dehydration (player leaves):** analyse all running routines to determine cycle length and
+outputs (`ProduceMana`, `HarvestMushroom`, `SpawnEntity`, `DigTile`); pre-schedule outputs
+into the grid's `Scheduler` for the next N cycles; set `passive = true`; skip in tick loop.
+
+**Hydration (player enters):** cancel pending passive output events; snap each agent to its
+correct position via `cycle_pos = (now - cycleStartTick) % cycleLength`; set `passive = false`;
+resume full simulation.
+
+**Guarantee:** outputs are exact — identical to what full simulation would have produced.
+Reuses the existing per-grid `Scheduler`; no new infrastructure needed.
+
+This keeps per-frame cost proportional to active grids (usually 1–2), not total grid count.
+
 **Bounded rooms** (`width > 0 && height > 0`): tiles outside `[0,w)×[0,h)` are
 void. Entities and the player are clamped to bounds.
 
@@ -313,6 +402,8 @@ Goblin    │ Combat   Block    Pass      Pass
 Poop      │  Pass    Hit      Pass      Pass
 ```
 
+*Table covers Phase 8 entity types only. Collision rules for golem types added in Phase 12 — TBD.*
+
 **Swap prevention**: all movement intentions collected first, then resolved
 together. A→B and B→A in the same tick → both blocked.
 
@@ -342,7 +433,7 @@ creation/load.
 ```cpp
 class Terrain {
     FastNoiseLite noise;
-    unordered_map<TilePos, float>    heightCache;   // Perlin, lazy-computed (keyed at z=0)
+    unordered_map<TilePos, float>    heightCache;   // Perlin, lazy-computed; z ignored (keyed at z=0)
     unordered_map<TilePos, TileType> typeOverrides;  // sparse; default = Grass
 };
 ```
@@ -355,23 +446,109 @@ class Terrain {
 
 ---
 
+### Stimuli
+
+**Design decision:** stimuli are generic `StimulusField { type, intensity, decay }` stored in a
+sparse `unordered_map<TilePos, StimulusField>` per `Grid`. Spread and decay are one generic pass.
+Adding a new stimulus type = new enum value; no new tick code.
+
+**Wet vs Water:** `Wet` is a stimulus (a tile property set by any fluid source — water, rain, etc.)
+that agents can sense via `JUMP_IF Wet`. `Water` is a separate fluid entity with its own dynamics
+(full fluid simulation deferred; design TBD). A water tile sets the `Wet` stimulus on itself and
+adjacent tiles.
+
+### Alchemy Engine
+
+The long-term replacement and expansion of the current fire/voltage stimulus system. All
+environmental interactions are elements of the alchemy system. See `ALCHEMY.md` for the master
+element list, combination table, and stimulus field definitions.
+
+**Spreading effects** (Fire, Electricity, Cold, Wet, Wind, …) propagate across tiles each tick
+via a **spread equation** — a per-tile computation that takes the effect's underlying quantities
+as inputs (e.g. Fire depends on heat and wetness; Electricity depends on voltage and conductivity).
+Agents sense effects via `JUMP_IF` / `JUMP_IF_NOT`. At scale, spread equations are the GPU
+compute kernel. See `ALCHEMY.md` for the full effect and quantity list.
+
+**Combinations** follow a Doodle-God-style discovery model: combining two elements or materials
+produces a new one. The **Philosopher's Stone** is the terminal combination.
+
+*Current implementation (pre-alchemy-engine):* fire and voltage are two hardcoded stimulus
+systems. These will be subsumed by the alchemy engine in Phase 14+. See Fire & Voltage Stimuli
+below.
+
+---
+
+**Current implementation** (pre-StimulusField refactor — two hardcoded systems):
+
+### Fire & Voltage Stimuli
+
+Two stimulus systems are implemented as sparse maps on `Grid`. Both run each tick
+before entity AI and set flags on affected entities, which the renderer reads to
+apply visual effects.
+
+**Fire (`tickFire`):**
+- `tileFireExp`: maps `TilePos → Tick` — the first tick a tile was exposed to fire.
+  `Campfire` entities write to this for all 8 surrounding tiles each tick.
+- `fireTileExpiry`: maps `TilePos → Tick` — when a `Fire` tile reverts to `BareEarth`.
+  A `Grass` tile with ≥50 ticks exposure is converted to `Fire`; `Fire` expires
+  after a further 500 ticks.
+- `entityFireExp`: maps `EntityID → Tick` — first tick a burnable entity was exposed.
+  `TreeStump` and `Log` ignite (`burning = true`) after 250 ticks; `entityBurnEnd`
+  records when they will despawn (ignition + 500 ticks).
+
+**Voltage (`tickVoltage`):**
+- `voltage`: BFS-computed map from `TilePos → int`. `Battery` entities seed the BFS
+  with 5V; each hop through a `Puddle` tile decrements by 1. Non-Puddle tiles block
+  propagation. Recomputed from scratch each tick.
+- `Lightbulb` entities set `lit = true` when their tile has ≥1V.
+- All other entities set `electrified = true` when on a Puddle tile with ≥1V.
+
+---
+
 ### Routine VM
 
 Routines are programs. Agents are threads. The GPU kernel is the interpreter.
 
-Each agent holds an `AgentExecState` — a program counter, wait counter, and fixed-
-depth call stack. One instruction executes per tick.
+Each agent holds an `AgentExecState` — a program counter and wait counter.
+One instruction executes per tick.
 
+**Implemented opcodes:**
 ```
-MOVE_REL / MOVE_ABS → sets intended move for the move-resolution pass
-FACE                → updates agent facing
-WAIT                → decrements waitTicks, skips until zero
-DIG / PLANT         → terrain interaction (wired to Terrain::dig/restore)
-JUMP                → unconditional jump
-JUMP_IF / JUMP_IF_NOT → conditional jump on stimulus threshold
-CALL / RET          → subroutine call stack (depth 8, GPU-safe fixed size)
-HALT                → agent despawns
+MOVE_REL  → move one tile relative to agent facing (dir = RelDir: Forward/Back/Left/Right)
+WAIT      → pause for ticks ticks
+HALT      → agent despawns
 ```
+
+**Planned opcodes (Phase 13):**
+```
+DIG             → dig tile in facing direction
+PLANT           → plant mushroom ahead if BareEarth
+JUMP addr       → unconditional jump to PC addr
+JUMP_IF    cond threshold addr → jump if stimulus[cond] > threshold
+JUMP_IF_NOT cond threshold addr → jump if stimulus[cond] <= threshold
+CALL addr       → push return addr, jump (call stack depth 8)
+RET             → pop call stack, return to caller
+```
+
+**Instruction format:** flat struct — all fields always present, unused fields default to zero.
+Chosen over a tagged union for ease of serialisation and studio editor access. See `routine.hpp`.
+
+---
+
+### Golem System
+
+Golems are summoned by facing a tile containing a summoning medium and pressing the summon key.
+Summoning is a world interaction verb — like hoeing or planting, it can be performed by the
+player or by other entities with the right capability.
+
+Eight mediums yield eight golem types. See `ENTITIES.md` for the full capability table.
+
+All golems execute player-recorded routines via the VM. Golems are the only agents that deal
+damage (Iron Golem is the primary combat unit). Summoning costs mana; the cost scales with
+golem tier.
+
+**Vocalizations:** each golem type emits a Simlish-style vocalization on summon (short phoneme
+sequence, unique per type).
 
 ---
 
@@ -380,7 +557,7 @@ HALT                → agent despawns
 Owned by `main.cpp`. Updated every render frame (not every game tick).
 
 ```cpp
-struct Camera { Vec2f pos; Vec2f target; float zoom; };
+struct Camera { Vec2f pos; Vec2f target; float zoom; float z; float targetZ; };
 Vec2f camOffset;  // manual pan offset added on top of player position
 ```
 
@@ -433,10 +610,17 @@ Entity render z interpolates `pos.z → destination.z` via `moveT`. Draw order: 
 **Bounded grid void:** tiles outside `[0,w)×[0,h)` render as dark void `(18,18,18)`.
 
 **Terrain colour:**
-- Grass: flat checkerboard `(0,134,0)` / `(0,120,0)` — no Perlin shading, for clear tile visibility
+- Grass: flat checkerboard `(0,134,0)` / `(0,120,0)` — no Perlin shading
 - BareEarth: flat brown `(139, 90, 43)`
-- Portal: purple `(160, 60, 220)`
+- Portal: purple `(160, 60, 220)` with pulsing shimmer each frame
+- Fire: orange-red `(220, 80, 20)` with per-frame flicker
+- Puddle: blue-grey with ripple animation driven by `rendererTick_`
 - Studio mode: muted blue-grey palette, height-varied (uses raw Perlin float)
+
+**UI panels:**
+- Controls (H): static keybinding reference
+- Recordings (I): recording list with rename; mutually exclusive with H
+- Rebind (K): all 23 actions with current key; navigate and capture to remap
 
 **Facing indicator:** small filled triangle (SDL_RenderGeometry) at the edge of
 each non-Mushroom entity's tile, pointing in `facing` direction.
@@ -449,6 +633,48 @@ each non-Mushroom entity's tile, pointing in `facing` direction.
   - While renaming, empty Input passed to game.tick() to suppress game actions
 
 ---
+
+### UI Layer (planned — Phase 16)
+
+**Problem with current approach:** each panel (`drawControlsMenu`, `drawRecordingsPanel`,
+`drawRebindPanel`) is a flat function in `renderer.cpp` with hardcoded pixel constants, no text
+caching, and no shared layout logic. Panel visibility is loose booleans in `main.cpp`. Phase 15
+needs ~5 interactive studio panels — this pattern won't scale.
+
+**Design:**
+
+```
+TextCache
+  unordered_map<(string, color), SDL_Texture*>
+  get(text, color) → texture (created on first use)
+  clear()          → invalidate all (e.g. on font change)
+
+Rect { int x, y, w, h }
+  contains(px, py) → bool   // hit testing
+
+Panel { Rect bounds; RGBA bg; RGBA border }
+  draw(sdl)                  // filled rect + border stroke
+
+Label { Rect bounds; string text; SDL_Color color; Align align }
+  draw(sdl, cache)
+
+ListWidget { Rect bounds; vector<string> items; int selected; int scrollOffset }
+  draw(sdl, cache)            // renders visible rows, highlights selected
+  itemAt(screenY) → int       // which item index is under a y coordinate (-1 = none)
+  scrollTo(index)             // ensure item is visible
+
+Button { Rect bounds; string label; bool hovered; bool pressed }
+  draw(sdl, cache)
+```
+
+**Panel state** — `UIState` owned by `main.cpp`:
+```cpp
+enum class ActivePanel { None, Controls, Recordings, Rebind, Studio };
+struct UIState { ActivePanel active = ActivePanel::None; };
+```
+Input routing: keyboard/mouse events go to `active` panel first; fall through to game if unconsumed.
+
+**Mouse:** panels absorb clicks via `Rect::contains`. World click only fires if no panel hit.
 
 ### Audio
 
@@ -483,14 +709,51 @@ dropped in as a replacement (OGG with SDL2_mixer OGG support).
 
 ---
 
+### Visual Events & Effects
+
+Parallel to `AudioEvent`, `Game::tick()` accumulates `VisualEvent`s that `main.cpp`
+drains each render frame and routes to the `Renderer`.
+
+**Events and their renderer effects:**
+| Event | Effect |
+|---|---|
+| `Dig` | Brown dirt particle burst at tile |
+| `CollectMushroom` | Yellow sparkle burst |
+| `DeployAgent` | Purple/blue puff burst |
+| `GoblinHit` | Red entity flash + camera shake |
+| `GoblinDie` | Death-fade sprite + red burst + shake |
+| `PlayerLand` | Small dust burst |
+| `PortalEnter` | Black fade-to in/out |
+| `GridSwitch` | Camera shake |
+
+**Renderer effect state** (all renderer-side, game logic unaffected):
+- `Particle` pool — `{pos, vel, z, life, maxLife, size, RGBA}`; ticked each frame
+- `EntityFlash` map — per-entity tint for N renderer ticks (hit flash)
+- `DyingEntity` list — fading sprite rendered after entity is destroyed
+- `shakeAmt_` — decays exponentially each frame; added to all `toPixelX/Y` calls
+- `fadeAlpha_` / `fadeDelta_` — full-screen black overlay for portal/grid transitions
+- `dayNightT_` — slow sinusoidal counter driving ambient terrain colour shift
+- Per-entity persistent effects: `burning` → pulsing orange overlay + rising sparks;
+  `electrified` → flickering cyan overlay + random electric sparks
+
+**`effects.hpp`** — SDL-free header containing `AnimFrame`, `Animation` (with
+`frameAt()`), `AnimState`, `RGBA`, `Particle` (with `tick()`), and `shakeDecay()`.
+No SDL dependency so these types are usable in unit tests without a display.
+
+---
+
 ### Persistence
 
-Binary save format (version 6). Auto-loaded on startup, auto-saved on quit (Esc).
+Binary save format (version 7). Auto-loaded on startup, auto-saved on quit (Esc).
+
+**Versioning policy:** bump version on every layout change; version mismatch = fresh world (no
+migration). The CPU save format is a prototype — a full GPU redesign post-Phase 20 will replace
+it entirely, so migration code is not worth writing.
 
 **Format:**
 ```
 magic: "GRID" (4 bytes)
-version: uint8 = 6
+version: uint8 = 7
 activeGridID: uint32
 nextGridID: uint32
 
@@ -503,16 +766,20 @@ for each grid (excluding studio):
     portal count: uint32
     for each portal: TilePos (x,y), targetGrid, targetPos (x,y)
     entity count: uint32
-    for each entity: type, pos(x,y), facing
+    for each entity: type, pos(x,y,z), facing
 
-player: pos(x,y), facing, mana
-playerWorldPos: x, y
+player: pos(x,y,z), facing, mana
+playerWorldPos: x, y, z
 selectedRecording: uint32
 recording count: uint32
 for each recording: name (length-prefixed string), instruction count, instructions
 ```
 
 Version mismatch → load fails silently (no save file = fresh world).
+
+**`settings.dat`** — plain text, `ActionName=KeyName` per line (SDL_GetKeyName format). Not
+versioned; malformed lines are skipped. Independent of `save.dat`. Locale preference will also
+be stored here (Phase 20).
 
 ---
 
@@ -546,21 +813,46 @@ adjacent tiles at different heights.
 
 ---
 
+## Combat
+
+Design decision pending. Three options under consideration:
+
+- **VATS-style slow-time** — player enters a slow-motion targeting mode and queues golem actions
+- **Stop-time** — game pauses; player issues orders to each golem; then resumes
+- **Turn-based** — full turn structure when enemies are in range
+
+Settled constraints:
+- The player never deals damage — golems, terrain, and environmental stimuli are the only damage sources
+- The player's role in combat is positioning and routine design, not real-time input
+
+---
+
+## World Interactions
+
+The player and entities interact with the world through a set of action verbs. Capability flags
+on each entity type determine which verbs it can perform. See `VERBS.md` for the master verb
+list and actor assignments.
+
+---
+
 ## Game Mechanics — Controls
 
-| Input | Action |
+Default keyboard bindings (all remappable via K panel or `settings.dat`):
+
+| Key | Action |
 |---|---|
 | `WASD` | Move player one tile. Updates `facing`. |
 | `Shift + WASD` | Strafe (move without updating `facing`). |
 | `F` | Dig tile ahead (`terrain.dig()`). |
 | `C` | If tile ahead is `BareEarth` and `mana >= 1`: plant mushroom, restore terrain, deduct 1 mana. |
-| `R` | Toggle recording. On stop, saves `Recording` to deque with default name "Script N". |
+| `R` | Toggle recording. On stop, saves `Recording` with default name "Script N". |
 | `Q` | Cycle `selectedRecording`. |
-| `E` | Deploy `selectedRecording` as a `Poop` agent spawned ahead of player. |
+| `E` | Deploy `selectedRecording` as a routine agent spawned ahead of player (currently `Poop` — placeholder, renamed Phase 12). |
 | `O` | Create portal tile ahead; spawn linked 20×20 room grid. |
 | `Tab` | Toggle between world and studio (direct transfer, no portal). |
 | `H` | Toggle controls reference panel. |
-| `I` | Toggle recordings panel (replaces H panel). |
+| `I` | Toggle recordings panel (replaces H/K panel). |
+| `K` | Toggle key rebind panel. |
 | `Enter` | (Recordings panel open) Begin rename of selected recording. |
 | `Arrow keys` | Pan camera offset. |
 | `Backspace` | Re-centre camera (reset pan offset). |
@@ -587,10 +879,9 @@ grid_game/
 │   ├── fonts/
 │   │   └── DejaVuSansMono.ttf
 │   ├── sprites/
-│   │   ├── player.png
-│   │   ├── goblin.png
-│   │   ├── mushroom.png
-│   │   └── poop.png
+│   │   ├── player.png  goblin.png  mushroom.png  poop.png
+│   │   ├── campfire.png  treestump.png  log.png
+│   │   └── battery.png  lightbulb.png
 │   ├── sfx/                           ← one-shot sound effects (WAV/OGG)
 │   │   ├── step.wav  dig.wav  plant.wav  collect.wav
 │   │   ├── record_start.wav  record_stop.wav  deploy.wav
@@ -605,26 +896,58 @@ grid_game/
 │   └── doctest.h
 ├── tests/
 │   ├── test_phase1.cpp  …  test_phase9.cpp
-│   └── test_terminal_renderer.cpp
+│   ├── test_terminal_renderer.cpp
+│   ├── test_fire_voltage.cpp
+│   ├── test_phase10.cpp
+│   └── test_input_map.cpp
 └── src/
     ├── main.cpp
-    ├── types.hpp          ← TilePos, Vec2f, Bounds, Camera, enums, lerp, toVec, TilePosHash
-    ├── game.hpp / .cpp    ← Game, tick, AudioEvent queue, save/load
-    ├── entity.hpp / .cpp  ← Entity, EntityRegistry, stepMovement, resolveMoves
-    ├── grid.hpp           ← Grid, Portal
-    ├── terrain.hpp / .cpp ← Terrain (Perlin + sparse overrides)
-    ├── spatial.hpp / .cpp ← SpatialGrid (entity occupancy, hard cap 8)
-    ├── scheduler.hpp / .cpp ← ScheduledAction, Scheduler (min-heap)
-    ├── events.hpp / .cpp  ← Event, EventBus
-    ├── routine.hpp        ← Instruction, OpCode, Condition, AgentExecState, Recording
+    ├── types.hpp             ← TilePos, Vec2f, Bounds, Camera, enums, lerp, toVec, TilePosHash
+    ├── effects.hpp           ← AnimFrame, Animation, AnimState, RGBA, Particle, shakeDecay (SDL-free)
+    ├── game.hpp / .cpp       ← Game, tick, AudioEvent + VisualEvent queues, save/load
+    ├── entity.hpp / .cpp     ← Entity, EntityRegistry, stepMovement, resolveMoves
+    ├── grid.hpp / .cpp       ← Grid, Portal, tickFire, tickVoltage
+    ├── terrain.hpp / .cpp    ← Terrain (Perlin + sparse overrides)
+    ├── spatial.hpp / .cpp    ← SpatialGrid (entity occupancy, hard cap 8)
+    ├── scheduler.hpp / .cpp  ← ScheduledAction, Scheduler (min-heap)
+    ├── events.hpp / .cpp     ← Event, EventBus
+    ├── routine.hpp           ← Instruction, OpCode, AgentExecState, Recording
     ├── routine_vm.hpp / .cpp ← RoutineVM: step(), move resolution
-    ├── recorder.hpp / .cpp ← Recorder: player actions → Instruction stream
-    ├── input.hpp / .cpp   ← Input snapshot (SDL keycodes → Key enum)
-    ├── audio.hpp / .cpp   ← AudioSystem (SDL2_mixer, SFX + music layers + ambient)
-    ├── irenderer.hpp      ← IRenderer interface
-    ├── renderer.hpp / .cpp ← Renderer (SDL2, camera, UI, SDL_ttf)
+    ├── recorder.hpp / .cpp   ← Recorder: player actions → Instruction stream
+    ├── input.hpp / .cpp      ← Input, InputMap, GamepadMap, Action enum
+    ├── audio.hpp / .cpp      ← AudioSystem (SDL2_mixer, SFX + music layers + ambient)
+    ├── irenderer.hpp         ← IRenderer interface
+    ├── renderer.hpp / .cpp   ← Renderer (SDL2, camera, particles, UI, SDL_ttf)
     └── terminal_renderer.hpp / .cpp ← TerminalRenderer (ANSI/ASCII)
 ```
+
+---
+
+## Architectural Decisions
+
+Decisions made through conversation; recorded here to avoid revisiting them unnecessarily.
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | Entity model | Keep type-driven dispatch + capabilities bitfield for now. Alternatives (component bag, full ECS) not worth the complexity at current entity-type count. Revisit before Phase 17 when entity variety peaks. |
+| 2 | Instruction format | Flat struct — all fields always present, unused fields zero. Chosen over tagged union for ease of serialisation and studio editor field access. Implemented in `routine.hpp`. |
+| 3 | Stimulus abstraction | Generic `StimulusField { type, intensity, decay }` per tile. `Wet` is a stimulus (any fluid source sets it). `Water` is a fluid entity with its own dynamics (deferred). VM checks `Wet`, not `Water`. |
+| 4 | Multi-grid scaling | Hibernation: no player in grid → analyse routines, pre-schedule outputs, hibernate. Player enters → cancel outputs, snap agents, resume. Exact (no approximation). Reuses existing Scheduler. |
+| 5 | GPU goal | CPU simulation is a feature prototype. Full GPU redesign (Vulkan compute or similar) post-Phase 20. Struct-of-arrays layout, fixed-size slots, parallel tick logic. No incremental migration — full rewrite. |
+| 6 | Save format versioning | Bump version on every layout change; mismatch = fresh world. No migration code. Format will be replaced in GPU rewrite. |
+
+---
+
+## Platform
+
+- **Input** — keyboard, gamepad, and touchscreen are co-equal input methods. All interactions
+  must be accessible via any of them.
+- **Target platforms** — Windows, macOS, Linux, iOS, Android, and major consoles (Switch,
+  PlayStation, Xbox). Exact porting order TBD.
+- **Split-screen multiplayer (near-term)** — two players share one screen, each with their own
+  camera viewport and controls; golems are shared. Design TBD.
+- **Online multiplayer (far future)** — shared world, separate cameras, state sync via
+  authoritative server. Not planned until after the GPU rewrite.
 
 ---
 

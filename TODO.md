@@ -128,7 +128,7 @@ Tests are written alongside the system they cover.
 - [x] Camera snaps instantly on grid switch (no lerp artefact)
 
 ### Persistent State ✓
-- [x] Binary save format v6: all grids, portals, terrain overrides, entities (with z), recordings
+- [x] Binary save format v7: all grids, portals, terrain overrides, entities (with z), recordings, flat Instruction layout
 - [x] Auto-save on quit (Esc); auto-load on startup
 - [x] Version check: mismatch → fresh world
 
@@ -185,7 +185,7 @@ projection so entities at higher z appear higher on screen.
 - [x] Camera gains `float z` / `targetZ`; tracks player render z with lerp/snap logic
 - [x] Entity shadow and sprite anchored at tile centre; facing indicator centred on body
 
-### Tests ✓ (159/159 passing)
+### Tests ✓
 - [x] `TilePos` hash includes z — (1,2,3) and (1,2,4) are distinct keys
 - [x] Two entities at same (x,y) but different z do not collide
 - [x] Entity at same (x,y,z) still collides
@@ -198,121 +198,421 @@ projection so entities at higher z appear higher on screen.
 
 ---
 
-## Phase 10 — Animations & Visual Effects
+## Phase 10 — Animations & Visual Effects (core done; sprite animation + tile variants pending)
 
 Sprite animation system and a general-purpose particle/effect layer. All effects
-are renderer-side only — game logic is unaffected. Effects are triggered by
-existing `AudioEvent`-style hooks or new `VisualEvent` equivalents emitted from
-`Game::tick()`.
+are renderer-side only — game logic is unaffected.
 
-### Sprite animation
-- [ ] `AnimFrame` — sprite region (src rect) + duration in ticks
-- [ ] `Animation` — named sequence of `AnimFrame`s, looping or one-shot
+### Sprite animation infrastructure ✓
+- [x] `AnimFrame` — sprite region + duration in ticks (`effects.hpp`)
+- [x] `Animation` — named sequence of `AnimFrame`s, looping or one-shot, `frameAt()`
+- [x] `AnimState` enum — `Idle`, `Walk`, `Hit`, `Die`
+
+### Sprite animation renderer integration (pending)
 - [ ] `SpriteCache` extended: loads animation strips; keyed by `(EntityType, AnimState)`
-- [ ] `AnimState` enum — `Idle`, `Walk`, `Hit`, `Die` (extensible)
 - [ ] Per-entity animation state tracked in renderer (not game logic)
-- [ ] Frame advances each tick based on `moveT` / elapsed time
+- [ ] Walk animation synced to movement (`moveT`)
 - [ ] Idle animation: N-frame loop while entity is not moving
-- [ ] Walk animation: synced to movement (frame advances with `moveT`)
 
-### Entity effects
-- [ ] Hit flash — entity sprite tints white/red for a few frames on damage
-- [ ] Death fade — entity fades out over ~10 frames on despawn
-- [ ] Drop shadow — soft ellipse drawn beneath each entity, scaled by z height
-- [ ] Footstep dust — small particle burst when entity lands after a z-level change
+### Entity effects ✓
+- [x] Hit flash — `EntityFlash` in renderer; tints sprite red for N frames on damage
+- [x] Death fade — `DyingEntity` list; fading sprite rendered after despawn
+- [x] Drop shadow — `drawShadow()` drawn beneath each entity
 
-### Tile effects
-- [ ] Fire overlay — flickering animated tile overlay on burning tiles
-- [ ] Water ripple — looping ripple animation on water tiles
-- [ ] Portal shimmer — pulsing glow or spin drawn over portal tiles
-- [ ] Dig particles — dirt particle burst when player digs a tile
+### Tile effects ✓
+- [x] Fire tile — orange-red colour with per-frame flicker
+- [x] Portal shimmer — pulsing colour shift each frame
+- [x] Puddle ripple — ripple animation driven by `rendererTick_`
+- [ ] Water ripple — pending Water tile type implementation
+- [ ] Neighbour-aware tile variants — edge/corner sprite selection
 
-### Pickup / interaction effects
-- [ ] Collect sparkle — radial particle burst when mushroom is collected
-- [ ] Mana float — small orb particle drifts up and fades on mana gain
-- [ ] Deploy puff — brief cloud animation when a poop agent is spawned
+### Pickup / interaction effects ✓
+- [x] Dig particles — brown burst (`spawnBurst` on `VisualEvent::Dig`)
+- [x] Collect sparkle — yellow burst on `CollectMushroom`
+- [x] Deploy puff — blue burst on `DeployAgent`
+- [x] Footstep dust — small burst on `PlayerLand`
 
-### Screen-level effects
-- [ ] Screen shake — camera offset perturbed on heavy impact (goblin hit, height landing); decays each frame
-- [ ] Fade — black fade in/out on portal entry and grid switch
+### Screen-level effects ✓
+- [x] Screen shake — `triggerShake()`, decays exponentially each frame
+- [x] Fade — `triggerFade()`, black overlay for portal entry and grid switch
 
-### Procedural tile detail
-- [ ] Position-based decoration — hash or second Perlin layer on absolute (x, y) deterministically places small detail sprites on tiles (stones, flowers, moss, roots, cracks) without storing them
-- [ ] Neighbour-aware tile variants — renderer queries the 4 (or 8) adjacent tile types and selects the correct edge/corner sprite variant (e.g. grass-to-bare-earth transition, cliff edge caps)
-- [ ] Detail density by terrain type — grass gets flowers/stones; bare earth gets cracks/pebbles; each type has its own decoration palette and frequency
-- [ ] Detail sprites respect z-level — decorations are drawn at the tile's height, occluded correctly by the perspective projection
+### Procedural tile detail ✓
+- [x] Position-based decoration — hash-based flowers/stones on Grass; cracks on BareEarth
+- [ ] Detail sprites respect z-level / perspective occlusion
+- [ ] Neighbour-aware tile variants (cliff edge caps, grass-to-earth transitions)
 
-### Atmospheric
-- [ ] Ambient particles — slowly drifting dust motes or leaves in world grid
-- [ ] Day/night tint — slow sinusoidal colour shift applied to terrain draw
+### Atmospheric ✓
+- [x] Ambient dust particles — drifting motes in world grid (capped at 150)
+- [x] Day/night tint — sinusoidal colour shift on terrain (`dayNightT_`)
 
-### Implementation notes
-- `ParticleSystem` owns a pool of particles: `{pos, vel, life, maxLife, colour, size}`
-- `Game::tick()` emits `VisualEvent`s (parallel to `AudioEvent`); renderer drains and spawns particles/effects
-- Screen shake state lives in renderer: `shakeAmount`, decays multiplicatively each frame
-- Fade state: `fadeAlpha` (0.0–1.0), driven by a timer set on grid-switch/portal events
-- Animation state per entity stored in `std::unordered_map<EntityID, AnimState>` in renderer
+### Per-entity fire / electrical effects ✓
+- [x] `burning` flag → pulsing orange overlay + rising fire sparks (~15/sec)
+- [x] `electrified` flag → flickering cyan overlay + random electric sparks (~12/sec)
 
-### Tests
-- [ ] `AnimFrame` / `Animation` frame selection at given elapsed tick
-- [ ] One-shot animation clamps to last frame rather than looping
-- [ ] Particle lifetime: particle marked dead when `life <= 0`
-- [ ] Screen shake magnitude decays to zero within expected frame count
+### VisualEvent system ✓
+- [x] `VisualEventType` enum + `VisualEvent` struct in `game.hpp`
+- [x] `Game::tick()` emits events; `main.cpp` drains and routes to renderer
+
+### Tests ✓
+- [x] `Animation::frameAt` — looping, one-shot, edge cases (15 tests)
+- [x] `Particle::tick` — decay, movement, death
+- [x] `shakeDecay` — monotone, convergence, zero
 
 ---
 
-## Backlog
+## GPU Rewrite (future — post Phase 20)
 
-### Known Issues
+**Decision**: The CPU simulation is a feature prototype, not the final architecture. Once the feature set is fleshed out (roughly post-Phase 20), do a full redesign targeting GPU compute (Vulkan compute shaders or similar).
+
+Design implications for the rewrite (not the current code):
+- Struct-of-arrays layout for all entity/tile data
+- Fixed-size entity slots, no pointers or hash maps as canonical store
+- Tick logic as embarrassingly parallel compute shaders
+- Renderer integrated with GPU sim (no CPU→GPU upload per frame)
+
+Current code does **not** need to accommodate this — just build features cleanly on CPU. The rewrite will start fresh.
+
+---
+
+## Known Issues
 - [ ] Rendered tiles are not consistently sized — minor visual inconsistency in the perspective projection, low priority
 
-### Mouse Interaction
-- [ ] Tile picking — inverse perspective projection maps screen (x, y) + camera z to world `TilePos`; must account for zoom and camera offset
-- [ ] Entity picking — hit-test entities at the hovered tile in draw order (topmost first)
-- [ ] Hover highlight — translucent overlay drawn on the tile under the cursor; colour varies by tile type / interactability
-- [ ] Entity hover — distinct highlight (outline or tint) when cursor is over an entity; show name or stats tooltip
-- [ ] Hover visual effect — subtle pulse or shimmer animation on the highlighted tile (ties into Phase 10 effect system)
-- [ ] Left-click to move — player pathfinds or steps toward clicked tile
-- [ ] Left-click to interact — click an entity to trigger context action (collect mushroom, attack goblin, inspect chest)
-- [ ] Right-click context menu — small popup listing available actions for the tile or entity under cursor
-- [ ] Click ripple effect — brief expanding ring particle burst at the clicked world position
+---
+
+## Pre-Phase 11 Refactors
+
+Small fixes and tech-debt items identified in code review. Do these before starting
+Phase 11 so the codebase is in good shape for the next wave of features.
+
+- [x] **Grid tick coupling** — already a single loop with `activeAtStart` capture; no change needed
+- [x] **Height logic duplicated** — extracted to `static bool resolveDestHeight(TilePos&, const TilePos&, const Grid&)` in `game.cpp`
+- [x] **Single-slot `pendingTransfer_`** — replaced `std::optional<PendingTransfer>` with `std::vector<PendingTransfer> pendingTransfers_`; multiple portal arrivals in the same tick now queue correctly
+- [x] **No fire/voltage tests** — `burning` and `electrified` flag tests already present in `test_fire_voltage.cpp`
+
+Pre-Phase 13:
+- [ ] **Agent state fragmentation** — `agentStates_` and `agentRecordings_` are parallel arrays indexed by position that easily drift out of sync. Merge into a single `AgentSlot { AgentExecState state; Recording rec; }` vector (HIGH)
+
+Pre-Phase 14:
+- [ ] **Fire/voltage not abstracted** — fire and voltage are hardcoded in `game.tick()`. Define a `StimulusField` struct (type, intensity, decay) stored per tile; tick logic becomes a generic stimulus-spread pass (MEDIUM)
+- [ ] **`Game` class too large** — `game.cpp` is doing movement, combat, recording, terrain, and stimulus in one file. Split into subsystem free-functions: `movement.cpp`, `combat.cpp`, `stimulus.cpp` called from `game.tick()` (MEDIUM)
+
+Deferred / as needed:
+- [ ] **Entity model revisit** — current plan uses type-driven dispatch + capabilities bitfield. Works fine at current scale but will get unwieldy past ~15 entity types. Alternatives: component bag (optional per-entity structs carrying their own state), full ECS. Revisit before Phase 17 when entity variety peaks.
+- [ ] **Collision resolution hardcoded** — `resolveCollision()` is a nested `switch`. When entity types expand in Phase 12, convert to a 2D lookup table `constexpr CollisionResult COLLISION_TABLE[ET_COUNT][ET_COUNT]` (MEDIUM)
+- [ ] **Save format versioning policy** — bump version on every layout change; mismatch = fresh world (no migration). Document what changed in a comment next to the version constant. Current: v7. (Policy decided — just needs discipline per phase)
+- [ ] **Entity pointer instability** — `EntityRegistry` stores entities in `unordered_map`; pointers/references invalidate on rehash. Callers that cache `Entity*` across ticks may see stale pointers. Audit usages; switch to ID-only access pattern or use a slot-map (MEDIUM)
+- [ ] **Z-level queries unchecked** — a few `SpatialGrid::at()` calls pass a `TilePos` with `z=0` when the intent is "any z". Add a `atAnyZ(x,y)` helper or audit call sites (LOW)
+- [ ] **Entity placeholder audit** — all current `EntityType` names (`Goblin`, `Mushroom`, `Poop`, `Campfire`, `TreeStump`, `Log`, `Battery`, `Lightbulb`) are temporary placeholders. Before Phase 12, update `ENTITIES.md` with final names and rename throughout the codebase. (See `DESIGN.md § Entity Placeholders`)
+
+---
+
+## Phase 11 — Mana Economy & Script Costs ✓
+
+Mana is the central resource. Every deployed script and every summoned entity draws
+from the same pool, creating a real trade-off between automation and unit diversity.
+
+- [x] `constexpr instrCost(OpCode, RelDir)` cost table in `routine.hpp` — single source of truth for balancing
+- [x] `Recording::manaCost()` — sums instruction costs across the full instruction vector
+- [x] Cost shown in the recordings panel next to the step count (`♦ N`)
+- [x] Deploying an agent checks `player.mana >= recording.manaCost()`; deducts on success; blocked silently if insufficient
+- [x] Agents that reach `HALT` do not refund mana — the cost is the price of automation, not a deposit
+- [x] Costs defined in one place (`routine.hpp`) so balancing is a single-file edit
+
+**Tests** ✓ (20 new tests)
+- [x] `instrCost` for all opcodes and RelDir variants
+- [x] `manaCost()` for known instruction sequences matches expected total
+- [x] Deploy blocked and mana unchanged when insufficient; succeeds and deducts when sufficient
+
+---
+
+## Phase 12 — Golem System & Entity Diversity ✓
+
+Implement the golem summoning system.
+
+- [x] `Entity` gains a `capabilities` bitfield — `CanExecuteRoutine`, `Pushable`, `CanFight`, `ImmuneFire`, `ImmuneWet`
+- [x] `entityCaps(EntityType)` — returns capability flags for every entity type
+- [x] `isGolem(EntityType)` — returns true for all 8 golem types
+- [x] Summon verb (`G`): face a medium tile; deducts mana; spawns correct golem type; medium tile consumed
+- [x] Golems execute player-recorded routines via the VM (same as Poop agents); survive HALT (only Poop despawns)
+- [x] Summon preview in HUD: golem name + mana cost; gold when affordable, red when not
+- [x] New entity types: Tree, Rock, Chest, MudGolem, StoneGolem, ClayGolem, WaterGolem, BushGolem, WoodGolem, IronGolem, CopperGolem
+- [x] New tile types: Mud, Stone, Clay, Bush, Wood, Iron, Copper (medium summoning tiles)
+- [x] Pushable objects (Log, Rock) — shoved one tile on player bump; blocked if destination occupied
+- [x] Chest collected on arrival: +5 mana
+- [x] Collision table extended: golem vs goblin, golem vs player, pushable bump logic
+- [x] Facing indicator exclusion extended for Tree, Rock, Chest, and all golems
+- [x] `VisualEvent::Summon` — blue burst + camera shake
+- [x] Save format bumped v7 → v8
+
+**Tests** ✓ (23 new tests)
+- [x] `isGolem` — all 8 golem types; Player/Goblin not golems
+- [x] `entityCaps` — Pushable on Log/Rock; CanExecuteRoutine/ImmuneWet on MudGolem; ImmuneFire on StoneGolem; CanFight on IronGolem/WoodGolem
+- [x] Collision: IronGolem/WoodGolem vs Goblin → Hit; MudGolem vs Goblin → Block; Golem vs Player → Block; Player vs Golem → Block
+- [x] Capability flags are distinct powers of two
+
+---
+
+## Phase 13 — Routine VM Expansion
+
+Extend the instruction set so agents can interact with terrain and react to stimuli.
+
+### Instruction format (decided)
+Flat struct — all fields always present, unused fields default to zero:
+`op`, `dir` (RelDir), `ticks` (WAIT), `addr` (JUMP/CALL), `cond` (Condition), `threshold`.
+Save format bumped to v7. Struct already updated in `routine.hpp`.
+
+### New opcodes
+- [ ] `DIG` — agent digs the tile in its facing direction (`terrain.dig(dest)`); mana cost applied
+- [ ] `PLANT` — agent plants mushroom ahead if tile is `BareEarth` and carried mana ≥ 1
+- [ ] `JUMP addr` — unconditional jump to instruction index
+- [ ] `JUMP_IF cond threshold addr` — jump if `stimulus[cond] > threshold`
+- [ ] `JUMP_IF_NOT cond threshold addr` — jump if `stimulus[cond] <= threshold`
+- [ ] `CALL addr` — push return address onto fixed-depth call stack (depth 8), jump to subroutine
+- [ ] `RET` — pop call stack, return to caller
+- [ ] `HALT` — agent becomes idle / despawns (already implemented)
+
+### Condition enum
+- [ ] Stimulus sampling: each condition checks the agent's current tile (or tile ahead)
+      (`Condition` enum already defined in `routine.hpp` — see DESIGN.md § Data Types)
+
+### Recorder support
+- [ ] Recorder emits `DIG` / `PLANT` instructions when player digs / plants during recording
+- [ ] Mana cost table updated: `DIG = 3`, `PLANT = 2`, `JUMP* = 0`, `CALL/RET = 0`
+
+**Tests**
+- [ ] `DIG` opcode calls `terrain.dig()` at agent's facing tile
+- [ ] `JUMP` advances PC to correct address
+- [ ] `JUMP_IF FIRE` fires when tile has fire stimulus; skips when not
+- [ ] `CALL/RET` round-trip restores correct return address; overflow (depth 9) safe
+
+---
+
+## Phase 14 — Alchemy Engine & Environmental Interactions
+
+### Design decisions (settled)
+- **Stimulus abstraction**: stimuli are generic `StimulusField { type, intensity, decay }` stored per tile in an `unordered_map<TilePos, StimulusField>` per Grid. Spread/decay is one generic pass. New stimulus = new enum value, no new tick code.
+- **Wet vs Water**: `Wet` is a stimulus (tile property set by any fluid source — water, rain, etc.). `Water` is a fluid entity with its own dynamics (full fluid simulation deferred — think more deeply about this before Phase 17+). A water tile sets the Wet stimulus on itself and adjacent tiles; the agent VM checks Wet, not Water.
+
+See `ALCHEMY.md` for the master element, stimulus, and combination list — all entries are placeholders.
+
+### Alchemy engine
+- [ ] Replace hardcoded fire/voltage systems with generic `StimulusField` spread/decay pass
+- [ ] Element combination rules — data-driven lookup table (see `ALCHEMY.md`)
+- [ ] Combination discovery — player discovers combinations by experimenting; unlocks permanently
+- [ ] Alchemy UI panel — shows discovered combinations
+
+### Environmental interactions
+- [ ] `Water` tile type — added to `TileType` enum; rendered as animated blue
+- [ ] `tickWater()` per grid each tick — water flows to the lowest adjacent non-Water tile if height diff ≤ 1 (BFS from all existing Water tiles); one expansion step per tick
+- [ ] Water slows movement — entities on Water tiles move at half speed (double `moveSpeed`)
+- [ ] Fire × water interaction — `Fire` tile adjacent to `Water` tile is extinguished (reverts to `BareEarth`) each tick
+- [ ] `Wet` Condition — `JUMP_IF Wet` fires when agent's tile has the Wet stimulus
+- [ ] Fire agent reaction — `flee` sub-routine: agents with `canFight = false` emit `JUMP_IF Fire` to reverse facing and step back
+- [ ] World generation pre-seeds water in low-height tiles (used by Phase 17)
+
+**Tests**
+- [ ] Water expands to lower adjacent tile each tick
+- [ ] Water does not expand uphill (height diff > 1)
+- [ ] Fire tile adjacent to Water is extinguished after one tick
+- [ ] Entity on Water tile has doubled move duration
+
+---
+
+## Phase 15 — Studio Overhaul
+
+Upgrades the studio from a blank recording space into a full multi-agent editing
+environment.
+
+### Path overlay
+- [ ] `routinePath(Recording, TilePos origin, Direction facing)` — simulate a recording and return the visited `TilePos` sequence
+- [ ] Renderer draws the path as colour-coded arrows on the studio floor; WAIT steps shown as dots
+- [ ] Path recomputed when selected recording changes or studio is entered
+- [ ] All deployed agents shown simultaneously, each with a distinct palette colour
+
+### Step scrubber
+- [ ] Timeline bar at bottom of screen: one cell per instruction, scrollable
+- [ ] Advance/rewind with Left/Right arrow; pause/play toggle (Space or A)
+- [ ] Ghost entity — translucent sprite at scrub position without moving the real agent
+
+### Instruction list panel
+- [ ] Side panel listing raw instructions (`MOVE_REL FORWARD`, `WAIT 10`, `HALT`, …)
+- [ ] Current PC row highlighted; scrolls to stay visible during playback
+- [ ] Rows selectable with Up/Down
+
+### Instruction editing
+- [ ] Delete selected instruction (Backspace): removes from `Recording`, recomputes path
+- [ ] Insert `WAIT N` at cursor — numeric input field for tick count
+- [ ] Insert `MOVE_REL dir` at cursor — choose direction with arrow keys, confirm with Enter
+- [ ] Reorder: Shift+Up/Down moves selected instruction
+- [ ] Edits persist via existing save system
+
+### Multi-agent coordination
+- [ ] Deploy any number of agents simultaneously (one per recording slot)
+- [ ] Overlapping paths highlighted red; conflicting ticks marked on timeline bar
+- [ ] Agent strip: name, colour, live step count; select to make active in instruction list
+
+### Playback controls
+- [ ] Loop mode (L): agents restart from spawn after HALT
+- [ ] Speed control (+ / −): 0.5×, 1×, 2×, 4× tick rate
+- [ ] Reset all (R): despawn agents, return player to spawn
+
+**Tests**
+- [ ] `routinePath` returns correct tile sequence for a known recording
+- [ ] `routinePath` handles WAIT (tile repeated) and HALT (sequence ends)
+- [ ] Conflict detection identifies tick where two paths share a TilePos
+
+---
+
+## Phase 16 — Mouse Interaction & UI Layer
+
+The current UI is flat inline code: each panel is a standalone function in `renderer.cpp`
+with hardcoded pixel constants, no text caching, and panel visibility managed by loose
+booleans in `main.cpp`. Phase 15's studio panels (timeline, instruction list, agent strip,
+scrubber) make this untenable. Do the UI layer here alongside mouse so both land together.
+
+### UI layer
+
+**Text cache**
+- [ ] `TextCache` — maps `(string, SDL_Color)` to `SDL_Texture*`; textures created on first use,
+      invalidated on TTF font change. Eliminates per-frame surface/texture allocation in `drawText`.
+
+**Widget primitives** (all SDL-free structs; renderer calls draw them)
+- [ ] `Rect { int x, y, w, h }` — screen-space rectangle; `contains(x,y)` for hit testing
+- [ ] `Panel { Rect bounds; RGBA bg; RGBA border }` — filled background + optional border;
+      `draw(renderer)` fills bg, strokes border, clips child draws to bounds
+- [ ] `Label { Rect bounds; std::string text; SDL_Color color }` — single line of text, left/centre/right aligned
+- [ ] `ListWidget { Rect bounds; vector<string> items; int selected; int scrollOffset }` —
+      scrollable list; `draw()` renders visible rows with selection highlight;
+      `itemAt(y)` returns item index under a screen y-coordinate (for click handling)
+- [ ] `Button { Rect bounds; std::string label; bool hovered; bool pressed }` —
+      draws filled bg + label; hover and press state driven by caller
+
+**Panel state — move out of `main.cpp`**
+- [ ] `UIState` struct (owned by `main.cpp`): `activePanel` enum (`None`, `Controls`, `Recordings`,
+      `Rebind`, `Studio*`); replaces the current loose `showControls/showRecordings/showRebind` bools
+- [ ] Input routing: mouse events and keyboard nav go to `activePanel` first; fall through to game only
+      if no panel is active or the panel doesn't consume the event
+
+**Rebuild existing panels using widgets**
+- [ ] `drawHUD` — unchanged (simple, no interaction needed)
+- [ ] `drawControlsMenu` — rebuild as `Panel` + `Label` list
+- [ ] `drawRecordingsPanel` — rebuild as `Panel` + `ListWidget` + rename `Label`
+- [ ] `drawRebindPanel` — rebuild as `Panel` + `ListWidget` (key name as second column)
+
+### Mouse interaction
+
+- [ ] Tile picking — inverse perspective projection maps screen (x, y) + camera z to world `TilePos`
+- [ ] Entity picking — hit-test entities at hovered tile in draw order (topmost first)
+- [ ] Hover highlight — translucent overlay on hovered tile; colour by tile type / interactability
+- [ ] Entity hover — outline or tint; name / stats tooltip
+- [ ] Hover visual effect — subtle pulse on highlighted tile
+- [ ] Left-click to move — player steps toward clicked tile
+- [ ] Left-click to interact — collect mushroom, attack goblin, inspect chest
+- [ ] Right-click context menu — `Panel` + `ListWidget` of available actions for tile/entity under cursor
+- [ ] Click ripple effect — expanding ring particle burst at clicked position
 - [ ] Middle-click / right-drag to pan — alternative to arrow-key camera pan
-- [ ] Cursor changes — OS cursor swaps (pointer → hand over interactable entity, crosshair over enemy)
+- [ ] Cursor changes — OS cursor swaps (pointer → hand, crosshair over enemy)
+- [ ] Panel hit testing — mouse clicks absorbed by any active UI panel before reaching the world
 
-### New Assets
-- [ ] Proper sprite art for all entity types (player, goblin, mushroom, poop)
-- [ ] Terrain tile sprites — textured tiles (grass, bare earth, stone, water)
-- [ ] Wall and structure tiles for room interiors
-- [ ] Real audio — replace placeholder WAV with composed OGG tracks
+**Tests**
+- [ ] `screenToTile(x, y, camera)` round-trips correctly against `toPixelX/Y` for known positions
+- [ ] Entity at hovered tile is identified correctly in draw order
 
-### New Interactions
-- [ ] Fire stimulus — tiles ignite; fire spreads each tick; agents react (flee routine)
-- [ ] Water — floods downhill tiles; slows movement; extinguishes fire
-- [ ] Pushable objects — crates, boulders: `pushable` flag, shoved by player or agents
-- [ ] More entity types — tree (blocks, choppable), rock (permanent), chest (yields mana)
-- [ ] Goblin drops — loot entity on despawn
-- [ ] Routine-triggered terrain — wire DIG/PLANT opcodes in VM to Terrain calls
-- [ ] Conditional routines — JUMP_IF / JUMP_IF_NOT on fire/entity-ahead stimulus
+---
 
-### Input & Controller Support
-- [ ] Key remapping — `InputMap` struct replaces hardcoded `Key` enum checks; bindings stored in a config file and editable at runtime
-- [ ] Gamepad support — SDL2 `SDL_GameController` API; analogue stick mapped to directional movement with deadzone; all actions bindable to buttons
-- [ ] Multiple controller profiles — player can switch between keyboard/gamepad at any time; last-used device takes priority
-- [ ] Settings menu — new in-game screen (toggled with a key, e.g. Escape → menu) listing current bindings; navigate with arrow keys or D-pad
-- [ ] Rebind UI — highlight a binding row, press any key/button to assign it; detect conflicts and warn; reset-to-default option
-- [ ] Binding persistence — save/load bindings alongside save.dat (or a separate `settings.dat`); fall back to defaults if file absent or malformed
+## Phase 17 — World Generation
 
-### Localisation
-- [ ] String table — all in-game text (HUD labels, panel headings, keybinding names, recording default names, tooltip/context strings) moved out of source into a locale file (e.g. `assets/locale/en.ini`); source references strings by key only
-- [ ] `Locale` class — loads a locale file at startup, exposes `get(key)` returning `const std::string&`; falls back to English key string if a key is missing so untranslated builds still run
-- [ ] Language setting — added to the settings menu (alongside key remapping); lists available locale files discovered in `assets/locale/`; takes effect immediately without restart
-- [ ] Locale persistence — selected language stored in `settings.dat`; loaded on startup before any text is rendered
-- [ ] Font coverage — SDL_ttf font replaced with one that covers the full Latin extended range and common non-Latin scripts (e.g. Noto Sans); fallback chain for missing glyphs
-- [ ] RTL support (stretch) — layout mirroring for right-to-left languages (Arabic, Hebrew); text drawn right-aligned in panels
-
-### World Generation
 - [ ] Biome map — second Perlin layer drives region type (forest, plains, swamp, desert)
-- [ ] Procedural entity spawning — goblins in clusters, mushroom patches in forest
-- [ ] Structures — houses (exterior + matching room grid), ruins, caves
-- [ ] Rivers — flow simulation from high to low height; water stimulus pre-seeded
-- [ ] Roads — connect structures; faster movement on road tiles
+- [ ] Procedural entity spawning — goblins in clusters, mushroom patches in forest, trees and rocks by biome
+- [ ] Structures — houses (exterior + linked room grid), ruins, caves
+- [ ] Rivers — pre-seeded Water tiles flowing from high terrain; connects to Phase 14 water system
+- [ ] Roads — connect structures; movement on road tiles at 1.5× speed
+
+**Tests**
+- [ ] World generates without panic on any seed
+- [ ] Biome at a given position is deterministic across repeated generation
+
+---
+
+## Phase 18 — Passive Grid Simulation
+
+### Design decisions (settled)
+- **Hibernation trigger**: no player in grid → analyse routines, pre-schedule outputs, hibernate. Player enters → cancel pending outputs, snap agents, resume full sim.
+- **Always exact**: outputs match what full simulation would have produced (no approximation).
+- **Scheduler reuse**: passive outputs go into the existing per-grid Scheduler; no new infrastructure needed.
+
+Interior grids contain agents on deterministic loops. When the player is outside,
+skip full simulation and replace it with pre-scheduled output events.
+
+### Cycle analysis
+- [ ] `analyseRoutine(Recording, TilePos origin, Direction facing)` — simulate one full loop, return `{cycleLength, outputs[]}` where each output is `{tickOffset, OutputType, value}`
+- [ ] `OutputType` enum: `ProduceMana`, `HarvestMushroom`, `SpawnEntity`, `DigTile` — anything a routine can cause
+- [ ] Handle non-looping routines (end with HALT, no loop): treat as single-shot, no repeat scheduling
+- [ ] Cache analysis result per recording; invalidate on instruction edit
+
+### Dehydration (player leaves grid)
+- [ ] Compute cycle position for each agent: `pos = (now - cycleStartTick) % cycleLength`
+- [ ] Push scheduled output events for next N cycles into the grid's `Scheduler`
+- [ ] Mark grid as `passive = true`; skip in the main tick loop
+
+### Hydration (player enters grid)
+- [ ] Cancel all pending passive output events from the `Scheduler`
+- [ ] Snap each agent to its correct position/facing for `now % cycleLength`
+- [ ] Set `passive = false`; resume full simulation from that tick
+
+### Consistency guarantees
+- [ ] Outputs fired while passive are identical to what full simulation would have produced
+- [ ] Hydrated agent state is consistent with terrain changes caused by passive outputs (e.g. a tile dug by a passive output is dug when the player enters)
+- [ ] If a passive output would cause a contradiction (e.g. harvest a mushroom that no longer exists), skip that output silently
+
+**Tests**
+- [ ] `analyseRoutine` returns correct cycle length and output offsets for a known recording
+- [ ] Passive grid fires mana output at correct tick without being ticked
+- [ ] Hydrated agent position matches what full simulation would have produced at the same tick
+
+---
+
+## Phase 19 — Assets, Audio & Polish
+
+### New assets
+- [ ] Proper sprite art for all entity types (player, goblin, mushroom, poop, campfire, tree, rock, chest, digger, farmer, guardian)
+- [ ] Terrain tile sprites — textured tiles (grass, bare earth, stone, water, fire)
+- [ ] Wall and structure tiles for room interiors
+- [ ] Real audio — replace placeholder WAV with composed OGG tracks (SFX + music layers)
+
+### Input polish
+- [ ] Multiple controller profiles — last-used device priority; hot-swap keyboard/gamepad mid-session
+- [ ] Conflict detection in rebind panel — warn when two actions share a key; reset-to-default option
+
+### Bug fixes
+- [ ] Rendered tiles not consistently sized — fix perspective projection tile-size inconsistency
+
+---
+
+## Phase 20 — Localisation
+
+- [ ] String table — all in-game text moved to `assets/locale/en.ini`; source references by key only
+- [ ] `Locale` class — `get(key)` returns `const std::string&`; falls back to key string if missing
+- [ ] Language setting in rebind/settings panel — lists locale files in `assets/locale/`; takes effect immediately
+- [ ] Locale persistence — selected language stored in `settings.dat`; loaded before any text is rendered
+- [ ] Font coverage — replace DejaVuSansMono with a font covering Latin extended + common non-Latin scripts (e.g. Noto Sans)
+- [ ] RTL support (stretch) — layout mirroring for Arabic/Hebrew; text right-aligned in panels
+
+---
+
+## Phase 21 — Combat System
+
+Design decision on combat style (VATS-style slow-time, stop-time, or turn-based) must be made
+before this phase begins. See `DESIGN.md § Combat`.
+
+- [ ] Combat capability for golems — damage dealing, targeting, pathfinding to enemy
+- [ ] Enemy AI routines — authored bytecode, same VM as golems
+- [ ] Death, drops, and loot
+
+---
+
+## Phase 22 — Platform & Multiplayer
+
+- [ ] Touchscreen input layer — all actions accessible via touch, co-equal with keyboard and gamepad
+- [ ] Port to additional platforms per `DESIGN.md § Platform` (order TBD)
+- [ ] Split-screen multiplayer — design must be settled before implementation

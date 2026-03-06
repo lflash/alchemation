@@ -91,25 +91,54 @@ CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
     using ET = EntityType;
     using CR = CollisionResult;
 
+    // Static terrain objects — always block movers that reach them.
+    auto isStatic = [](ET t) {
+        return t == ET::Tree || t == ET::Rock || t == ET::Campfire ||
+               t == ET::TreeStump || t == ET::Battery || t == ET::Lightbulb;
+    };
+
     switch (mover) {
         case ET::Player:
-            if (occupant == ET::Goblin)   return CR::Block;   // bump combat
+            if (occupant == ET::Goblin)   return CR::Block;    // bump → combat
             if (occupant == ET::Mushroom) return CR::Collect;
+            if (occupant == ET::Chest)    return CR::Collect;
+            if (occupant == ET::Log)      return CR::Block;    // bump → push
+            if (occupant == ET::Rock)     return CR::Block;    // bump → push
+            if (isGolem(occupant))        return CR::Block;
+            if (isStatic(occupant))       return CR::Block;
             return CR::Pass;
 
         case ET::Goblin:
-            if (occupant == ET::Player) return CR::Combat;
-            if (occupant == ET::Goblin) return CR::Block;
+            if (occupant == ET::Player)   return CR::Combat;
+            if (occupant == ET::Goblin)   return CR::Block;
+            if (isGolem(occupant))        return CR::Block;
+            if (isStatic(occupant))       return CR::Block;
             return CR::Pass;
 
         case ET::Poop:
-            if (occupant == ET::Goblin) return CR::Hit;
+            if (occupant == ET::Goblin)   return CR::Hit;
             return CR::Pass;
 
         case ET::Mushroom:
             return CR::Pass;
+
+        // Golems
+        default:
+            if (!isGolem(mover)) return CR::Pass;
+            if (occupant == ET::Player)   return CR::Block;
+            if (occupant == ET::Goblin) {
+                // Fighting golems strike goblins; others are blocked
+                if (mover == ET::IronGolem || mover == ET::WoodGolem)
+                    return CR::Hit;
+                return CR::Block;
+            }
+            if (occupant == ET::Mushroom) return CR::Pass;
+            if (occupant == ET::Goblin)   return CR::Block;
+            if (isGolem(occupant))        return CR::Block;
+            if (isStatic(occupant))       return CR::Block;
+            if (occupant == ET::Log || occupant == ET::Rock) return CR::Block;
+            return CR::Pass;
     }
-    return CR::Pass;
 }
 
 // ─── Two-phase move resolution ────────────────────────────────────────────────

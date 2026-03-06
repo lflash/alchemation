@@ -8,9 +8,16 @@
 // ─── OpCode ──────────────────────────────────────────────────────────────────
 
 enum class OpCode : uint8_t {
-    MOVE_REL,   // move one tile relative to agent facing; dir = RelDir
-    WAIT,       // pause for arg ticks
-    HALT,       // stop; agent despawns
+    MOVE_REL,       // move one tile relative to agent facing; dir = RelDir
+    WAIT,           // pause for ticks ticks
+    HALT,           // stop; agent despawns
+    DIG,            // dig tile in facing direction
+    PLANT,          // plant mushroom in facing direction
+    JUMP,           // unconditional jump; addr = target PC
+    JUMP_IF,        // jump if stimulus[cond] > threshold; addr, cond, threshold
+    JUMP_IF_NOT,    // jump if stimulus[cond] <= threshold; addr, cond, threshold
+    CALL,           // push return addr, jump; addr = target PC
+    RET,            // pop return addr, jump back
 };
 
 // ─── RelDir ──────────────────────────────────────────────────────────────────
@@ -18,12 +25,30 @@ enum class OpCode : uint8_t {
 // Direction relative to the agent's current facing. Stored in Instruction::dir.
 enum class RelDir : uint8_t { Forward = 0, Right = 1, Back = 2, Left = 3 };
 
+// ─── Condition ───────────────────────────────────────────────────────────────
+
+// Stimulus conditions testable by JUMP_IF / JUMP_IF_NOT.
+enum class Condition : uint8_t { None = 0, Fire, Wet, EntityAhead, AtEdge };
+
 // ─── Instruction ─────────────────────────────────────────────────────────────
+//
+// Flat layout — all fields always present; unused fields default to zero.
+// Mapping by opcode:
+//   MOVE_REL              → dir
+//   WAIT                  → ticks
+//   HALT                  → (none)
+//   DIG / PLANT           → (none; agent uses its current facing)
+//   JUMP / CALL           → addr
+//   JUMP_IF / JUMP_IF_NOT → addr, cond, threshold
+//   RET                   → (none)
 
 struct Instruction {
-    OpCode   op;
-    uint8_t  dir;    // RelDir for MOVE_REL; unused for WAIT/HALT
-    uint32_t arg;    // tick count for WAIT; unused otherwise
+    OpCode    op        = OpCode::HALT;
+    RelDir    dir       = RelDir::Forward;
+    uint16_t  ticks     = 0;
+    uint16_t  addr      = 0;
+    Condition cond      = Condition::None;
+    uint8_t   threshold = 0;
 };
 
 // ─── AgentExecState ──────────────────────────────────────────────────────────
@@ -33,12 +58,37 @@ struct AgentExecState {
     uint32_t waitTicks = 0;   // remaining ticks on a WAIT
 };
 
+// ─── Instruction cost table ───────────────────────────────────────────────────
+//
+// Mana cost per instruction. Defined here so it is trivially testable and easy
+// to rebalance — this is the single source of truth.
+//
+// Phase 13 opcodes (DIG, PLANT, JUMP*, CALL, RET) are priced now so the table
+// is complete; their game-logic implementations land in Phase 13.
+
+constexpr int instrCost(OpCode op, RelDir dir = RelDir::Forward) {
+    switch (op) {
+        case OpCode::MOVE_REL: return (dir == RelDir::Back) ? 2 : 1;
+        case OpCode::DIG:      return 3;
+        case OpCode::PLANT:    return 2;
+        default:               return 0;   // WAIT, HALT, JUMP*, CALL, RET
+    }
+}
+
 // ─── Recording ───────────────────────────────────────────────────────────────
 
 struct Recording {
     std::string              name;
     std::vector<Instruction> instructions;
     bool empty() const { return instructions.empty(); }
+
+    // Total mana cost to deploy this recording as an agent.
+    int manaCost() const {
+        int total = 0;
+        for (const auto& ins : instructions)
+            total += instrCost(ins.op, ins.dir);
+        return total;
+    }
 };
 
 // ─── Direction rotation helpers ───────────────────────────────────────────────

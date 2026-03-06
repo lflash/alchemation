@@ -69,7 +69,7 @@ TEST_CASE("pause between moves emits WAIT with correct tick count") {
 
     REQUIRE(r.instructions.size() >= 3);
     CHECK(r.instructions[0].op  == OpCode::WAIT);
-    CHECK(r.instructions[0].arg == 3);
+    CHECK(r.instructions[0].ticks == 3);
     CHECK(r.instructions[1].op  == OpCode::MOVE_REL);
 }
 
@@ -95,7 +95,7 @@ TEST_CASE("two moves separated by a pause emit WAIT between them") {
     REQUIRE(r.instructions.size() == 4);
     CHECK(r.instructions[0].op  == OpCode::MOVE_REL);
     CHECK(r.instructions[1].op  == OpCode::WAIT);
-    CHECK(r.instructions[1].arg == 2);
+    CHECK(r.instructions[1].ticks == 2);
     CHECK(r.instructions[2].op  == OpCode::MOVE_REL);
     CHECK(r.instructions[3].op  == OpCode::HALT);
 }
@@ -112,9 +112,9 @@ TEST_CASE("stop() saves recording and resets; second recording is independent") 
 
     REQUIRE(rec.recordings.size() == 2);
     // First recording: MOVE_REL Forward (N facing N)
-    CHECK(static_cast<RelDir>(rec.recordings[0].instructions[0].dir) == RelDir::Forward);
+    CHECK(rec.recordings[0].instructions[0].dir == RelDir::Forward);
     // Second recording: MOVE_REL Forward (E facing E)
-    CHECK(static_cast<RelDir>(rec.recordings[1].instructions[0].dir) == RelDir::Forward);
+    CHECK(rec.recordings[1].instructions[0].dir == RelDir::Forward);
 }
 
 // ─── RoutineVM ───────────────────────────────────────────────────────────────
@@ -128,7 +128,7 @@ static Recording makeRecording(std::vector<Instruction> instrs) {
 TEST_CASE("VM: HALT on first instruction returns halt immediately") {
     RoutineVM vm;
     AgentExecState state;
-    Recording rec = makeRecording({ {OpCode::HALT, 0, 0} });
+    Recording rec = makeRecording({ {.op = OpCode::HALT} });
     auto result = vm.step(state, rec, Direction::N);
     CHECK(result.halt);
     CHECK(!result.wantMove);
@@ -145,8 +145,8 @@ TEST_CASE("VM: MOVE_REL Forward facing N moves north") {
     RoutineVM vm;
     AgentExecState state;
     Recording rec = makeRecording({
-        {OpCode::MOVE_REL, static_cast<uint8_t>(RelDir::Forward), 0},
-        {OpCode::HALT, 0, 0},
+        {.op = OpCode::MOVE_REL, .dir = RelDir::Forward},
+        {.op = OpCode::HALT},
     });
     auto result = vm.step(state, rec, Direction::N);
     CHECK(!result.halt);
@@ -159,8 +159,8 @@ TEST_CASE("VM: MOVE_REL Forward facing E moves east") {
     RoutineVM vm;
     AgentExecState state;
     Recording rec = makeRecording({
-        {OpCode::MOVE_REL, static_cast<uint8_t>(RelDir::Forward), 0},
-        {OpCode::HALT, 0, 0},
+        {.op = OpCode::MOVE_REL, .dir = RelDir::Forward},
+        {.op = OpCode::HALT},
     });
     auto result = vm.step(state, rec, Direction::E);
     CHECK(result.wantMove);
@@ -171,8 +171,8 @@ TEST_CASE("VM: MOVE_REL Right facing N moves east") {
     RoutineVM vm;
     AgentExecState state;
     Recording rec = makeRecording({
-        {OpCode::MOVE_REL, static_cast<uint8_t>(RelDir::Right), 0},
-        {OpCode::HALT, 0, 0},
+        {.op = OpCode::MOVE_REL, .dir = RelDir::Right},
+        {.op = OpCode::HALT},
     });
     auto result = vm.step(state, rec, Direction::N);
     CHECK(result.wantMove);
@@ -183,8 +183,8 @@ TEST_CASE("VM: WAIT holds for correct number of ticks then continues") {
     RoutineVM vm;
     AgentExecState state;
     Recording rec = makeRecording({
-        {OpCode::WAIT, 0, 3},
-        {OpCode::HALT, 0, 0},
+        {.op = OpCode::WAIT, .ticks = 3},
+        {.op = OpCode::HALT},
     });
 
     // Tick 1: WAIT consumed, 2 remaining
@@ -206,9 +206,9 @@ TEST_CASE("VM: pc advances correctly through a linear sequence") {
     RoutineVM vm;
     AgentExecState state;
     Recording rec = makeRecording({
-        {OpCode::MOVE_REL, static_cast<uint8_t>(RelDir::Forward), 0},
-        {OpCode::MOVE_REL, static_cast<uint8_t>(RelDir::Right),   0},
-        {OpCode::HALT, 0, 0},
+        {.op = OpCode::MOVE_REL, .dir = RelDir::Forward},
+        {.op = OpCode::MOVE_REL, .dir = RelDir::Right},
+        {.op = OpCode::HALT},
     });
 
     CHECK(state.pc == 0);

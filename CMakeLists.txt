@@ -70,6 +70,8 @@ add_executable(tests
     tests/test_fire_voltage.cpp
     tests/test_phase10.cpp
     tests/test_input_map.cpp
+    tests/test_phase11.cpp
+    tests/test_phase12.cpp
     ${LOGIC_SOURCES}
 )
 

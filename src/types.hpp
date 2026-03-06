@@ -52,12 +52,26 @@ constexpr EntityID INVALID_ENTITY = 0;
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-enum class EntityType { Player, Goblin, Mushroom, Poop,
-                        Campfire, TreeStump, Log, Battery, Lightbulb };
+enum class EntityType {
+    // Core
+    Player, Goblin, Mushroom, Poop,
+    // Static stimulus sources
+    Campfire, TreeStump, Log, Battery, Lightbulb,
+    // Terrain objects (Phase 12)
+    Tree, Rock, Chest,
+    // Golems — summoned from medium tiles (Phase 12)
+    MudGolem, StoneGolem, ClayGolem, WaterGolem,
+    BushGolem, WoodGolem, IronGolem, CopperGolem,
+};
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
-enum class TileType  { Grass, BareEarth, Portal, Fire, Puddle };
+enum class TileType {
+    Grass, BareEarth, Portal, Fire, Puddle,
+    // Summoning mediums — each yields one golem type (Phase 12)
+    Mud, Stone, Clay, Bush, Wood, Iron, Copper,
+    // Water deferred to Phase 14
+};
 
 
 // ─── Math helpers ────────────────────────────────────────────────────────────

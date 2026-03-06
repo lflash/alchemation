@@ -26,6 +26,7 @@ InputMap InputMap::defaults() {
         { Action::Record,           SDLK_r         },
         { Action::CycleRecording,   SDLK_q         },
         { Action::Deploy,           SDLK_e         },
+        { Action::Summon,           SDLK_g         },
         { Action::SwitchGrid,       SDLK_TAB       },
         { Action::PanUp,            SDLK_UP        },
         { Action::PanDown,          SDLK_DOWN      },
@@ -47,7 +48,7 @@ InputMap InputMap::defaults() {
 static constexpr const char* ACTION_NAMES[] = {
     "MoveUp", "MoveDown", "MoveLeft", "MoveRight", "Strafe",
     "Dig", "Plant", "PlacePortal",
-    "Record", "CycleRecording", "Deploy",
+    "Record", "CycleRecording", "Deploy", "Summon",
     "SwitchGrid",
     "PanUp", "PanDown", "PanLeft", "PanRight", "ResetCamera", "ZoomModifier",
     "Quit", "Confirm", "ToggleControls", "ToggleRecordings", "ToggleRebind",

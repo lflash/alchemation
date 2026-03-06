@@ -11,15 +11,24 @@
 // ─── Sprite paths ─────────────────────────────────────────────────────────────
 
 static const std::unordered_map<EntityType, std::string> SPRITE_PATHS = {
-    { EntityType::Player,    "assets/sprites/player.png"     },
-    { EntityType::Goblin,    "assets/sprites/goblin.png"     },
-    { EntityType::Mushroom,  "assets/sprites/mushroom.png"   },
-    { EntityType::Poop,      "assets/sprites/poop.png"       },
-    { EntityType::Campfire,  "assets/sprites/campfire.png"   },
-    { EntityType::TreeStump, "assets/sprites/tree_stump.png" },
-    { EntityType::Log,       "assets/sprites/logs.png"       },
-    { EntityType::Battery,   "assets/sprites/battery.png"    },
-    { EntityType::Lightbulb, "assets/sprites/lightbulb.png"  },
+    { EntityType::Player,      "assets/sprites/player.png"     },
+    { EntityType::Goblin,      "assets/sprites/goblin.png"     },
+    { EntityType::Mushroom,    "assets/sprites/mushroom.png"   },
+    { EntityType::Poop,        "assets/sprites/poop.png"       },
+    { EntityType::Campfire,    "assets/sprites/campfire.png"   },
+    { EntityType::TreeStump,   "assets/sprites/tree_stump.png" },
+    { EntityType::Log,         "assets/sprites/logs.png"       },
+    { EntityType::Battery,     "assets/sprites/battery.png"    },
+    { EntityType::Lightbulb,   "assets/sprites/lightbulb.png"  },
+    // All golem types share a placeholder sprite until per-type art lands
+    { EntityType::MudGolem,    "assets/sprites/golem.png"      },
+    { EntityType::StoneGolem,  "assets/sprites/golem.png"      },
+    { EntityType::ClayGolem,   "assets/sprites/golem.png"      },
+    { EntityType::WaterGolem,  "assets/sprites/golem.png"      },
+    { EntityType::BushGolem,   "assets/sprites/golem.png"      },
+    { EntityType::WoodGolem,   "assets/sprites/golem.png"      },
+    { EntityType::IronGolem,   "assets/sprites/golem.png"      },
+    { EntityType::CopperGolem, "assets/sprites/golem.png"      },
 };
 
 // ─── SpriteCache ─────────────────────────────────────────────────────────────
@@ -359,6 +368,36 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
                  static_cast<uint8_t>(200 * ripple), 255 };
     }
 
+    // Summoning medium tiles — each has a distinct flat colour with a day/night tint.
+    if (type == TileType::Mud)
+        return { static_cast<uint8_t>(101 * dayFactor),
+                 static_cast<uint8_t>( 67 * dayFactor),
+                 static_cast<uint8_t>( 33 * dayFactor), 255 };
+    if (type == TileType::Stone)
+        return { static_cast<uint8_t>(120 * dayFactor),
+                 static_cast<uint8_t>(120 * dayFactor),
+                 static_cast<uint8_t>(120 * dayFactor), 255 };
+    if (type == TileType::Clay)
+        return { static_cast<uint8_t>(180 * dayFactor),
+                 static_cast<uint8_t>( 90 * dayFactor),
+                 static_cast<uint8_t>( 60 * dayFactor), 255 };
+    if (type == TileType::Bush)
+        return { static_cast<uint8_t>( 30 * dayFactor),
+                 static_cast<uint8_t>(100 * dayFactor),
+                 static_cast<uint8_t>( 30 * dayFactor), 255 };
+    if (type == TileType::Wood)
+        return { static_cast<uint8_t>(130 * dayFactor),
+                 static_cast<uint8_t>( 80 * dayFactor),
+                 static_cast<uint8_t>( 30 * dayFactor), 255 };
+    if (type == TileType::Iron)
+        return { static_cast<uint8_t>( 80 * dayFactor),
+                 static_cast<uint8_t>( 85 * dayFactor),
+                 static_cast<uint8_t>( 95 * dayFactor), 255 };
+    if (type == TileType::Copper)
+        return { static_cast<uint8_t>(184 * dayFactor),
+                 static_cast<uint8_t>(115 * dayFactor),
+                 static_cast<uint8_t>( 51 * dayFactor), 255 };
+
     if (studioMode_) {
         // Muted blue-grey studio floor.
         int v = static_cast<int>(height * 18.0f);
@@ -678,6 +717,35 @@ void Renderer::drawHUD(int mana, bool isRecording) {
         drawText(recStr, X + PAD + manaW, ty, {210, 60, 60, 255});
 }
 
+void Renderer::drawSummonPreview(const SummonPreview& preview) {
+    if (!preview.active) return;
+
+    constexpr int PAD = 8;
+    constexpr int H   = 30;
+
+    std::string label = "Summon: " + preview.golemName +
+                        "  \xe2\x99\xa6 " + std::to_string(preview.manaCost);  // ♦
+
+    int textW = 0, textH = 0;
+    if (font_) TTF_SizeUTF8(font_, label.c_str(), &textW, &textH);
+
+    int W = PAD + textW + PAD;
+    int X = (VIEWPORT_W - W) / 2;
+    int Y = VIEWPORT_H - H - 10;
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 10, 10, 10, 195);
+    SDL_Rect panel = {X, Y, W, H};
+    SDL_RenderFillRect(sdl, &panel);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(sdl, 90, 90, 90, 255);
+    SDL_RenderDrawRect(sdl, &panel);
+
+    SDL_Color col = preview.canAfford ? SDL_Color{220, 210, 80, 255}
+                                      : SDL_Color{200,  60, 60, 255};
+    drawText(label, X + PAD, Y + (H - textH) / 2, col);
+}
+
 void Renderer::drawText(const std::string& text, int x, int y, SDL_Color col) const {
     if (!font_ || text.empty()) return;
     SDL_Surface* surf = TTF_RenderUTF8_Blended(font_, text.c_str(), col);
@@ -763,9 +831,15 @@ void Renderer::drawRecordingsPanel(const std::vector<RecordingInfo>& list,
                 drawText("  " + rec.name, X + PAD, ty, normCol);
             }
 
-            // Step count (right side)
+            // Mana cost (right side): ♦ N
+            std::string manaStr = "\xe2\x99\xa6 " + std::to_string(rec.manaCost);
+            SDL_Color   manaCol = rec.selected ? SDL_Color{220, 185, 50, 255}
+                                               : SDL_Color{ 90,  70, 20, 255};
+            drawText(manaStr, X + W - PAD - 44, ty, manaCol);
+
+            // Step count (left of mana cost)
             std::string steps = std::to_string(rec.steps);
-            drawText(steps, X + W - PAD - 28, ty,
+            drawText(steps, X + W - PAD - 76, ty,
                      rec.selected ? accentCol : dimCol);
 
             ty += ROW;

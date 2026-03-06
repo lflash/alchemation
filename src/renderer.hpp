@@ -128,6 +128,10 @@ public:
     // Draws the always-on HUD (mana counter + recording indicator) top-left.
     void drawHUD(int mana, bool isRecording);
 
+    // Draws a summon preview tooltip at the bottom of the screen.
+    // No-op if preview.active is false.
+    void drawSummonPreview(const SummonPreview& preview);
+
     // Draws a small directional triangle at the edge of a tile in the entity's facing direction.
     void drawFacingIndicator(Vec2f renderPos, float renderZ, Direction facing);
 

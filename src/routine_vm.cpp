@@ -18,13 +18,12 @@ VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
             return { .halt = true };
 
         case OpCode::WAIT:
-            state.waitTicks = instr.arg > 0 ? instr.arg - 1 : 0;
+            state.waitTicks = instr.ticks > 0 ? instr.ticks - 1 : 0;
             ++state.pc;
             return {};
 
         case OpCode::MOVE_REL: {
-            RelDir rel   = static_cast<RelDir>(instr.dir);
-            TilePos delta = resolveRelDir(agentFacing, rel);
+            TilePos delta = resolveRelDir(agentFacing, instr.dir);
             ++state.pc;
             return { .halt = false, .wantMove = true, .moveDelta = delta };
         }

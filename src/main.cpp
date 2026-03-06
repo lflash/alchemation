@@ -7,6 +7,7 @@
 #include "types.hpp"
 #include "input.hpp"
 #include "game.hpp"
+#include "entity.hpp"
 #include "renderer.hpp"
 #include "audio.hpp"
 
@@ -215,12 +216,16 @@ int main() {
             renderer.drawShadow(renderPos, renderZ);
             renderer.drawSprite(renderPos, renderZ, ent->type, ent->id, ent->moveT, ent->lit);
             renderer.drawEntityEffects(renderPos, renderZ, ent->burning, ent->electrified);
-            if (ent->type != EntityType::Mushroom  &&
-                ent->type != EntityType::Campfire  &&
-                ent->type != EntityType::TreeStump &&
-                ent->type != EntityType::Log       &&
-                ent->type != EntityType::Battery   &&
-                ent->type != EntityType::Lightbulb)
+            if (ent->type != EntityType::Mushroom   &&
+                ent->type != EntityType::Campfire   &&
+                ent->type != EntityType::TreeStump  &&
+                ent->type != EntityType::Log        &&
+                ent->type != EntityType::Battery    &&
+                ent->type != EntityType::Lightbulb  &&
+                ent->type != EntityType::Tree       &&
+                ent->type != EntityType::Rock       &&
+                ent->type != EntityType::Chest      &&
+                !isGolem(ent->type))
                 renderer.drawFacingIndicator(renderPos, renderZ, ent->facing);
         }
 
@@ -264,6 +269,11 @@ int main() {
                 case VisualEventType::GridSwitch:
                     renderer.triggerShake(8.0f);
                     break;
+                case VisualEventType::Summon:
+                    renderer.spawnBurst(vp, vz, {100, 200, 255, 255},
+                                        14, 4.0f, 0.5f, 4.0f);
+                    renderer.triggerShake(3.0f);
+                    break;
             }
         }
 
@@ -271,7 +281,7 @@ int main() {
         // Drain game events → SFX
         static constexpr SFX eventToSFX[] = {
             SFX::Step, SFX::Dig, SFX::Plant, SFX::CollectMushroom,
-            SFX::RecordStart, SFX::RecordStop, SFX::DeployAgent,
+            SFX::RecordStart, SFX::RecordStop, SFX::DeployAgent, SFX::DeployAgent,
             SFX::PortalCreate, SFX::PortalEnter, SFX::GridSwitch,
             SFX::GoblinHit, SFX::AgentStep,
         };
@@ -305,6 +315,7 @@ int main() {
         audio.update(fdt);
 
         renderer.drawHUD(game.playerMana(), game.isRecording());
+        renderer.drawSummonPreview(game.playerSummonPreview());
         if (showRecordings)
             renderer.drawRecordingsPanel(game.recordingList(), renamingScript, renameBuffer);
         else if (showControls)

@@ -6,7 +6,6 @@
 #include "input.hpp"
 #include "recorder.hpp"
 #include "routine_vm.hpp"
-#include <optional>
 #include <unordered_map>
 #include <string>
 #include <utility>
@@ -19,7 +18,7 @@
 
 enum class AudioEvent {
     PlayerStep, Dig, Plant, CollectMushroom,
-    RecordStart, RecordStop, DeployAgent,
+    RecordStart, RecordStop, DeployAgent, Summon,
     PortalCreate, PortalEnter, GridSwitch,
     GoblinHit, AgentStep,
 };
@@ -30,7 +29,7 @@ enum class AudioEvent {
 // frame and spawns particles / triggers screen-level effects accordingly.
 
 enum class VisualEventType {
-    Dig, CollectMushroom, DeployAgent,
+    Dig, CollectMushroom, DeployAgent, Summon,
     GoblinHit, GoblinDie, PlayerLand,
     PortalEnter, GridSwitch,
 };
@@ -43,12 +42,26 @@ struct VisualEvent {
     EntityType      entityType = EntityType::Player; // for dying-entity (GoblinDie)
 };
 
+// ─── SummonPreview ───────────────────────────────────────────────────────────
+//
+// Describes what the player would summon if they pressed the Summon key.
+// active = false when the player is not facing a medium tile.
+
+struct SummonPreview {
+    bool        active    = false;
+    EntityType  golemType = EntityType::MudGolem;
+    std::string golemName;
+    int         manaCost  = 0;
+    bool        canAfford = false;
+};
+
 // ─── RecordingInfo ────────────────────────────────────────────────────────────
 
 struct RecordingInfo {
     size_t      index;
     std::string name;
     int         steps;
+    int         manaCost;
     bool        selected;
 };
 
@@ -105,6 +118,9 @@ public:
     std::vector<RecordingInfo> recordingList() const;
     void renameRecording(size_t index, const std::string& name);
 
+    // HUD summon preview: what the player would summon if they pressed G.
+    SummonPreview playerSummonPreview() const;
+
     // Persistence.
     void save(const std::string& path) const;
     bool load(const std::string& path);
@@ -139,7 +155,7 @@ private:
         GridID   toGrid;
         TilePos  toPos;
     };
-    std::optional<PendingTransfer> pendingTransfer_;
+    std::vector<PendingTransfer> pendingTransfers_;
 
     // ── State ─────────────────────────────────────────────────────────────────
     EntityRegistry                   registry_;

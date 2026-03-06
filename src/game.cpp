@@ -8,6 +8,38 @@
 #include <queue>
 #include <unordered_set>
 
+// ─── Summon helpers ───────────────────────────────────────────────────────────
+
+struct GolemInfo {
+    EntityType  type;
+    const char* name;
+    int         manaCost;
+};
+
+static const GolemInfo GOLEM_TABLE[] = {
+    { EntityType::MudGolem,    "Mud Golem",    3 },
+    { EntityType::StoneGolem,  "Stone Golem",  5 },
+    { EntityType::ClayGolem,   "Clay Golem",   3 },
+    { EntityType::BushGolem,   "Bush Golem",   2 },
+    { EntityType::WoodGolem,   "Wood Golem",   4 },
+    { EntityType::IronGolem,   "Iron Golem",   6 },
+    { EntityType::CopperGolem, "Copper Golem", 4 },
+    // WaterGolem deferred to Phase 14 (requires Water tile type)
+};
+
+static const GolemInfo* golemForMedium(TileType t) {
+    switch (t) {
+        case TileType::Mud:    return &GOLEM_TABLE[0];
+        case TileType::Stone:  return &GOLEM_TABLE[1];
+        case TileType::Clay:   return &GOLEM_TABLE[2];
+        case TileType::Bush:   return &GOLEM_TABLE[3];
+        case TileType::Wood:   return &GOLEM_TABLE[4];
+        case TileType::Iron:   return &GOLEM_TABLE[5];
+        case TileType::Copper: return &GOLEM_TABLE[6];
+        default: return nullptr;
+    }
+}
+
 // ─── transferEntity ───────────────────────────────────────────────────────────
 
 void transferEntity(EntityID eid, Grid& from, Grid& to,
@@ -35,14 +67,25 @@ void Game::subscribeEvents(Grid& grid) {
         for (EntityID cid : g.spatial.at(player->pos)) {
             if (cid == playerID_) continue;
             Entity* cand = registry_.get(cid);
-            if (!cand || cand->type != EntityType::Mushroom) continue;
-            player->mana += 3;
-            visualEvents_.push_back({ VisualEventType::CollectMushroom,
-                                      toVec(cand->pos), static_cast<float>(cand->pos.z) });
-            g.remove(cid, *cand);
-            registry_.destroy(cid);
-            audioEvents_.push_back(AudioEvent::CollectMushroom);
-            break;
+            if (!cand) continue;
+            if (cand->type == EntityType::Mushroom) {
+                player->mana += 3;
+                visualEvents_.push_back({ VisualEventType::CollectMushroom,
+                                          toVec(cand->pos), static_cast<float>(cand->pos.z) });
+                g.remove(cid, *cand);
+                registry_.destroy(cid);
+                audioEvents_.push_back(AudioEvent::CollectMushroom);
+                break;
+            }
+            if (cand->type == EntityType::Chest) {
+                player->mana += 5;
+                visualEvents_.push_back({ VisualEventType::CollectMushroom,
+                                          toVec(cand->pos), static_cast<float>(cand->pos.z) });
+                g.remove(cid, *cand);
+                registry_.destroy(cid);
+                audioEvents_.push_back(AudioEvent::CollectMushroom);
+                break;
+            }
         }
     });
 }
@@ -84,6 +127,21 @@ Game::Game() {
     spawnStatic(EntityType::TreeStump, 4,  2);   // east of campfire
     spawnStatic(EntityType::Log,       3,  3);   // south of campfire
 
+    // ── Phase 12 demo: medium tiles + terrain objects ─────────────────────────
+    // A row of summoning mediums south of spawn so the player can test golems.
+    world.terrain.setType({-3,  4}, TileType::Mud);
+    world.terrain.setType({-2,  4}, TileType::Stone);
+    world.terrain.setType({-1,  4}, TileType::Clay);
+    world.terrain.setType({ 0,  4}, TileType::Bush);
+    world.terrain.setType({ 1,  4}, TileType::Wood);
+    world.terrain.setType({ 2,  4}, TileType::Iron);
+    world.terrain.setType({ 3,  4}, TileType::Copper);
+
+    // A Tree, Rock and Chest near spawn (west side, off the north navigation corridor).
+    spawnStatic(EntityType::Tree,  -5, -6);
+    spawnStatic(EntityType::Rock,  -4, -6);
+    spawnStatic(EntityType::Chest, -3, -6);
+
     // ── Voltage demo ──────────────────────────────────────────────────────────
     // Battery at {-4,0} powers a puddle chain running east.
     // Lightbulb at {-1,0} sits on the third puddle (2V) and will be lit.
@@ -123,19 +181,19 @@ void Game::tick(const Input& input, Tick currentTick) {
 // ─── Pending portal transfer ─────────────────────────────────────────────────
 
 void Game::applyPendingTransfer() {
-    if (!pendingTransfer_) return;
-    auto& t = *pendingTransfer_;
-    if (grids_.count(t.fromGrid) && grids_.count(t.toGrid)) {
-        transferEntity(t.eid, grids_.at(t.fromGrid), grids_.at(t.toGrid),
-                       registry_, t.toPos);
-        if (t.eid == playerID_) {
-            activeGridID_     = t.toGrid;
-            gridJustSwitched_ = true;
-            audioEvents_.push_back(AudioEvent::PortalEnter);
-            visualEvents_.push_back({ VisualEventType::PortalEnter, {0,0}, 0 });
+    for (auto& t : pendingTransfers_) {
+        if (grids_.count(t.fromGrid) && grids_.count(t.toGrid)) {
+            transferEntity(t.eid, grids_.at(t.fromGrid), grids_.at(t.toGrid),
+                           registry_, t.toPos);
+            if (t.eid == playerID_) {
+                activeGridID_     = t.toGrid;
+                gridJustSwitched_ = true;
+                audioEvents_.push_back(AudioEvent::PortalEnter);
+                visualEvents_.push_back({ VisualEventType::PortalEnter, {0,0}, 0 });
+            }
         }
     }
-    pendingTransfer_.reset();
+    pendingTransfers_.clear();
 }
 
 // ─── Accessors ────────────────────────────────────────────────────────────────
@@ -167,9 +225,19 @@ std::vector<RecordingInfo> Game::recordingList() const {
         int steps = 0;
         for (const auto& instr : rec.instructions)
             if (instr.op != OpCode::HALT) ++steps;
-        result.push_back({ i, rec.name, steps, i == selectedRecording_ });
+        result.push_back({ i, rec.name, steps, rec.manaCost(), i == selectedRecording_ });
     }
     return result;
+}
+
+SummonPreview Game::playerSummonPreview() const {
+    const Entity* player = registry_.get(playerID_);
+    if (!player || !player->isIdle()) return {};
+    const Grid& grid = activeGrid();
+    TilePos ahead = player->pos + dirToDelta(player->facing);
+    const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
+    if (!gi) return {};
+    return { true, gi->type, gi->name, gi->manaCost, player->mana >= gi->manaCost };
 }
 
 void Game::renameRecording(size_t index, const std::string& name) {
@@ -212,6 +280,18 @@ void Game::tickScheduler(Grid& grid, Tick currentTick) {
     }
 }
 
+// ─── Height helper ────────────────────────────────────────────────────────────
+//
+// Set dest.z from terrain for unbounded grids, then return whether the height
+// step is legal (≤ 1 level). Bounded grids have flat floors, so dest.z is
+// unchanged and this always returns true for them.
+
+static bool resolveDestHeight(TilePos& dest, const TilePos& from, const Grid& grid) {
+    if (!grid.isBounded())
+        dest.z = grid.terrain.levelAt(dest);
+    return std::abs(dest.z - from.z) <= 1;
+}
+
 // ─── Player input ─────────────────────────────────────────────────────────────
 
 void Game::tickPlayerInput(const Input& input) {
@@ -239,16 +319,22 @@ void Game::tickPlayerInput(const Input& input) {
         !recorder_.recordings.empty() &&
         selectedRecording_ < recorder_.recordings.size()) {
 
-        TilePos  spawnPos = player->pos + dirToDelta(player->facing);
-        EntityID pid      = registry_.spawn(EntityType::Poop, spawnPos);
-        Entity*  pe       = registry_.get(pid);
-        pe->facing        = player->facing;
-        grid.add(pid, *pe);
-        agentStates_[pid]     = AgentExecState{};
-        agentRecordings_[pid] = recorder_.recordings[selectedRecording_];
-        audioEvents_.push_back(AudioEvent::DeployAgent);
-        visualEvents_.push_back({ VisualEventType::DeployAgent,
-                                  toVec(spawnPos), static_cast<float>(spawnPos.z) });
+        const Recording& rec  = recorder_.recordings[selectedRecording_];
+        int              cost = rec.manaCost();
+
+        if (player->mana >= cost) {
+            player->mana -= cost;
+            TilePos  spawnPos = player->pos + dirToDelta(player->facing);
+            EntityID pid      = registry_.spawn(EntityType::Poop, spawnPos);
+            Entity*  pe       = registry_.get(pid);
+            pe->facing        = player->facing;
+            grid.add(pid, *pe);
+            agentStates_[pid]     = AgentExecState{};
+            agentRecordings_[pid] = rec;
+            audioEvents_.push_back(AudioEvent::DeployAgent);
+            visualEvents_.push_back({ VisualEventType::DeployAgent,
+                                      toVec(spawnPos), static_cast<float>(spawnPos.z) });
+        }
     }
 
     // Tab: toggle between world and studio
@@ -286,19 +372,13 @@ void Game::tickPlayerInput(const Input& input) {
         if (!input.held(Action::Strafe))
             player->facing = toDirection(delta);
 
-        // Resolve destination height. Bounded rooms are flat (z unchanged).
-        if (!grid.isBounded())
-            newDest.z = grid.terrain.levelAt(newDest);
-
         // Clamp to grid bounds if bounded (XY only — z free)
         if (grid.isBounded()) {
             newDest.x = std::clamp(newDest.x, 0, grid.width  - 1);
             newDest.y = std::clamp(newDest.y, 0, grid.height - 1);
         }
 
-        // Only attempt the move if terrain height difference is at most 1 level.
-        // (For bounded rooms delta.z == 0, so this check always passes there.)
-        if (std::abs(newDest.z - player->pos.z) <= 1) {
+        if (resolveDestHeight(newDest, player->pos, grid)) {
 
         std::vector<MoveIntention> intentions = {{
             playerID_, player->pos, newDest, player->type, player->size
@@ -310,52 +390,69 @@ void Game::tickPlayerInput(const Input& input) {
             if (recorder_.isRecording())
                 recorder_.recordMove(delta, facingBefore);
         } else {
-            // Bump combat
+            // Bump interactions
             Bounds destBounds = boundsAt(newDest, player->size);
             for (EntityID cid : grid.spatial.query(destBounds, newDest.z)) {
                 Entity* cand = registry_.get(cid);
-                if (!cand || cand->type != EntityType::Goblin) continue;
+                if (!cand) continue;
                 if (!overlaps(destBounds, boundsAt(cand->pos, cand->size))) continue;
 
-                cand->health -= player->mana;
-                Vec2f goblinVpos = toVec(cand->pos);
-                float goblinVz   = static_cast<float>(cand->pos.z);
-                audioEvents_.push_back(AudioEvent::GoblinHit);
-                if (cand->health <= 0) {
-                    visualEvents_.push_back({ VisualEventType::GoblinDie,
-                                             goblinVpos, goblinVz, cid, cand->type });
-                    grid.remove(cid, *cand);
-                    registry_.destroy(cid);
-                } else {
-                    visualEvents_.push_back({ VisualEventType::GoblinHit,
-                                             goblinVpos, goblinVz, cid });
-                    TilePos pushBase = cand->isMoving() ? cand->destination : cand->pos;
-                    TilePos pushDest = pushBase + delta;
-                    if (cand->isMoving()) {
-                        Bounds pushBounds   = boundsAt(pushDest, cand->size);
-                        bool   pushBlocked  = false;
-                        for (EntityID oid : grid.spatial.query(pushBounds, pushDest.z)) {
-                            if (oid == cid) continue;
-                            const Entity* occ = registry_.get(oid);
-                            if (!occ || !overlaps(pushBounds, boundsAt(occ->pos, occ->size))) continue;
-                            if (resolveCollision(cand->type, occ->type) == CollisionResult::Block) {
-                                pushBlocked = true; break;
-                            }
-                        }
-                        if (!pushBlocked) {
-                            grid.spatial.remove(cid, cand->destination, cand->size);
-                            grid.spatial.add(cid, pushDest, cand->size);
-                            cand->destination = pushDest;
-                        }
+                if (cand->type == EntityType::Goblin) {
+                    // Combat: goblin takes damage, gets pushed
+                    cand->health -= player->mana;
+                    Vec2f goblinVpos = toVec(cand->pos);
+                    float goblinVz   = static_cast<float>(cand->pos.z);
+                    audioEvents_.push_back(AudioEvent::GoblinHit);
+                    if (cand->health <= 0) {
+                        visualEvents_.push_back({ VisualEventType::GoblinDie,
+                                                 goblinVpos, goblinVz, cid, cand->type });
+                        grid.remove(cid, *cand);
+                        registry_.destroy(cid);
                     } else {
-                        std::vector<MoveIntention> push = {{
-                            cid, cand->pos, pushDest, cand->type, cand->size
-                        }};
-                        auto pushAllowed = resolveMoves(push, grid.spatial, registry_);
-                        if (pushAllowed.count(cid)) cand->destination = pushDest;
+                        visualEvents_.push_back({ VisualEventType::GoblinHit,
+                                                 goblinVpos, goblinVz, cid });
+                        TilePos pushBase = cand->isMoving() ? cand->destination : cand->pos;
+                        TilePos pushDest = pushBase + delta;
+                        if (cand->isMoving()) {
+                            Bounds pushBounds  = boundsAt(pushDest, cand->size);
+                            bool   pushBlocked = false;
+                            for (EntityID oid : grid.spatial.query(pushBounds, pushDest.z)) {
+                                if (oid == cid) continue;
+                                const Entity* occ = registry_.get(oid);
+                                if (!occ || !overlaps(pushBounds, boundsAt(occ->pos, occ->size))) continue;
+                                if (resolveCollision(cand->type, occ->type) == CollisionResult::Block) {
+                                    pushBlocked = true; break;
+                                }
+                            }
+                            if (!pushBlocked) {
+                                grid.spatial.remove(cid, cand->destination, cand->size);
+                                grid.spatial.add(cid, pushDest, cand->size);
+                                cand->destination = pushDest;
+                            }
+                        } else {
+                            std::vector<MoveIntention> push = {{
+                                cid, cand->pos, pushDest, cand->type, cand->size
+                            }};
+                            auto pushAllowed = resolveMoves(push, grid.spatial, registry_);
+                            if (pushAllowed.count(cid)) cand->destination = pushDest;
+                        }
                     }
+                    break;
+
+                } else if (cand->isIdle() && cand->hasCapability(Capability::Pushable)) {
+                    // Push: shove the entity one tile in the movement direction
+                    TilePos pushDest = cand->pos + delta;
+                    if (grid.isBounded()) {
+                        pushDest.x = std::clamp(pushDest.x, 0, grid.width  - 1);
+                        pushDest.y = std::clamp(pushDest.y, 0, grid.height - 1);
+                    }
+                    std::vector<MoveIntention> push = {{
+                        cid, cand->pos, pushDest, cand->type, cand->size
+                    }};
+                    auto pushAllowed = resolveMoves(push, grid.spatial, registry_);
+                    if (pushAllowed.count(cid)) cand->destination = pushDest;
+                    break;
                 }
-                break;
             }
         }
         } // height check
@@ -381,6 +478,32 @@ void Game::tickPlayerInput(const Input& input) {
         }
     }
 
+
+    // G: summon golem from medium tile ahead
+    if (input.pressed(Action::Summon) && player) {
+        TilePos ahead = player->pos + dirToDelta(player->facing);
+        const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
+        if (gi && player->mana >= gi->manaCost) {
+            player->mana -= gi->manaCost;
+            grid.terrain.dig(ahead);   // consume medium tile → BareEarth
+
+            EntityID gid = registry_.spawn(gi->type, ahead);
+            Entity*  ge  = registry_.get(gid);
+            ge->facing   = player->facing;
+            grid.add(gid, *ge);
+
+            // Assign the selected recording if one exists
+            if (!recorder_.recordings.empty() &&
+                selectedRecording_ < recorder_.recordings.size()) {
+                agentStates_[gid]     = AgentExecState{};
+                agentRecordings_[gid] = recorder_.recordings[selectedRecording_];
+            }
+
+            audioEvents_.push_back(AudioEvent::Summon);
+            visualEvents_.push_back({ VisualEventType::Summon,
+                                      toVec(ahead), static_cast<float>(ahead.z) });
+        }
+    }
 
     // O: create portal + linked room ahead of player
     if (input.pressed(Action::PlacePortal) && player) {
@@ -428,11 +551,7 @@ void Game::tickGoblinWander(Grid& grid) {
             newDest.y = std::clamp(newDest.y, 0, grid.height - 1);
         }
 
-        // Resolve destination height and skip if too steep.
-        if (!grid.isBounded()) {
-            newDest.z = grid.terrain.levelAt(newDest);
-            if (std::abs(newDest.z - ent->pos.z) > 1) continue;
-        }
+        if (!resolveDestHeight(newDest, ent->pos, grid)) continue;
 
         std::vector<MoveIntention> intentions = {{
             eid, ent->pos, newDest, ent->type, ent->size
@@ -458,17 +577,17 @@ void Game::tickVM(Grid& grid) {
         VMResult res = vm_.step(state, agentRecordings_[id], ent->facing);
 
         if (res.halt) {
-            grid.remove(id, *ent);
-            registry_.destroy(id);
+            if (ent->type == EntityType::Poop) {
+                // Poop despawns when its routine ends
+                grid.remove(id, *ent);
+                registry_.destroy(id);
+            }
+            // Golems and other routine agents stop executing but stay alive
             toRemove.push_back(id);
         } else if (res.wantMove) {
             TilePos newDest = ent->pos + res.moveDelta;
 
-            // Resolve destination height and skip if too steep.
-            if (!grid.isBounded())
-                newDest.z = grid.terrain.levelAt(newDest);
-
-            if (std::abs(newDest.z - ent->pos.z) <= 1) {
+            if (resolveDestHeight(newDest, ent->pos, grid)) {
                 std::vector<MoveIntention> intentions = {{
                     id, ent->pos, newDest, ent->type, ent->size
                 }};
@@ -512,13 +631,11 @@ void Game::tickMovement(Grid& grid) {
                 playerPrevZ_ = ent->pos.z;
             }
 
-            // Portal check: any entity, only if no transfer already pending
-            if (!pendingTransfer_) {
-                auto pit = grid.portals.find(ent->pos);
-                if (pit != grid.portals.end())
-                    pendingTransfer_ = { eid, grid.id,
-                                         pit->second.targetGrid, pit->second.targetPos };
-            }
+            // Portal check: queue a transfer for any entity that lands on a portal.
+            auto pit = grid.portals.find(ent->pos);
+            if (pit != grid.portals.end())
+                pendingTransfers_.push_back({ eid, grid.id,
+                                              pit->second.targetGrid, pit->second.targetPos });
         }
     }
 }
@@ -743,7 +860,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 6);   // version 6
+    wr<uint8_t>(f, 8);   // version 8: new entity types (golems, Tree/Rock/Chest), new tile types
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -777,8 +894,11 @@ void Game::save(const std::string& path) const {
         wr<uint32_t>(f, static_cast<uint32_t>(rec.instructions.size()));
         for (const Instruction& ins : rec.instructions) {
             wr<uint8_t>(f, static_cast<uint8_t>(ins.op));
-            wr<uint8_t>(f, ins.dir);
-            wr<uint32_t>(f, ins.arg);
+            wr<uint8_t>(f, static_cast<uint8_t>(ins.dir));
+            wr<uint16_t>(f, ins.ticks);
+            wr<uint16_t>(f, ins.addr);
+            wr<uint8_t>(f, static_cast<uint8_t>(ins.cond));
+            wr<uint8_t>(f, ins.threshold);
         }
     }
     wr<uint64_t>(f, static_cast<uint64_t>(selectedRecording_));
@@ -792,7 +912,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 6) return false;
+    if (version != 8) return false;
 
     // Clear all state
     for (auto& [id, grid] : grids_) {
@@ -813,7 +933,7 @@ bool Game::load(const std::string& path) {
     }
     agentStates_.clear();
     agentRecordings_.clear();
-    pendingTransfer_.reset();
+    pendingTransfers_.clear();
 
     // Player
     GridID    playerGrid = rd<uint32_t>(f);
@@ -895,10 +1015,14 @@ bool Game::load(const std::string& path) {
         rec.name = rdStr(f);
         uint32_t instrCount = rd<uint32_t>(f);
         for (uint32_t j = 0; j < instrCount; ++j) {
-            OpCode   op  = static_cast<OpCode>(rd<uint8_t>(f));
-            uint8_t  dir = rd<uint8_t>(f);
-            uint32_t arg = rd<uint32_t>(f);
-            rec.instructions.push_back({ op, dir, arg });
+            Instruction ins;
+            ins.op        = static_cast<OpCode>(rd<uint8_t>(f));
+            ins.dir       = static_cast<RelDir>(rd<uint8_t>(f));
+            ins.ticks     = rd<uint16_t>(f);
+            ins.addr      = rd<uint16_t>(f);
+            ins.cond      = static_cast<Condition>(rd<uint8_t>(f));
+            ins.threshold = rd<uint8_t>(f);
+            rec.instructions.push_back(ins);
         }
         recorder_.recordings.push_back(std::move(rec));
     }
