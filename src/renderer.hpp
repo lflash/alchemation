@@ -3,12 +3,14 @@
 #include "irenderer.hpp"
 #include "effects.hpp"
 #include "game.hpp"
+#include "ui.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include <cmath>
 
 class Terrain;
 
@@ -146,6 +148,32 @@ public:
     // (0-based, matching enum order).  listening = waiting for a new keypress.
     void drawRebindPanel(const InputMap& map, int selectedRow, bool listening);
 
+    // ── Phase 16: Mouse interaction ───────────────────────────────────────────
+
+    // Inverse perspective projection: maps screen pixel (px, py) to the world
+    // tile at the camera's z-level. Static so tests can call it without SDL.
+    static TilePos screenToTile(int px, int py, const Camera& cam) {
+        float ts  = TILE_SIZE * cam.zoom;
+        float tsH = TILE_H    * cam.zoom;
+        float tileX = cam.pos.x + (px - VIEWPORT_W * 0.5f) / ts;
+        float tileY = cam.pos.y + (py - VIEWPORT_H * 0.5f) / tsH;
+        return { static_cast<int>(std::floor(tileX)),
+                 static_cast<int>(std::floor(tileY)),
+                 static_cast<int>(std::round(cam.z)) };
+    }
+
+    // Draw a translucent white overlay on the hovered tile.
+    void drawHoverHighlight(TilePos tile);
+
+    // Draw a small name tooltip anchored just above a screen position.
+    void drawEntityTooltip(const std::string& name, int screenX, int screenY);
+
+    // Draw a right-click context menu.
+    void drawContextMenu(const ContextMenu& menu);
+
+    // Swap between arrow and hand OS cursor.
+    void setHandCursor(bool hand);
+
 private:
     SDL_Window*   window;
     SDL_Renderer* sdl;
@@ -155,6 +183,29 @@ private:
     bool          studioMode_ = false;
     int           gridW_      = 0;   // 0 = unbounded
     int           gridH_      = 0;
+
+    // ── Text cache ────────────────────────────────────────────────────────────
+    // Maps (text, packed-RGBA-color) → SDL_Texture*. Created on first use;
+    // destroyed on ~Renderer(). drawText() is mutable to populate the cache.
+    struct TextKey {
+        std::string text;
+        uint32_t    color = 0;
+        bool operator==(const TextKey& o) const {
+            return text == o.text && color == o.color;
+        }
+    };
+    struct TextKeyHash {
+        size_t operator()(const TextKey& k) const {
+            size_t h = std::hash<std::string>{}(k.text);
+            h ^= std::hash<uint32_t>{}(k.color) + 0x9e3779b9u + (h << 6) + (h >> 2);
+            return h;
+        }
+    };
+    mutable std::unordered_map<TextKey, SDL_Texture*, TextKeyHash> textCache_;
+
+    // ── OS cursors ────────────────────────────────────────────────────────────
+    SDL_Cursor* cursorArrow_ = nullptr;
+    SDL_Cursor* cursorHand_  = nullptr;
 
     // ── Effect state ──────────────────────────────────────────────────────────
     std::vector<Particle>                           particles_;

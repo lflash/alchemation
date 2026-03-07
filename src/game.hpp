@@ -122,6 +122,12 @@ public:
     // HUD summon preview: what the player would summon if they pressed G.
     SummonPreview playerSummonPreview() const;
 
+    // Mouse interaction (Phase 16).
+    // Returns the first entity whose pos matches tile in the active grid.
+    const Entity* entityAtTile(TilePos tile) const;
+    // Queue a one-step move toward target for the next tick.
+    void queueClickMove(TilePos target);
+
     // Persistence.
     void save(const std::string& path) const;
     bool load(const std::string& path);
@@ -175,6 +181,10 @@ private:
     std::unordered_map<EntityID, AgentExecState> agentStates_;
     std::unordered_map<EntityID, Recording>      agentRecordings_;
     size_t selectedRecording_ = 0;
+
+    // Pending click-move (set by queueClickMove, consumed in tickPlayerInput).
+    TilePos pendingClickDelta_ = {0, 0, 0};
+    bool    hasPendingClick_   = false;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     Grid&       activeGrid()       { return grids_.at(activeGridID_); }

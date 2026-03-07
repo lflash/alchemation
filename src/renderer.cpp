@@ -59,7 +59,8 @@ SDL_Texture* SpriteCache::get(EntityType type) const {
 
 // ─── Renderer ────────────────────────────────────────────────────────────────
 
-Renderer::Renderer() : sprites(nullptr), font_(nullptr) {
+Renderer::Renderer() : sprites(nullptr), font_(nullptr),
+                        cursorArrow_(nullptr), cursorHand_(nullptr) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0)
         throw std::runtime_error(SDL_GetError());
 
@@ -88,9 +89,16 @@ Renderer::Renderer() : sprites(nullptr), font_(nullptr) {
     font_ = TTF_OpenFont("assets/fonts/DejaVuSansMono.ttf", 13);
     if (!font_)
         std::fprintf(stderr, "Warning: could not load font: %s\n", TTF_GetError());
+
+    cursorArrow_ = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
+    cursorHand_  = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
 }
 
 Renderer::~Renderer() {
+    for (auto& [key, tex] : textCache_) SDL_DestroyTexture(tex);
+    textCache_.clear();
+    if (cursorArrow_) SDL_FreeCursor(cursorArrow_);
+    if (cursorHand_)  SDL_FreeCursor(cursorHand_);
     if (font_) TTF_CloseFont(font_);
     TTF_Quit();
     SDL_DestroyRenderer(sdl);
@@ -757,16 +765,25 @@ void Renderer::drawSummonPreview(const SummonPreview& preview) {
 
 void Renderer::drawText(const std::string& text, int x, int y, SDL_Color col) const {
     if (!font_ || text.empty()) return;
-    SDL_Surface* surf = TTF_RenderUTF8_Blended(font_, text.c_str(), col);
-    if (!surf) return;
-    SDL_Texture* tex = SDL_CreateTextureFromSurface(sdl, surf);
-    SDL_FreeSurface(surf);
-    if (!tex) return;
+    uint32_t packed = (uint32_t(col.r) << 24) | (uint32_t(col.g) << 16)
+                    | (uint32_t(col.b) <<  8) | col.a;
+    TextKey key{text, packed};
+    SDL_Texture* tex = nullptr;
+    auto it = textCache_.find(key);
+    if (it != textCache_.end()) {
+        tex = it->second;
+    } else {
+        SDL_Surface* surf = TTF_RenderUTF8_Blended(font_, text.c_str(), col);
+        if (!surf) return;
+        tex = SDL_CreateTextureFromSurface(sdl, surf);
+        SDL_FreeSurface(surf);
+        if (!tex) return;
+        textCache_[key] = tex;
+    }
     int w, h;
     SDL_QueryTexture(tex, nullptr, nullptr, &w, &h);
     SDL_Rect dst = {x, y, w, h};
     SDL_RenderCopy(sdl, tex, nullptr, &dst);
-    SDL_DestroyTexture(tex);
 }
 
 void Renderer::drawRecordingsPanel(const std::vector<RecordingInfo>& list,
@@ -1022,4 +1039,78 @@ void Renderer::drawRebindPanel(const InputMap& map, int selectedRow, bool listen
         drawText("Esc  cancel", X + PAD, ty, hintCol);
     else
         drawText("\xe2\x86\x91\xe2\x86\x93 select   \xe2\x86\xb5 rebind   K close", X + PAD, ty, hintCol);
+}
+
+// ─── Phase 16: Mouse interaction ─────────────────────────────────────────────
+
+void Renderer::drawHoverHighlight(TilePos tile) {
+    float lf = static_cast<float>(tile.z);
+    int sx = toPixelX(tile.x,     lf);
+    int sy = toPixelY(tile.y,     lf);
+    int sw = toPixelX(tile.x + 1, lf) - sx;
+    int sh = static_cast<int>(std::ceil(TILE_H * camera_.zoom));
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 255, 255, 255, 45);
+    SDL_Rect r = { sx, sy, sw, sh };
+    SDL_RenderFillRect(sdl, &r);
+    SDL_SetRenderDrawColor(sdl, 255, 255, 255, 110);
+    SDL_RenderDrawRect(sdl, &r);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+}
+
+void Renderer::drawEntityTooltip(const std::string& name, int screenX, int screenY) {
+    if (name.empty()) return;
+    constexpr int PAD = 6;
+    constexpr int H   = 22;
+    int tw = 0, th = 0;
+    if (font_) TTF_SizeUTF8(font_, name.c_str(), &tw, &th);
+    int W = PAD + tw + PAD;
+    int X = std::clamp(screenX - W / 2, 0, VIEWPORT_W - W);
+    int Y = screenY - H - 4;
+    if (Y < 0) Y = screenY + 4;
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 10, 10, 10, 210);
+    SDL_Rect bg = { X, Y, W, H };
+    SDL_RenderFillRect(sdl, &bg);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(sdl, 90, 90, 90, 255);
+    SDL_RenderDrawRect(sdl, &bg);
+    drawText(name, X + PAD, Y + (H - th) / 2, {220, 220, 220, 255});
+}
+
+void Renderer::drawContextMenu(const ContextMenu& menu) {
+    if (!menu.active || menu.items.empty()) return;
+
+    constexpr int PAD = 8;
+    constexpr int ROW = 20;
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 15, 15, 25, 225);
+    SDL_Rect bg = { menu.bounds.x, menu.bounds.y, menu.bounds.w, menu.bounds.h };
+    SDL_RenderFillRect(sdl, &bg);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(sdl, 100, 100, 140, 255);
+    SDL_RenderDrawRect(sdl, &bg);
+
+    for (int i = 0; i < (int)menu.items.size(); ++i) {
+        int iy = menu.bounds.y + PAD + i * ROW;
+        if (i == menu.hovered) {
+            SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(sdl, 60, 80, 150, 160);
+            SDL_Rect row = { menu.bounds.x + 2, iy - 1, menu.bounds.w - 4, ROW };
+            SDL_RenderFillRect(sdl, &row);
+            SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+        }
+        SDL_Color col = (i == menu.hovered)
+            ? SDL_Color{255, 255, 255, 255}
+            : SDL_Color{180, 180, 210, 255};
+        drawText(menu.items[i], menu.bounds.x + PAD, iy + 2, col);
+    }
+}
+
+void Renderer::setHandCursor(bool hand) {
+    SDL_Cursor* c = hand ? cursorHand_ : cursorArrow_;
+    if (c) SDL_SetCursor(c);
 }

@@ -74,6 +74,7 @@ add_executable(tests
     tests/test_phase12.cpp
     tests/test_phase13.cpp
     tests/test_phase14.cpp
+    tests/test_phase16.cpp
     ${LOGIC_SOURCES}
 )
 

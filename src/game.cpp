@@ -273,6 +273,29 @@ std::vector<const Entity*> Game::drawOrder() const {
     return result;
 }
 
+// ─── Mouse interaction (Phase 16) ─────────────────────────────────────────────
+
+const Entity* Game::entityAtTile(TilePos tile) const {
+    const Grid& g = activeGrid();
+    for (EntityID eid : g.entities) {
+        const Entity* e = registry_.get(eid);
+        if (e && e->pos == tile) return e;
+    }
+    return nullptr;
+}
+
+void Game::queueClickMove(TilePos target) {
+    const Entity* p = registry_.get(playerID_);
+    if (!p) return;
+    int dx = target.x - p->pos.x;
+    int dy = target.y - p->pos.y;
+    if (dx == 0 && dy == 0) return;
+    if (dx > 1) dx = 1; else if (dx < -1) dx = -1;
+    if (dy > 1) dy = 1; else if (dy < -1) dy = -1;
+    pendingClickDelta_ = {dx, dy, 0};
+    hasPendingClick_   = true;
+}
+
 // ─── Scheduler ───────────────────────────────────────────────────────────────
 
 void Game::tickScheduler(Grid& grid, Tick currentTick) {
@@ -370,11 +393,15 @@ void Game::tickPlayerInput(const Input& input) {
     if (recorder_.isRecording()) recorder_.tick();
 
     // Movement
-    TilePos delta = {0, 0};
-    if (input.held(Action::MoveUp)) delta.y -= 1;
-    if (input.held(Action::MoveDown)) delta.y += 1;
-    if (input.held(Action::MoveLeft)) delta.x -= 1;
+    TilePos delta = {0, 0, 0};
+    if (input.held(Action::MoveUp))    delta.y -= 1;
+    if (input.held(Action::MoveDown))  delta.y += 1;
+    if (input.held(Action::MoveLeft))  delta.x -= 1;
     if (input.held(Action::MoveRight)) delta.x += 1;
+    // Click-move: fires when no keyboard direction is held.
+    if (delta == TilePos{0, 0, 0} && hasPendingClick_)
+        delta = pendingClickDelta_;
+    hasPendingClick_ = false;
 
     if (delta != TilePos{0, 0}) {
         TilePos   newDest      = player->pos + delta;
