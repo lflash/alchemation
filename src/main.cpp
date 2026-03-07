@@ -19,8 +19,27 @@
 // first pick at cam.z to get an approximate (x,y), then look up the actual
 // terrain level there and redo the inverse projection at that z.
 
-static TilePos screenToTileAccurate(int px, int py,
-                                    const Camera& cam, const Terrain& terrain) {
+// Returns true if screen pixel (px,py) falls inside the top face of tile.
+// Used to detect when the cursor is on a cliff face rather than a tile top.
+static bool pixelOnTileFace(int px, int py, TilePos tile, const Camera& cam) {
+    float lf   = static_cast<float>(tile.z);
+    float dz   = lf - cam.z;
+    float f    = 1.0f + dz / static_cast<float>(Renderer::Z_PERSP);
+    float ts   = Renderer::TILE_SIZE * cam.zoom * f;
+    float tsH  = Renderer::TILE_H    * cam.zoom;
+    float step = static_cast<float>(Renderer::Z_STEP) * cam.zoom;
+    float cx   = Renderer::VIEWPORT_W * 0.5f;
+    float cy   = Renderer::VIEWPORT_H * 0.5f;
+    float sx0  = cx + (tile.x - cam.pos.x) * ts;
+    float sy0  = cy + (tile.y - cam.pos.y) * tsH - dz * step * f;
+    return px >= sx0 && px < sx0 + ts && py >= sy0 && py < sy0 + tsH;
+}
+
+// Two-pass terrain-aware picking. Returns the tile whose top face contains
+// the pixel, accounting for perspective and elevation. Sets *valid=false
+// when the pixel is on a cliff face between tiles.
+static TilePos screenToTileAccurate(int px, int py, const Camera& cam,
+                                    const Terrain& terrain, bool* valid) {
     // Pass 1: assume z = cam.z
     TilePos t0 = Renderer::screenToTile(px, py, cam);
     int z0 = terrain.levelAt(t0);
@@ -34,9 +53,14 @@ static TilePos screenToTileAccurate(int px, int py,
     float tileX = cam.pos.x + (px - Renderer::VIEWPORT_W * 0.5f) / (ts * f);
     float tileY = cam.pos.y + (py - Renderer::VIEWPORT_H * 0.5f + dz * step * f) / tsH;
 
-    return { static_cast<int>(std::floor(tileX)),
-             static_cast<int>(std::floor(tileY)),
-             z0 };
+    int rx = static_cast<int>(std::floor(tileX));
+    int ry = static_cast<int>(std::floor(tileY));
+    // Use the actual terrain level at the pass-2 position — NOT z0 from pass 1.
+    // Without this, pixelOnTileFace computes the wrong screen bounds for the tile.
+    int rz = terrain.levelAt({rx, ry, 0});
+    TilePos result = { rx, ry, rz };
+    if (valid) *valid = pixelOnTileFace(px, py, result, cam);
+    return result;
 }
 
 // ─── Entity display name ──────────────────────────────────────────────────────
@@ -111,6 +135,7 @@ int main() {
 
     // ── Mouse state ───────────────────────────────────────────────────────────
     TilePos hoveredTile    = {0, 0, 0};
+    bool    hoveredValid   = false;
     int     mouseX         = 0, mouseY = 0;
     bool    middleDragging = false;
     int     dragLastX      = 0, dragLastY = 0;
@@ -145,7 +170,7 @@ int main() {
             if (e.type == SDL_MOUSEMOTION) {
                 mouseX = e.motion.x;
                 mouseY = e.motion.y;
-                hoveredTile = screenToTileAccurate(mouseX, mouseY, camera, game.terrain());
+                hoveredTile = screenToTileAccurate(mouseX, mouseY, camera, game.terrain(), &hoveredValid);
 
                 // Update context menu hovered item.
                 if (ui.contextMenu.active) {
@@ -197,7 +222,8 @@ int main() {
                     // Ignore clicks on active panels.
                     if (ui.isOpen()) { input.handleEvent(e); continue; }
 
-                    // Click-to-move toward hovered tile + ripple.
+                    // Click-to-move toward hovered tile + ripple (only on valid tile face).
+                    if (!hoveredValid) { input.handleEvent(e); continue; }
                     game.queueClickMove(hoveredTile);
                     renderer.spawnBurst(
                         { static_cast<float>(hoveredTile.x) + 0.5f,
@@ -209,7 +235,8 @@ int main() {
                 if (e.button.button == SDL_BUTTON_RIGHT) {
                     if (!ui.isOpen()) {
                         ui.contextMenu.active = false;
-                        TilePos tile = screenToTileAccurate(mx, my, camera, game.terrain());
+                        bool    _v;
+                        TilePos tile = screenToTileAccurate(mx, my, camera, game.terrain(), &_v);
                         contextTile  = tile;
                         const Entity*  ent   = game.entityAtTile(tile);
                         TileType       ttype = game.terrain().typeAt(tile);
@@ -371,11 +398,10 @@ int main() {
         camera.z     += (camera.targetZ  - camera.z)     * factor;
 
         // ── Cursor ───────────────────────────────────────────────────────────
-        // Hand cursor when hovering over an entity (other than player).
+        // Hand cursor when hovering over a non-player entity on a valid tile.
         {
-            const Entity* hovered = game.entityAtTile(hoveredTile);
-            bool hand = hovered && hovered->type != EntityType::Player;
-            renderer.setHandCursor(hand);
+            const Entity* hovered = hoveredValid ? game.entityAtTile(hoveredTile) : nullptr;
+            renderer.setHandCursor(hovered && hovered->type != EntityType::Player);
         }
 
         // ── Render ───────────────────────────────────────────────────────────
@@ -388,7 +414,7 @@ int main() {
         renderer.drawTerrain(game.terrain());
 
         // Hover highlight (draw before entities so entities appear on top).
-        renderer.drawHoverHighlight(hoveredTile);
+        if (hoveredValid) renderer.drawHoverHighlight(hoveredTile);
 
         for (const Entity* ent : game.drawOrder()) {
             Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
@@ -500,11 +526,10 @@ int main() {
             renderer.drawRebindPanel(input.getMap(), ui.rebindRow, ui.rebindListening);
 
         // Entity tooltip (draw after panels so it's always on top).
-        {
+        if (hoveredValid) {
             const Entity* hovered = game.entityAtTile(hoveredTile);
-            if (hovered && hovered->type != EntityType::Player) {
+            if (hovered && hovered->type != EntityType::Player)
                 renderer.drawEntityTooltip(entityTypeName(hovered->type), mouseX, mouseY);
-            }
         }
 
         // Context menu (topmost).
