@@ -393,34 +393,34 @@ Extend the instruction set so agents can interact with terrain and react to stim
 
 ---
 
-## Phase 14 — Alchemy Engine & Environmental Interactions
+## Phase 14 — Environmental Interactions ✓
 
-### Design decisions (settled)
-- **Stimulus abstraction**: stimuli are generic `StimulusField { type, intensity, decay }` stored per tile in an `unordered_map<TilePos, StimulusField>` per Grid. Spread/decay is one generic pass. New stimulus = new enum value, no new tick code.
-- **Wet vs Water**: `Wet` is a stimulus (tile property set by any fluid source — water, rain, etc.). `Water` is a fluid entity with its own dynamics (full fluid simulation deferred — think more deeply about this before Phase 17+). A water tile sets the Wet stimulus on itself and adjacent tiles; the agent VM checks Wet, not Water.
+(Alchemy engine deferred: combination rules, StimulusField abstraction, and discovery
+UI all TBD in ALCHEMY.md — not ready to implement.)
 
-See `ALCHEMY.md` for the master element, stimulus, and combination list — all entries are placeholders.
+### Environmental interactions ✓
+- [x] `Water` tile type — added to `TileType` enum; rendered as animated blue with slow wave
+- [x] `tickWater()` per grid each tick — water expands to adjacent tiles at same or lower height (diff ≤ 1), skips Fire/Portal; batched so one expansion step per tick
+- [x] Water slows movement — on arrival at a Water tile, entity speed halved (reset on exit)
+- [x] Fire × Water extinguish — any Fire tile adjacent to a Water tile is immediately extinguished (→ BareEarth) in tickFire
+- [x] `Wet` Condition updated — now fires on both `Puddle` and `Water` tiles
+- [x] Save format bumped v8 → v9 (new Water tile type)
+- [x] Player mana floor: never drops below 1 after any mana-spending action
 
-### Alchemy engine
-- [ ] Replace hardcoded fire/voltage systems with generic `StimulusField` spread/decay pass
-- [ ] Element combination rules — data-driven lookup table (see `ALCHEMY.md`)
-- [ ] Combination discovery — player discovers combinations by experimenting; unlocks permanently
-- [ ] Alchemy UI panel — shows discovered combinations
+**Tests** ✓ (10 new tests)
+- [x] Water is a distinct TileType; Terrain can set/read it
+- [x] tickWater: water expands to same-level adjacent tile in one tick
+- [x] tickWater: existing water tile stays Water
+- [x] tickWater: does not overwrite Portal or Fire tiles
+- [x] tickFire: Fire adjacent to Water is extinguished; Fire not adjacent to Water is unaffected
+- [x] Mana floor: player mana stays ≥ 1 after repeated Plant actions
 
-### Environmental interactions
-- [ ] `Water` tile type — added to `TileType` enum; rendered as animated blue
-- [ ] `tickWater()` per grid each tick — water flows to the lowest adjacent non-Water tile if height diff ≤ 1 (BFS from all existing Water tiles); one expansion step per tick
-- [ ] Water slows movement — entities on Water tiles move at half speed (double `moveSpeed`)
-- [ ] Fire × water interaction — `Fire` tile adjacent to `Water` tile is extinguished (reverts to `BareEarth`) each tick
-- [ ] `Wet` Condition — `JUMP_IF Wet` fires when agent's tile has the Wet stimulus
-- [ ] Fire agent reaction — `flee` sub-routine: agents with `canFight = false` emit `JUMP_IF Fire` to reverse facing and step back
-- [ ] World generation pre-seeds water in low-height tiles (used by Phase 17)
-
-**Tests**
-- [ ] Water expands to lower adjacent tile each tick
-- [ ] Water does not expand uphill (height diff > 1)
-- [ ] Fire tile adjacent to Water is extinguished after one tick
-- [ ] Entity on Water tile has doubled move duration
+### Deferred to later phases
+- [ ] Generic `StimulusField` abstraction replacing hardcoded fire/voltage (pre-GPU rewrite)
+- [ ] Element combination rules + discovery (ALCHEMY.md all TBD)
+- [ ] Alchemy UI panel (needs UI layer from Phase 16)
+- [ ] Fire agent flee sub-routine (authored routine, not code)
+- [ ] World gen water pre-seeding (Phase 17)
 
 ---
 

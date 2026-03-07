@@ -152,6 +152,13 @@ Game::Game() {
     world.terrain.setType({-1, 0}, TileType::Puddle);   // 2V
     spawnStatic(EntityType::Lightbulb, -1,  0);   // on puddle → lit
     spawnStatic(EntityType::Lightbulb,  3,  0);   // on grass  → unlit
+
+    // ── Phase 14 demo: water pool south-east of spawn ────────────────────────
+    // Placed at (20,20) — far enough away that water spreading won't reach the
+    // spawn area during tests (~50 ticks).
+    world.terrain.setType({20, 20}, TileType::Water);
+    world.terrain.setType({21, 20}, TileType::Water);
+    world.terrain.setType({20, 21}, TileType::Water);
 }
 
 // ─── Top-level tick ──────────────────────────────────────────────────────────
@@ -174,6 +181,7 @@ void Game::tick(const Input& input, Tick currentTick) {
         tickMovement(grid);
         tickFire(grid, registry_, currentTick);
         tickVoltage(grid, registry_);
+        tickWater(grid);
         grid.events.flush();
     }
 }
@@ -324,6 +332,7 @@ void Game::tickPlayerInput(const Input& input) {
 
         if (player->mana >= cost) {
             player->mana -= cost;
+            if (player->mana < 1) player->mana = 1;
             TilePos  spawnPos = player->pos + dirToDelta(player->facing);
             EntityID pid      = registry_.spawn(EntityType::Poop, spawnPos);
             Entity*  pe       = registry_.get(pid);
@@ -475,6 +484,7 @@ void Game::tickPlayerInput(const Input& input) {
             grid.add(mid, *registry_.get(mid));
             grid.terrain.restore(ahead);
             player->mana--;
+            if (player->mana < 1) player->mana = 1;
             recorder_.recordPlant();
             audioEvents_.push_back(AudioEvent::Plant);
         }
@@ -487,6 +497,7 @@ void Game::tickPlayerInput(const Input& input) {
         const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
         if (gi && player->mana >= gi->manaCost) {
             player->mana -= gi->manaCost;
+            if (player->mana < 1) player->mana = 1;
             grid.terrain.dig(ahead);   // consume medium tile → BareEarth
 
             EntityID gid = registry_.spawn(gi->type, ahead);
@@ -582,7 +593,7 @@ void Game::tickVM(Grid& grid) {
             TileType tileHere = grid.terrain.typeAt(ent->pos);
             if (tileHere == TileType::Fire)
                 stimuli[static_cast<int>(Condition::Fire)] = 1;
-            if (tileHere == TileType::Puddle)
+            if (tileHere == TileType::Puddle || tileHere == TileType::Water)
                 stimuli[static_cast<int>(Condition::Wet)] = 1;
 
             TilePos ahead = ent->pos + dirToDelta(ent->facing);
@@ -655,6 +666,13 @@ void Game::tickMovement(Grid& grid) {
         bool    arrived = stepMovement(*ent);
         if (arrived) {
             grid.spatial.move(eid, oldPos, ent->pos, ent->size);
+
+            // Water slows movement: half speed while standing on a Water tile.
+            if (ent->speed > 0.0f) {
+                TileType tileHere = grid.terrain.typeAt(ent->pos);
+                float    baseSpeed = defaultConfig(ent->type).speed;
+                ent->speed = (tileHere == TileType::Water) ? baseSpeed * 0.5f : baseSpeed;
+            }
             grid.events.emit({ EventType::Arrived, eid });
 
             if (eid == playerID_) {
@@ -686,10 +704,16 @@ void tickFire(Grid& grid, EntityRegistry& registry, Tick currentTick) {
     static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
 
     // 1. Expire fire tiles whose timer has elapsed → BareEarth.
+    //    Also extinguish any Fire tile adjacent to a Water tile.
     {
         std::vector<TilePos> done;
-        for (const auto& [pos, expiry] : grid.fireTileExpiry)
-            if (currentTick >= expiry) done.push_back(pos);
+        for (const auto& [pos, expiry] : grid.fireTileExpiry) {
+            if (currentTick >= expiry) { done.push_back(pos); continue; }
+            for (const auto& d : kDirs4) {
+                if (grid.terrain.typeAt(pos + d) == TileType::Water)
+                    { done.push_back(pos); break; }
+            }
+        }
         for (const TilePos& pos : done) {
             grid.terrain.setType(pos, TileType::BareEarth);
             grid.fireTileExpiry.erase(pos);
@@ -818,6 +842,42 @@ void tickVoltage(Grid& grid, EntityRegistry& registry) {
     }
 }
 
+// ─── Water simulation ─────────────────────────────────────────────────────────
+//
+// Each tick, every Water tile tries to expand to adjacent non-water tiles that are
+// at the same height or lower (and no more than 1 level lower — no waterfall leaps).
+// New tiles are batched so water expands by exactly one step per tick.
+
+void tickWater(Grid& grid) {
+    static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
+
+    // Collect all current Water tiles.
+    std::vector<TilePos> waterTiles;
+    for (const auto& [pos, type] : grid.terrain.overrides())
+        if (type == TileType::Water) waterTiles.push_back(pos);
+
+    // Expand to eligible adjacent tiles.
+    std::vector<TilePos> toFlood;
+    for (const TilePos& pos : waterTiles) {
+        int srcLevel = grid.terrain.levelAt(pos);
+        for (const auto& d : kDirs4) {
+            TilePos adj = pos + d;
+            // Don't overwrite portals, fire, or other significant tile types.
+            TileType adjType = grid.terrain.typeAt(adj);
+            if (adjType == TileType::Water || adjType == TileType::Fire ||
+                adjType == TileType::Portal) continue;
+            int dstLevel = grid.terrain.levelAt(adj);
+            // Water flows downhill or level; won't leap off cliffs.
+            if (dstLevel > srcLevel) continue;
+            if (srcLevel - dstLevel > 1) continue;
+            toFlood.push_back(adj);
+        }
+    }
+
+    for (const TilePos& pos : toFlood)
+        grid.terrain.setType(pos, TileType::Water);
+}
+
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
 namespace {
@@ -896,7 +956,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 8);   // version 8: new entity types (golems, Tree/Rock/Chest), new tile types
+    wr<uint8_t>(f, 9);   // version 9: Water tile type, mana floor
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -948,7 +1008,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 8) return false;
+    if (version != 9) return false;
 
     // Clear all state
     for (auto& [id, grid] : grids_) {

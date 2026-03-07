@@ -398,6 +398,15 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
                  static_cast<uint8_t>(115 * dayFactor),
                  static_cast<uint8_t>( 51 * dayFactor), 255 };
 
+    if (type == TileType::Water) {
+        // Animated blue: deeper and more vivid than Puddle, with a gentle slow swell.
+        float wave = 0.8f + 0.2f * std::sin(dayNightT_ * 2.5f
+                                             + pos.x * 0.7f + pos.y * 0.8f);
+        return { static_cast<uint8_t>( 30 * wave),
+                 static_cast<uint8_t>( 80 * wave),
+                 static_cast<uint8_t>(210 * wave), 255 };
+    }
+
     if (studioMode_) {
         // Muted blue-grey studio floor.
         int v = static_cast<int>(height * 18.0f);

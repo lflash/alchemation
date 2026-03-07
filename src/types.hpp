@@ -70,7 +70,8 @@ enum class TileType {
     Grass, BareEarth, Portal, Fire, Puddle,
     // Summoning mediums — each yields one golem type (Phase 12)
     Mud, Stone, Clay, Bush, Wood, Iron, Copper,
-    // Water deferred to Phase 14
+    // Environmental fluid (Phase 14)
+    Water,
 };
 
 

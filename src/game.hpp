@@ -72,6 +72,7 @@ struct RecordingInfo {
 
 void tickFire(Grid& grid, EntityRegistry& registry, Tick currentTick);
 void tickVoltage(Grid& grid, EntityRegistry& registry);
+void tickWater(Grid& grid);
 
 // ─── Grid ID constants ────────────────────────────────────────────────────────
 
