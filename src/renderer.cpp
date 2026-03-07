@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <unordered_set>
+#include <string>
 
 // ─── Sprite paths ─────────────────────────────────────────────────────────────
 
@@ -1113,4 +1115,207 @@ void Renderer::drawContextMenu(const ContextMenu& menu) {
 void Renderer::setHandCursor(bool hand) {
     SDL_Cursor* c = hand ? cursorHand_ : cursorArrow_;
     if (c) SDL_SetCursor(c);
+}
+
+// ─── Phase 15: Studio overlays ────────────────────────────────────────────────
+
+void Renderer::drawStudioPaths(const std::vector<StudioPathView>& views,
+                                const std::vector<int>& conflicts,
+                                int scrubTick, int selectedRec) {
+    if (views.empty()) return;
+
+    std::unordered_set<int> conflictSet(conflicts.begin(), conflicts.end());
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+
+    for (int vi = 0; vi < (int)views.size(); ++vi) {
+        const StudioPathView& view = views[vi];
+        if (!view.path || view.path->empty()) continue;
+        const auto& path = *view.path;
+        AgentColor col = view.color;
+
+        for (int tick = 0; tick < (int)path.size(); ++tick) {
+            const PathStep& step = path[tick];
+            bool isConflict = conflictSet.count(tick) > 0;
+            bool isScrub    = (vi == selectedRec && tick == scrubTick);
+
+            uint8_t r = isConflict ? 220 : col.r;
+            uint8_t g = isConflict ?  50 : col.g;
+            uint8_t b = isConflict ?  50 : col.b;
+            uint8_t a = isScrub ? 255 : 160;
+            if (isScrub) { r = 255; g = 255; b = 255; }
+
+            SDL_SetRenderDrawColor(sdl, r, g, b, a);
+
+            // Tile centre in screen pixels (studio floor is z=0)
+            int cx = toPixelX(step.pos.x + 0.5f, 0.0f);
+            int cy = toPixelY(step.pos.y + 0.5f, 0.0f);
+
+            if (step.isWait) {
+                SDL_Rect dot = { cx - 2, cy - 2, 4, 4 };
+                SDL_RenderFillRect(sdl, &dot);
+            } else {
+                SDL_Rect body = { cx - 3, cy - 3, 6, 6 };
+                SDL_RenderFillRect(sdl, &body);
+                // Arrow pointing in facing direction
+                TilePos d = dirToDelta(step.facing);
+                float ts  = TILE_SIZE * camera_.zoom;
+                float tsH = TILE_H    * camera_.zoom;
+                int ex = cx + static_cast<int>(d.x * ts * 0.35f);
+                int ey = cy + static_cast<int>(d.y * tsH * 0.35f);
+                SDL_RenderDrawLine(sdl, cx, cy, ex, ey);
+            }
+        }
+    }
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+}
+
+void Renderer::drawGhostEntity(TilePos pos, Direction facing, EntityType type) {
+    SDL_Texture* tex = sprites.get(type);
+    if (!tex) return;
+    (void)facing;
+
+    float lf  = static_cast<float>(pos.z);
+    int   iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
+    int   iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
+
+    SDL_Rect dst;
+    dst.x = toPixelX(static_cast<float>(pos.x), lf);
+    dst.y = toPixelY(static_cast<float>(pos.y), lf) + iH / 2 - iTs;
+    dst.w = iTs;
+    dst.h = iTs;
+
+    SDL_SetTextureAlphaMod(tex, 100);
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    SDL_RenderCopy(sdl, tex, nullptr, &dst);
+    SDL_SetTextureAlphaMod(tex, 255);
+}
+
+void Renderer::drawInstructionPanel(const Recording& rec, int selectedRow,
+                                     int scrubInstrIdx,
+                                     bool insertingWait, bool insertingMove,
+                                     const std::string& insertBuffer,
+                                     RelDir insertDir) {
+    static const char* REL_DIR_NAMES[] = {"FWD", "RIGHT", "BACK", "LEFT"};
+
+    const int PX      = VIEWPORT_W - 212;
+    const int PY      = 10;
+    const int PW      = 202;
+    const int ROW_H   = 16;
+    const int MAX_VIS = 22;
+    const int PAD     = 5;
+
+    int n      = (int)rec.instructions.size();
+    int visN   = std::min(n, MAX_VIS);
+    bool hasFooter = (insertingWait || insertingMove);
+    int PH     = PAD + ROW_H + PAD + visN * ROW_H + PAD + (hasFooter ? ROW_H + 4 : 0);
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 8, 8, 18, 215);
+    SDL_Rect bg = { PX, PY, PW, PH };
+    SDL_RenderFillRect(sdl, &bg);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(sdl, 70, 70, 110, 255);
+    SDL_RenderDrawRect(sdl, &bg);
+
+    // Title
+    std::string title = rec.name + "  [" + std::to_string(n) + "]";
+    drawText(title, PX + PAD, PY + PAD, {180, 180, 255, 255});
+
+    // Scroll so that selectedRow is always visible
+    int scrollOffset = 0;
+    if (selectedRow >= MAX_VIS)
+        scrollOffset = selectedRow - MAX_VIS + 1;
+    if (scrollOffset < 0) scrollOffset = 0;
+
+    for (int i = 0; i < MAX_VIS && (scrollOffset + i) < n; ++i) {
+        int idx  = scrollOffset + i;
+        int rowY = PY + PAD + (i + 1) * ROW_H + PAD;
+        const Instruction& instr = rec.instructions[idx];
+
+        bool isSel  = (idx == selectedRow);
+        bool isScrub = (idx == scrubInstrIdx);
+
+        if (isSel) {
+            SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(sdl, 50, 50, 100, 200);
+            SDL_Rect selr = { PX + 2, rowY - 1, PW - 4, ROW_H };
+            SDL_RenderFillRect(sdl, &selr);
+            SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+        }
+
+        std::string text;
+        switch (instr.op) {
+            case OpCode::MOVE_REL:   text = std::string("MOVE ") + REL_DIR_NAMES[(int)instr.dir]; break;
+            case OpCode::WAIT:       text = "WAIT " + std::to_string(instr.ticks);                 break;
+            case OpCode::HALT:       text = "HALT";                                                 break;
+            case OpCode::DIG:        text = "DIG";                                                  break;
+            case OpCode::PLANT:      text = "PLANT";                                                break;
+            case OpCode::JUMP:       text = "JUMP "   + std::to_string(instr.addr);                break;
+            case OpCode::JUMP_IF:    text = "JMPIF "  + std::to_string(instr.addr);                break;
+            case OpCode::JUMP_IF_NOT:text = "JMPIFN " + std::to_string(instr.addr);                break;
+            case OpCode::CALL:       text = "CALL "   + std::to_string(instr.addr);                break;
+            case OpCode::RET:        text = "RET";                                                  break;
+        }
+
+        std::string prefix = (isScrub ? ">" : " ") + std::to_string(idx) + " ";
+        SDL_Color col = {160, 160, 180, 255};
+        if (isScrub) col = {255, 240,  80, 255};
+        if (isSel && !isScrub) col = {240, 240, 255, 255};
+        drawText(prefix + text, PX + PAD, rowY, col);
+    }
+
+    // Insert-mode footer
+    if (hasFooter) {
+        int footerY = PY + PAD + (visN + 1) * ROW_H + PAD + 2;
+        std::string prompt;
+        if (insertingWait)
+            prompt = "WAIT " + insertBuffer + "_  (Enter/Esc)";
+        else {
+            prompt = std::string("MOVE ") + REL_DIR_NAMES[(int)insertDir] + " (Arr/Ent/Esc)";
+        }
+        drawText(prompt, PX + PAD, footerY, {255, 210, 80, 255});
+    }
+}
+
+void Renderer::drawTimeline(const Recording& rec, int scrubInstrIdx,
+                             const std::vector<int>& conflictInstrs) {
+    if (rec.instructions.empty()) return;
+
+    std::unordered_set<int> conflictSet(conflictInstrs.begin(), conflictInstrs.end());
+
+    const int BAR_H  = 14;
+    const int BAR_Y  = VIEWPORT_H - BAR_H - 2;
+    const int MARGIN = 6;
+
+    int n     = (int)rec.instructions.size();
+    int avail = VIEWPORT_W - 2 * MARGIN;
+    int cellW = std::max(2, avail / n);
+    int totalW = cellW * n;
+    int startX = MARGIN + (avail - totalW) / 2;
+
+    // Background strip
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 0, 0, 0, 190);
+    SDL_Rect strip = { 0, BAR_Y - 3, VIEWPORT_W, BAR_H + 6 };
+    SDL_RenderFillRect(sdl, &strip);
+
+    for (int i = 0; i < n; ++i) {
+        const Instruction& instr = rec.instructions[i];
+        bool isScrub    = (i == scrubInstrIdx);
+        bool isConflict = conflictSet.count(i) > 0;
+        bool isHalt     = (instr.op == OpCode::HALT);
+        bool isWait     = (instr.op == OpCode::WAIT);
+
+        uint8_t r = isWait ? 40  : 60;
+        uint8_t g = isWait ? 60  : 60;
+        uint8_t b = isWait ? 100 : 90;
+        if (isHalt)     { r =  30; g =  30; b =  30; }
+        if (isConflict) { r = 180; g =  40; b =  40; }
+        if (isScrub)    { r = 255; g = 255; b = 255; }
+
+        SDL_SetRenderDrawColor(sdl, r, g, b, 220);
+        SDL_Rect cell = { startX + i * cellW, BAR_Y, cellW - 1, BAR_H };
+        SDL_RenderFillRect(sdl, &cell);
+    }
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
 }

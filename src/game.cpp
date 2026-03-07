@@ -296,6 +296,72 @@ void Game::queueClickMove(TilePos target) {
     hasPendingClick_   = true;
 }
 
+// ─── Instruction editing (Phase 15) ──────────────────────────────────────────
+
+// Adjust JUMP/CALL addresses after an instruction is removed at index 'deleted'.
+static void fixAddrsDelete(std::vector<Instruction>& instrs, size_t deleted) {
+    for (auto& instr : instrs) {
+        bool isJump = (instr.op == OpCode::JUMP || instr.op == OpCode::JUMP_IF ||
+                       instr.op == OpCode::JUMP_IF_NOT || instr.op == OpCode::CALL);
+        if (!isJump) continue;
+        if (instr.addr > (uint16_t)deleted)
+            instr.addr--;
+        else if (instr.addr == (uint16_t)deleted)
+            instr.addr = 0;
+    }
+}
+
+// Adjust JUMP/CALL addresses after an instruction is inserted at 'insertPos'.
+static void fixAddrsInsert(std::vector<Instruction>& instrs, size_t insertPos) {
+    for (auto& instr : instrs) {
+        bool isJump = (instr.op == OpCode::JUMP || instr.op == OpCode::JUMP_IF ||
+                       instr.op == OpCode::JUMP_IF_NOT || instr.op == OpCode::CALL);
+        if (isJump && instr.addr >= (uint16_t)insertPos)
+            instr.addr++;
+    }
+}
+
+void Game::deleteInstruction(size_t recIdx, size_t instrIdx) {
+    if (recIdx >= recorder_.recordings.size()) return;
+    Recording& rec = recorder_.recordings[recIdx];
+    if (instrIdx >= rec.instructions.size()) return;
+    fixAddrsDelete(rec.instructions, instrIdx);
+    rec.instructions.erase(rec.instructions.begin() + (ptrdiff_t)instrIdx);
+}
+
+void Game::insertWait(size_t recIdx, size_t pos, uint16_t ticks) {
+    if (recIdx >= recorder_.recordings.size()) return;
+    Recording& rec = recorder_.recordings[recIdx];
+    size_t insertAt = std::min(pos, rec.instructions.size());
+    Instruction instr;
+    instr.op    = OpCode::WAIT;
+    instr.ticks = (ticks > 0) ? ticks : 1;
+    fixAddrsInsert(rec.instructions, insertAt);
+    rec.instructions.insert(rec.instructions.begin() + (ptrdiff_t)insertAt, instr);
+}
+
+void Game::insertMoveRel(size_t recIdx, size_t pos, RelDir dir) {
+    if (recIdx >= recorder_.recordings.size()) return;
+    Recording& rec = recorder_.recordings[recIdx];
+    size_t insertAt = std::min(pos, rec.instructions.size());
+    Instruction instr;
+    instr.op  = OpCode::MOVE_REL;
+    instr.dir = dir;
+    fixAddrsInsert(rec.instructions, insertAt);
+    rec.instructions.insert(rec.instructions.begin() + (ptrdiff_t)insertAt, instr);
+}
+
+void Game::reorderInstruction(size_t recIdx, size_t from, size_t to) {
+    if (recIdx >= recorder_.recordings.size()) return;
+    Recording& rec = recorder_.recordings[recIdx];
+    size_t n = rec.instructions.size();
+    if (from >= n || to >= n || from == to) return;
+    Instruction moved = rec.instructions[from];
+    rec.instructions.erase(rec.instructions.begin() + (ptrdiff_t)from);
+    size_t insertAt = (to > from) ? to - 1 : to;
+    rec.instructions.insert(rec.instructions.begin() + (ptrdiff_t)insertAt, moved);
+}
+
 // ─── Scheduler ───────────────────────────────────────────────────────────────
 
 void Game::tickScheduler(Grid& grid, Tick currentTick) {

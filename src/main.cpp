@@ -3,6 +3,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
+#include <unordered_set>
 
 #include "types.hpp"
 #include "input.hpp"
@@ -11,6 +12,59 @@
 #include "renderer.hpp"
 #include "audio.hpp"
 #include "ui.hpp"
+#include "studio.hpp"
+
+// ─── StudioState ─────────────────────────────────────────────────────────────
+//
+// All studio-mode scrubber / instruction-editor state. Owned by main.cpp.
+// recompute() rebuilds paths whenever recordings are edited.
+
+struct StudioState {
+    int   scrubTick    = 0;
+    bool  playing      = false;
+    bool  loopMode     = false;
+    float speedMult    = 1.0f;
+    float scrubAccum   = 0.0f;
+    int   instrRow     = 0;      // selected row in instruction panel
+    bool  panelFocused = false;  // arrow keys go to panel instead of player
+    bool  insertingWait = false;
+    bool  insertingMove = false;
+    std::string waitBuffer;
+    RelDir      insertDir = RelDir::Forward;
+
+    // One path per recording (recomputed on enter / edit).
+    std::vector<std::vector<PathStep>> paths;
+    std::vector<int>                   conflicts;
+    int  pathLen = 0;
+
+    // Fixed spawn used for path simulation (centre of bounded 20x20 studio).
+    static constexpr int ORIGIN_X = ROOM_W / 2;
+    static constexpr int ORIGIN_Y = ROOM_H / 2;
+
+    void recompute(const Game& game) {
+        int n = (int)game.recordingCount();
+        paths.resize(n);
+        for (int i = 0; i < n; ++i)
+            paths[i] = routinePath(game.recording(i),
+                                   {ORIGIN_X, ORIGIN_Y, 0}, Direction::S);
+        conflicts = studioConflicts(paths);
+        pathLen = 0;
+        for (const auto& p : paths)
+            if ((int)p.size() > pathLen) pathLen = (int)p.size();
+        scrubTick = std::min(scrubTick, pathLen > 0 ? pathLen - 1 : 0);
+        instrRow  = std::min(instrRow,  std::max(0,
+            n > 0 ? (int)game.recording(game.selectedRecordingIdx()).instructions.size() - 1 : 0));
+    }
+
+    void reset() {
+        scrubTick    = 0;
+        playing      = false;
+        scrubAccum   = 0.0f;
+        insertingWait = false;
+        insertingMove = false;
+        waitBuffer.clear();
+    }
+};
 
 // ─── Terrain-aware tile picking ───────────────────────────────────────────────
 //
@@ -130,8 +184,10 @@ int main() {
     input.setMap(InputMap::load(SETTINGS_PATH));
 
     // ── UI state ─────────────────────────────────────────────────────────────
-    UIState ui;
-    Input   emptyInput;   // passed to game.tick() while rename is active
+    UIState     ui;
+    StudioState studio;
+    Input       emptyInput;   // passed to game.tick() while rename is active
+    bool        wasInStudio = false;
 
     // ── Mouse state ───────────────────────────────────────────────────────────
     TilePos hoveredTile    = {0, 0, 0};
@@ -300,6 +356,115 @@ int main() {
                 ui.contextMenu.active = false;
             }
 
+            // ── Studio insert-WAIT mode ───────────────────────────────────────
+            if (game.inStudio() && studio.insertingWait && e.type == SDL_KEYDOWN) {
+                SDL_Keycode k = e.key.keysym.sym;
+                if (k >= SDLK_0 && k <= SDLK_9) {
+                    if (studio.waitBuffer.size() < 4)
+                        studio.waitBuffer += static_cast<char>('0' + (k - SDLK_0));
+                } else if (k == SDLK_BACKSPACE && !studio.waitBuffer.empty()) {
+                    studio.waitBuffer.pop_back();
+                } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+                    uint16_t ticks = studio.waitBuffer.empty()
+                                     ? 1 : static_cast<uint16_t>(std::stoi(studio.waitBuffer));
+                    size_t selRec = game.selectedRecordingIdx();
+                    game.insertWait(selRec, (size_t)studio.instrRow, ticks);
+                    studio.instrRow++;
+                    studio.insertingWait = false;
+                    studio.waitBuffer.clear();
+                    studio.recompute(game);
+                } else if (k == SDLK_ESCAPE) {
+                    studio.insertingWait = false;
+                    studio.waitBuffer.clear();
+                }
+                continue;
+            }
+
+            // ── Studio insert-MOVE mode ───────────────────────────────────────
+            if (game.inStudio() && studio.insertingMove && e.type == SDL_KEYDOWN) {
+                SDL_Keycode k = e.key.keysym.sym;
+                if      (k == SDLK_UP)    studio.insertDir = RelDir::Forward;
+                else if (k == SDLK_DOWN)  studio.insertDir = RelDir::Back;
+                else if (k == SDLK_LEFT)  studio.insertDir = RelDir::Left;
+                else if (k == SDLK_RIGHT) studio.insertDir = RelDir::Right;
+                else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
+                    size_t selRec = game.selectedRecordingIdx();
+                    game.insertMoveRel(selRec, (size_t)studio.instrRow, studio.insertDir);
+                    studio.instrRow++;
+                    studio.insertingMove = false;
+                    studio.recompute(game);
+                } else if (k == SDLK_ESCAPE) {
+                    studio.insertingMove = false;
+                }
+                continue;
+            }
+
+            // ── Studio panel-focused key nav ──────────────────────────────────
+            if (game.inStudio() && studio.panelFocused && e.type == SDL_KEYDOWN) {
+                SDL_Keycode k  = e.key.keysym.sym;
+                size_t selRec  = game.selectedRecordingIdx();
+                int    instrN  = (selRec < game.recordingCount())
+                                 ? (int)game.recording(selRec).instructions.size() : 0;
+                if (k == SDLK_UP && (SDL_GetModState() & KMOD_SHIFT)) {
+                    if (studio.instrRow > 0) {
+                        game.reorderInstruction(selRec, studio.instrRow, studio.instrRow - 1);
+                        studio.instrRow--;
+                        studio.recompute(game);
+                    }
+                    continue;
+                }
+                if (k == SDLK_DOWN && (SDL_GetModState() & KMOD_SHIFT)) {
+                    if (studio.instrRow + 1 < instrN) {
+                        game.reorderInstruction(selRec, studio.instrRow, studio.instrRow + 1);
+                        studio.instrRow++;
+                        studio.recompute(game);
+                    }
+                    continue;
+                }
+                if (k == SDLK_UP)   { studio.instrRow = std::max(0, studio.instrRow - 1); continue; }
+                if (k == SDLK_DOWN) { studio.instrRow = std::min(instrN - 1, studio.instrRow + 1); continue; }
+                if (k == SDLK_BACKSPACE && instrN > 0) {
+                    game.deleteInstruction(selRec, (size_t)studio.instrRow);
+                    instrN = (int)game.recording(selRec).instructions.size();
+                    if (studio.instrRow >= instrN) studio.instrRow = std::max(0, instrN - 1);
+                    studio.recompute(game);
+                    continue;
+                }
+                if (k == SDLK_w) { studio.insertingWait = true; studio.waitBuffer.clear(); continue; }
+                if (k == SDLK_m) { studio.insertingMove = true; studio.insertDir = RelDir::Forward; continue; }
+            }
+
+            // ── Studio raw keys (always active in studio) ─────────────────────
+            if (game.inStudio() && e.type == SDL_KEYDOWN) {
+                SDL_Keycode k = e.key.keysym.sym;
+                if (k == SDLK_LEFTBRACKET) {
+                    studio.scrubTick = std::max(0, studio.scrubTick - 1);
+                    studio.playing = false;
+                } else if (k == SDLK_RIGHTBRACKET) {
+                    if (studio.pathLen > 0)
+                        studio.scrubTick = std::min(studio.pathLen - 1, studio.scrubTick + 1);
+                    studio.playing = false;
+                } else if (k == SDLK_SPACE && !studio.panelFocused) {
+                    studio.playing = !studio.playing;
+                } else if (k == SDLK_l) {
+                    studio.loopMode = !studio.loopMode;
+                } else if (k == SDLK_EQUALS || k == SDLK_PLUS || k == SDLK_KP_PLUS) {
+                    static const float speeds[] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f};
+                    for (int si = 0; si < 4; ++si)
+                        if (studio.speedMult < speeds[si + 1] - 0.01f)
+                            { studio.speedMult = speeds[si + 1]; break; }
+                } else if (k == SDLK_MINUS || k == SDLK_KP_MINUS) {
+                    static const float speeds[] = {0.25f, 0.5f, 1.0f, 2.0f, 4.0f};
+                    for (int si = 4; si > 0; --si)
+                        if (studio.speedMult > speeds[si - 1] + 0.01f)
+                            { studio.speedMult = speeds[si - 1]; break; }
+                } else if (k == SDLK_0) {
+                    studio.reset();
+                } else if (k == SDLK_p) {
+                    studio.panelFocused = !studio.panelFocused;
+                }
+            }
+
             input.handleEvent(e);
         }
 
@@ -355,6 +520,31 @@ int main() {
             game.tick(tickInput, currentTick);
             accumulator -= TICK_DT;
             ++currentTick;
+        }
+
+        // ── Studio state update ───────────────────────────────────────────────
+        bool nowInStudio = game.inStudio();
+        if (nowInStudio && !wasInStudio) {
+            // Player just entered the studio — compute paths fresh.
+            studio.reset();
+            studio.recompute(game);
+        }
+        wasInStudio = nowInStudio;
+
+        if (nowInStudio && studio.playing && studio.pathLen > 0) {
+            studio.scrubAccum += studio.speedMult;
+            while (studio.scrubAccum >= 1.0f) {
+                studio.scrubTick++;
+                studio.scrubAccum -= 1.0f;
+                if (studio.scrubTick >= studio.pathLen) {
+                    if (studio.loopMode) {
+                        studio.scrubTick = 0;
+                    } else {
+                        studio.scrubTick = studio.pathLen - 1;
+                        studio.playing   = false;
+                    }
+                }
+            }
         }
 
         // Snap camera instantly on grid switch.
@@ -434,6 +624,27 @@ int main() {
                 ent->type != EntityType::Chest      &&
                 !isGolem(ent->type))
                 renderer.drawFacingIndicator(renderPos, renderZ, ent->facing);
+        }
+
+        // ── Studio overlays (drawn before particles so they appear under effects) ─
+        if (game.inStudio() && studio.paths.size() > 0) {
+            // Build path views for all recordings
+            std::vector<Renderer::StudioPathView> views;
+            for (int i = 0; i < (int)studio.paths.size(); ++i) {
+                views.push_back({ &studio.paths[i], agentPaletteColor(i) });
+            }
+            int selRec = (int)game.selectedRecordingIdx();
+            renderer.drawStudioPaths(views, studio.conflicts,
+                                     studio.scrubTick, selRec);
+
+            // Ghost entity at scrub position for selected recording
+            if (selRec >= 0 && selRec < (int)studio.paths.size()) {
+                const auto& selPath = studio.paths[selRec];
+                if (studio.scrubTick < (int)selPath.size()) {
+                    const PathStep& gs = selPath[studio.scrubTick];
+                    renderer.drawGhostEntity(gs.pos, gs.facing, EntityType::Poop);
+                }
+            }
         }
 
         renderer.drawParticles();
@@ -524,6 +735,42 @@ int main() {
             renderer.drawControlsMenu();
         else if (ui.is(ActivePanel::Rebind))
             renderer.drawRebindPanel(input.getMap(), ui.rebindRow, ui.rebindListening);
+
+        // Studio instruction panel and timeline.
+        if (game.inStudio() && game.recordingCount() > 0) {
+            size_t selRec = game.selectedRecordingIdx();
+            if (selRec < game.recordingCount()) {
+                const Recording& selRecording = game.recording(selRec);
+
+                // Compute instruction index at current scrub position.
+                int scrubInstrIdx = -1;
+                if (selRec < studio.paths.size() &&
+                    studio.scrubTick < (int)studio.paths[selRec].size())
+                    scrubInstrIdx = studio.paths[selRec][studio.scrubTick].instrIdx;
+
+                // Build conflict-instruction set (path tick → instrIdx).
+                std::vector<int> conflictInstrs;
+                {
+                    std::unordered_set<int> seen;
+                    for (int tick : studio.conflicts) {
+                        if (selRec < studio.paths.size() &&
+                            tick < (int)studio.paths[selRec].size()) {
+                            int ii = studio.paths[selRec][tick].instrIdx;
+                            if (seen.insert(ii).second)
+                                conflictInstrs.push_back(ii);
+                        }
+                    }
+                }
+
+                renderer.drawInstructionPanel(selRecording, studio.instrRow,
+                                              scrubInstrIdx,
+                                              studio.insertingWait,
+                                              studio.insertingMove,
+                                              studio.waitBuffer,
+                                              studio.insertDir);
+                renderer.drawTimeline(selRecording, scrubInstrIdx, conflictInstrs);
+            }
+        }
 
         // Entity tooltip (draw after panels so it's always on top).
         if (hoveredValid) {

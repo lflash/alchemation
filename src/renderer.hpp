@@ -4,6 +4,7 @@
 #include "effects.hpp"
 #include "game.hpp"
 #include "ui.hpp"
+#include "studio.hpp"
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
@@ -147,6 +148,34 @@ public:
     // Draws the key-rebind panel.  selectedRow is the highlighted Action index
     // (0-based, matching enum order).  listening = waiting for a new keypress.
     void drawRebindPanel(const InputMap& map, int selectedRow, bool listening);
+
+    // ── Phase 15: Studio overlays ─────────────────────────────────────────────
+
+    // Draw per-recording path overlays on the studio floor.
+    // paths[i] is the precomputed PathStep sequence for recording i.
+    // conflicts is the list of tick indices where two or more paths share a tile.
+    // scrubTick / selectedRec identify the scrub position on the selected path.
+    struct StudioPathView {
+        const std::vector<PathStep>* path;   // non-owning pointer
+        AgentColor                   color;
+    };
+    void drawStudioPaths(const std::vector<StudioPathView>& views,
+                         const std::vector<int>& conflicts,
+                         int scrubTick, int selectedRec);
+
+    // Draw a translucent ghost entity at the given tile position.
+    void drawGhostEntity(TilePos pos, Direction facing, EntityType type);
+
+    // Draw the instruction list panel on the right side of the screen.
+    void drawInstructionPanel(const Recording& rec, int selectedRow, int scrubInstrIdx,
+                              bool insertingWait, bool insertingMove,
+                              const std::string& insertBuffer, RelDir insertDir);
+
+    // Draw the timeline bar at the bottom of the screen.
+    // scrubInstrIdx: instruction index at the current scrub position (-1 = none).
+    // conflictInstrs: instruction indices that have path conflicts.
+    void drawTimeline(const Recording& rec, int scrubInstrIdx,
+                      const std::vector<int>& conflictInstrs);
 
     // ── Phase 16: Mouse interaction ───────────────────────────────────────────
 

@@ -26,6 +26,7 @@ set(LOGIC_SOURCES
     src/recorder.cpp
     src/routine_vm.cpp
     src/game.cpp
+    src/studio.cpp
     src/terminal_renderer.cpp
 )
 
@@ -74,6 +75,7 @@ add_executable(tests
     tests/test_phase12.cpp
     tests/test_phase13.cpp
     tests/test_phase14.cpp
+    tests/test_phase15.cpp
     tests/test_phase16.cpp
     ${LOGIC_SOURCES}
 )

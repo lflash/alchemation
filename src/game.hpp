@@ -119,6 +119,17 @@ public:
     std::vector<RecordingInfo> recordingList() const;
     void renameRecording(size_t index, const std::string& name);
 
+    // Recording access (Phase 15).
+    size_t           recordingCount()      const { return recorder_.recordings.size(); }
+    const Recording& recording(size_t idx) const { return recorder_.recordings.at(idx); }
+    size_t           selectedRecordingIdx()const { return selectedRecording_; }
+
+    // Instruction editing (Phase 15).
+    void deleteInstruction(size_t recIdx, size_t instrIdx);
+    void insertWait(size_t recIdx, size_t pos, uint16_t ticks);
+    void insertMoveRel(size_t recIdx, size_t pos, RelDir dir);
+    void reorderInstruction(size_t recIdx, size_t from, size_t to);
+
     // HUD summon preview: what the player would summon if they pressed G.
     SummonPreview playerSummonPreview() const;
 
