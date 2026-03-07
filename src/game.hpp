@@ -6,6 +6,7 @@
 #include "input.hpp"
 #include "recorder.hpp"
 #include "routine_vm.hpp"
+#include "stimulus.hpp"
 #include <unordered_map>
 #include <string>
 #include <utility>
@@ -65,14 +66,15 @@ struct RecordingInfo {
     bool        selected;
 };
 
-// ─── Fire & Voltage simulation ───────────────────────────────────────────────
+// ─── AgentSlot ────────────────────────────────────────────────────────────────
 //
-// Free functions so they can be exercised directly in unit tests without a
-// full Game object. Game::tick() calls both for every non-paused grid.
+// Bundles per-agent VM execution state with its assigned recording.
+// Stored in Game::agentSlots_, keyed by EntityID.
 
-void tickFire(Grid& grid, EntityRegistry& registry, Tick currentTick);
-void tickVoltage(Grid& grid, EntityRegistry& registry);
-void tickWater(Grid& grid);
+struct AgentSlot {
+    AgentExecState state;
+    Recording      rec;
+};
 
 // ─── Grid ID constants ────────────────────────────────────────────────────────
 
@@ -190,8 +192,7 @@ private:
     std::vector<AudioEvent>  audioEvents_;
     std::vector<VisualEvent> visualEvents_;
     int                      playerPrevZ_ = 0;
-    std::unordered_map<EntityID, AgentExecState> agentStates_;
-    std::unordered_map<EntityID, Recording>      agentRecordings_;
+    std::unordered_map<EntityID, AgentSlot> agentSlots_;
     size_t selectedRecording_ = 0;
 
     // Pending click-move (set by queueClickMove, consumed in tickPlayerInput).

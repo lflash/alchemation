@@ -290,11 +290,11 @@ Phase 11 so the codebase is in good shape for the next wave of features.
 - [x] **No fire/voltage tests** — `burning` and `electrified` flag tests already present in `test_fire_voltage.cpp`
 
 Pre-Phase 13:
-- [ ] **Agent state fragmentation** — `agentStates_` and `agentRecordings_` are parallel arrays indexed by position that easily drift out of sync. Merge into a single `AgentSlot { AgentExecState state; Recording rec; }` vector (HIGH)
+- [x] **Agent state fragmentation** — merged `agentStates_` + `agentRecordings_` into `agentSlots_: unordered_map<EntityID, AgentSlot>` where `AgentSlot { AgentExecState state; Recording rec; }` (HIGH)
 
 Pre-Phase 14:
-- [ ] **Fire/voltage not abstracted** — fire and voltage are hardcoded in `game.tick()`. Define a `StimulusField` struct (type, intensity, decay) stored per tile; tick logic becomes a generic stimulus-spread pass (MEDIUM)
-- [ ] **`Game` class too large** — `game.cpp` is doing movement, combat, recording, terrain, and stimulus in one file. Split into subsystem free-functions: `movement.cpp`, `combat.cpp`, `stimulus.cpp` called from `game.tick()` (MEDIUM)
+- [x] **`Game` class too large** — split `tickFire`/`tickVoltage`/`tickWater` into `stimulus.cpp`; `tickMovement`/`tickGoblinWander` into `movement.cpp`. `game.cpp` now handles only player input, VM, scheduling, persistence, and accessors (MEDIUM)
+- [ ] **StimulusField abstraction** — deferred. Fire, voltage, and water have fundamentally different spread models (timer-based, BFS, volume-conserving) that don't compose cleanly into a generic struct without obscuring the logic. Revisit if a fourth stimulus type is added. (was: "fire and voltage not abstracted")
 
 Deferred / as needed:
 - [ ] **Entity model revisit** — current plan uses type-driven dispatch + capabilities bitfield. Works fine at current scale but will get unwieldy past ~15 entity types. Alternatives: component bag (optional per-entity structs carrying their own state), full ECS. Revisit before Phase 17 when entity variety peaks.

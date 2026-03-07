@@ -25,6 +25,8 @@ set(LOGIC_SOURCES
     src/events.cpp
     src/recorder.cpp
     src/routine_vm.cpp
+    src/stimulus.cpp
+    src/movement.cpp
     src/game.cpp
     src/studio.cpp
     src/terminal_renderer.cpp
