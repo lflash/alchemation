@@ -10,7 +10,7 @@ void Recorder::tick() {
     if (recording_) ++ticksSinceLastMove_;
 }
 
-void Recorder::recordMove(TilePos delta, Direction facingBeforeMove) {
+void Recorder::recordMove(TilePos delta, Direction facingBeforeMove, bool strafe) {
     if (!recording_) return;
 
     // Emit WAIT for any pause since the last move (or since start).
@@ -20,7 +20,9 @@ void Recorder::recordMove(TilePos delta, Direction facingBeforeMove) {
     }
 
     RelDir rel = toRelDir(facingBeforeMove, delta);
-    current_.instructions.push_back({ .op = OpCode::MOVE_REL, .dir = rel });
+    // threshold != 0 signals "strafe" to the VM (don't update agent facing on playback).
+    current_.instructions.push_back({ .op = OpCode::MOVE_REL, .dir = rel,
+                                      .threshold = static_cast<uint8_t>(strafe ? 1 : 0) });
 }
 
 void Recorder::recordDig() {
@@ -39,6 +41,17 @@ void Recorder::recordPlant() {
         ticksSinceLastMove_ = 0;
     }
     current_.instructions.push_back({ .op = OpCode::PLANT });
+}
+
+void Recorder::recordSummon(size_t targetRecIdx) {
+    if (!recording_) return;
+    if (ticksSinceLastMove_ > 0) {
+        current_.instructions.push_back({ .op = OpCode::WAIT, .ticks = static_cast<uint16_t>(ticksSinceLastMove_) });
+        ticksSinceLastMove_ = 0;
+    }
+    // addr stores which recording index to assign to the summoned golem.
+    current_.instructions.push_back({ .op = OpCode::SUMMON,
+                                      .addr = static_cast<uint16_t>(targetRecIdx) });
 }
 
 Recording Recorder::stop() {

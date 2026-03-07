@@ -337,6 +337,15 @@ int main() {
                 }
             }
 
+            // ── Delete script from recordings panel ───────────────────────────
+            if (ui.is(ActivePanel::Recordings) && !ui.renamingScript &&
+                e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_DELETE) {
+                size_t idx = game.selectedRecordingIdx();
+                game.deleteRecording(idx);
+                studio.recompute(game);
+                continue;
+            }
+
             // ── Rebind capture ────────────────────────────────────────────────
             if (ui.rebindListening && e.type == SDL_KEYDOWN && e.key.repeat == 0) {
                 SDL_Keycode k = e.key.keysym.sym;
@@ -661,9 +670,6 @@ int main() {
                 case VisualEventType::CollectMushroom:
                     renderer.spawnBurst(vp, vz, {255, 220, 50, 255}, 10, 4.0f, 0.5f, 3.0f);
                     break;
-                case VisualEventType::DeployAgent:
-                    renderer.spawnBurst(vp, vz, {180, 180, 255, 255}, 6, 2.0f, 0.3f, 4.0f);
-                    break;
                 case VisualEventType::GoblinHit:
                     renderer.flashEntity(ve.entityID, {255, 80, 80, 255}, 6);
                     renderer.triggerShake(4.0f);
@@ -692,7 +698,7 @@ int main() {
         // ── Audio ─────────────────────────────────────────────────────────────
         static constexpr SFX eventToSFX[] = {
             SFX::Step, SFX::Dig, SFX::Plant, SFX::CollectMushroom,
-            SFX::RecordStart, SFX::RecordStop, SFX::DeployAgent, SFX::DeployAgent,
+            SFX::RecordStart, SFX::RecordStop, SFX::DeployAgent,
             SFX::PortalCreate, SFX::PortalEnter, SFX::GridSwitch,
             SFX::GoblinHit, SFX::AgentStep,
         };
@@ -736,8 +742,8 @@ int main() {
         else if (ui.is(ActivePanel::Rebind))
             renderer.drawRebindPanel(input.getMap(), ui.rebindRow, ui.rebindListening);
 
-        // Studio instruction panel and timeline.
-        if (game.inStudio() && game.recordingCount() > 0) {
+        // Studio instruction panel and timeline (hidden when any other menu is open).
+        if (game.inStudio() && game.recordingCount() > 0 && !ui.isOpen()) {
             size_t selRec = game.selectedRecordingIdx();
             if (selRec < game.recordingCount()) {
                 const Recording& selRecording = game.recording(selRec);

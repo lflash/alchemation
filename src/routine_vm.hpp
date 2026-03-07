@@ -6,11 +6,14 @@
 // ─── RoutineVM ───────────────────────────────────────────────────────────────
 
 struct VMResult {
-    bool    halt      = false;   // agent should stop executing (despawn if Poop)
-    bool    wantMove  = false;   // moveDelta is valid
-    TilePos moveDelta = {0, 0};
-    bool    wantDig   = false;   // dig tile in agent's facing direction
-    bool    wantPlant = false;   // plant mushroom in agent's facing direction
+    bool    halt       = false;   // agent should stop executing (despawn if Poop)
+    bool    wantMove   = false;   // moveDelta is valid
+    TilePos moveDelta  = {0, 0};
+    bool    isStrafe   = false;   // true → don't update agent facing after move
+    bool    wantDig    = false;   // dig tile in agent's facing direction
+    bool    wantPlant  = false;   // plant mushroom in agent's facing direction
+    bool     wantSummon   = false;   // summon golem from medium tile in agent's facing direction
+    uint16_t summonRecIdx = 0;       // recording index to assign to the summoned golem
 };
 
 class RoutineVM {

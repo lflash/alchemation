@@ -23,13 +23,16 @@ public:
     // facing is the player's facing AFTER the move direction has been applied
     // (i.e. the facing used to compute the RelDir, which is the pre-move facing
     // for non-strafing movement but may differ when strafing).
-    void recordMove(TilePos delta, Direction facingBeforeMove);
+    void recordMove(TilePos delta, Direction facingBeforeMove, bool strafe = false);
 
     // Emit a WAIT (if any pause) then a DIG instruction.
     void recordDig();
 
     // Emit a WAIT (if any pause) then a PLANT instruction.
     void recordPlant();
+
+    // Emit a WAIT (if any pause) then a SUMMON instruction.
+    void recordSummon(size_t targetRecIdx);
 
     // Append HALT and return the completed Recording. Resets internal state.
     Recording stop();

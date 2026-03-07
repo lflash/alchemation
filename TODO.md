@@ -89,9 +89,9 @@ Tests are written alongside the system they cover.
 - [x] `Recording` struct wrapping `vector<Instruction>` + name string
 - [x] `Recorder` — `start()`, `stop()` saves recording named "Script N"
 - [x] Movement emits `MOVE_REL`; pauses emit `WAIT`; recording ends with `HALT`
-- [x] `R` toggles recording; `Q` cycles selected; `E` deploys as Poop agent
+- [x] `R` toggles recording; `Q` cycles selected; `E` summons a golem
 - [x] `RoutineVM::step()` — one instruction per tick, `MOVE_REL` relative to facing
-- [x] Poop despawns when VM reaches `HALT`
+- [x] All routine agents despawn when VM reaches `HALT`
 
 **Tests** ✓
 
@@ -229,7 +229,7 @@ are renderer-side only — game logic is unaffected.
 ### Pickup / interaction effects ✓
 - [x] Dig particles — brown burst (`spawnBurst` on `VisualEvent::Dig`)
 - [x] Collect sparkle — yellow burst on `CollectMushroom`
-- [x] Deploy puff — blue burst on `DeployAgent`
+- [x] Summon burst — blue burst on `Summon`
 - [x] Footstep dust — small burst on `PlayerLand`
 
 ### Screen-level effects ✓
@@ -332,8 +332,8 @@ Implement the golem summoning system.
 - [x] `Entity` gains a `capabilities` bitfield — `CanExecuteRoutine`, `Pushable`, `CanFight`, `ImmuneFire`, `ImmuneWet`
 - [x] `entityCaps(EntityType)` — returns capability flags for every entity type
 - [x] `isGolem(EntityType)` — returns true for all 8 golem types
-- [x] Summon verb (`G`): face a medium tile; deducts mana; spawns correct golem type; medium tile consumed
-- [x] Golems execute player-recorded routines via the VM (same as Poop agents); survive HALT (only Poop despawns)
+- [x] Summon verb (`E`): spawns golem from medium tile ahead (defaults to Mud Golem on any tile); mana deducted; tile NOT consumed
+- [x] Golems execute player-recorded routines via the VM; despawn at HALT (same as all routine agents)
 - [x] Summon preview in HUD: golem name + mana cost; gold when affordable, red when not
 - [x] New entity types: Tree, Rock, Chest, MudGolem, StoneGolem, ClayGolem, WaterGolem, BushGolem, WoodGolem, IronGolem, CopperGolem
 - [x] New tile types: Mud, Stone, Clay, Bush, Wood, Iron, Copper (medium summoning tiles)
@@ -424,48 +424,48 @@ UI all TBD in ALCHEMY.md — not ready to implement.)
 
 ---
 
-## Phase 15 — Studio Overhaul
+## Phase 15 — Studio Overhaul ✓
 
 Upgrades the studio from a blank recording space into a full multi-agent editing
 environment.
 
-### Path overlay
-- [ ] `routinePath(Recording, TilePos origin, Direction facing)` — simulate a recording and return the visited `TilePos` sequence
-- [ ] Renderer draws the path as colour-coded arrows on the studio floor; WAIT steps shown as dots
-- [ ] Path recomputed when selected recording changes or studio is entered
-- [ ] All deployed agents shown simultaneously, each with a distinct palette colour
+### Path overlay ✓
+- [x] `routinePath(Recording, TilePos origin, Direction facing)` — simulate a recording from fixed origin `{10,10}` / Direction::S; returns `PathStep` sequence; capped at 512 steps
+- [x] Renderer draws the path as colour-coded arrows on the studio floor; WAIT steps shown as dots
+- [x] Path recomputed on studio entry and on every instruction edit
+- [x] All recordings shown simultaneously, each with a distinct 8-colour palette
 
-### Step scrubber
-- [ ] Timeline bar at bottom of screen: one cell per instruction, scrollable
-- [ ] Advance/rewind with Left/Right arrow; pause/play toggle (Space or A)
-- [ ] Ghost entity — translucent sprite at scrub position without moving the real agent
+### Step scrubber ✓
+- [x] Timeline bar at bottom of screen: one cell per instruction; conflict ticks red
+- [x] Advance/rewind with `[` / `]`; pause/play toggle with Space
+- [x] Ghost entity — translucent sprite at scrub position for selected recording
 
-### Instruction list panel
-- [ ] Side panel listing raw instructions (`MOVE_REL FORWARD`, `WAIT 10`, `HALT`, …)
-- [ ] Current PC row highlighted; scrolls to stay visible during playback
-- [ ] Rows selectable with Up/Down
+### Instruction list panel ✓
+- [x] Right-side panel listing raw instructions with index prefix
+- [x] Scrub position highlighted yellow; selected row highlighted; scrolls to stay visible
+- [x] Rows selectable with Up/Down when panel focused (`P`)
+- [x] Panel hidden when any menu (recordings/controls/rebind) is open
 
-### Instruction editing
-- [ ] Delete selected instruction (Backspace): removes from `Recording`, recomputes path
-- [ ] Insert `WAIT N` at cursor — numeric input field for tick count
-- [ ] Insert `MOVE_REL dir` at cursor — choose direction with arrow keys, confirm with Enter
-- [ ] Reorder: Shift+Up/Down moves selected instruction
-- [ ] Edits persist via existing save system
+### Instruction editing ✓
+- [x] Delete selected instruction (Backspace in panel-focused mode): removes, recomputes path; JUMP/CALL addresses auto-fixed
+- [x] Insert `WAIT N` at cursor (`W` + digit entry + Enter/Esc)
+- [x] Insert `MOVE_REL dir` at cursor (`M` + arrow + Enter/Esc)
+- [x] Reorder: Shift+Up/Down moves selected instruction; JUMP/CALL addresses auto-fixed
+- [x] Delete script from recordings panel: `Del` key while recordings panel open
 
-### Multi-agent coordination
-- [ ] Deploy any number of agents simultaneously (one per recording slot)
-- [ ] Overlapping paths highlighted red; conflicting ticks marked on timeline bar
-- [ ] Agent strip: name, colour, live step count; select to make active in instruction list
+### Multi-agent coordination ✓
+- [x] All recordings shown simultaneously on the studio floor
+- [x] Overlapping paths highlighted red; conflicting ticks marked on timeline bar
 
-### Playback controls
-- [ ] Loop mode (L): agents restart from spawn after HALT
-- [ ] Speed control (+ / −): 0.5×, 1×, 2×, 4× tick rate
-- [ ] Reset all (R): despawn agents, return player to spawn
+### Playback controls ✓
+- [x] Loop mode (`L`): scrubber restarts at end
+- [x] Speed control (`+` / `−`): 0.5×, 1×, 2×, 4×
+- [x] Reset (`0`): scrubber returns to tick 0
 
-**Tests**
-- [ ] `routinePath` returns correct tile sequence for a known recording
-- [ ] `routinePath` handles WAIT (tile repeated) and HALT (sequence ends)
-- [ ] Conflict detection identifies tick where two paths share a TilePos
+**Tests** ✓
+- [x] `routinePath` correct for empty, HALT, MOVE, WAIT, maxSteps cap, instrIdx tracking
+- [x] `studioConflicts` single path / diverging / shared tile / multiple conflicts
+- [x] `deleteInstruction` / `insertWait` / `insertMoveRel` smoke tests
 
 ---
 
@@ -523,6 +523,23 @@ scrubber) make this untenable. Do the UI layer here alongside mouse so both land
 **Tests**
 - [ ] `screenToTile(x, y, camera)` round-trips correctly against `toPixelX/Y` for known positions
 - [ ] Entity at hovered tile is identified correctly in draw order
+
+---
+
+## Post-Phase 16 — Summon System Overhaul ✓
+
+Reworked the golem summoning system after Phase 15/16:
+
+- [x] **`SUMMON` opcode** (`OpCode::SUMMON`, cost 5) — new VM instruction; agents execute it to summon a golem at the tile ahead
+- [x] **`Recorder::recordSummon(targetRecIdx)`** — records SUMMON intent unconditionally when `E` pressed (like DIG, regardless of tile); encodes selected recording index in `instr.addr`
+- [x] **Target recording encoded in instruction** — `instr.addr` = selected recording index at record time; summoned golem receives that exact recording (not the summoning agent's own)
+- [x] **No tile consumption** — summoning does not dig/consume the medium tile; medium tiles are reusable
+- [x] **Mud Golem fallback** — summon on any tile (Grass, BareEarth, etc.) defaults to spawning a Mud Golem; medium tiles still yield their specific golem types
+- [x] **All routine agents despawn at HALT** — golems and Poop agents all despawn when their script ends
+- [x] **Deploy action removed** — `Action::Deploy` and Poop-spawning removed; `E` now summons a golem
+- [x] **Strafe recording fix** — `MOVE_REL` instructions store a strafe flag in `instr.threshold`; VM passes `isStrafe` through `VMResult`; agent facing only updates on non-strafe moves; `routinePath` in studio also tracks facing correctly
+- [x] **Studio medium tiles persist through load** — `load()` re-applies Mud/Stone/Clay tiles in GRID_STUDIO after `clearOverrides()`; tiles only restored if not already consumed
+- [x] **tickVM deferred-add fix** — new agents spawned by SUMMON collected in `toAdd` and inserted into `agentStates_` after iteration completes (inserting during `unordered_map` iteration is UB)
 
 ---
 

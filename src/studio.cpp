@@ -29,6 +29,8 @@ std::vector<PathStep> routinePath(const Recording& rec,
             case OpCode::MOVE_REL: {
                 TilePos delta = resolveRelDir(dir, instr.dir);
                 pos = pos + delta;
+                bool strafe = (instr.threshold != 0);
+                if (!strafe) dir = toDirection(delta);
                 path.push_back({ pos, dir, instrIdx, false });
                 ++steps;
                 ++pc;
@@ -45,6 +47,7 @@ std::vector<PathStep> routinePath(const Recording& rec,
 
             case OpCode::DIG:
             case OpCode::PLANT:
+            case OpCode::SUMMON:
                 path.push_back({ pos, dir, instrIdx, false });
                 ++steps;
                 ++pc;

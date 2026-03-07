@@ -121,23 +121,54 @@ using RecordingID = uint32_t;
 using Tick        = uint64_t;
 
 enum class EntityType {
+    // Core
     Player, Goblin, Mushroom, Poop,
-    Campfire,    // static; spreads fire stimulus to adjacent tiles
+    // Static stimulus sources
+    Campfire,    // static; spreads fire to adjacent tiles
     TreeStump,   // burnable; ignites after fire exposure, despawns when burned
-    Log,         // burnable; same as TreeStump
-    Battery,     // static; emits 5V into adjacent Puddle tiles (BFS)
+    Log,         // burnable + pushable; same burn behaviour as TreeStump
+    Battery,     // static; emits voltage into adjacent Puddle tiles (BFS)
     Lightbulb,   // static; glows when its tile has ≥1V
+    // Terrain objects (Phase 12)
+    Tree,        // static blocker
+    Rock,        // pushable blocker
+    Chest,       // collectible; awards +5 mana on player arrival
+    // Golems — summoned from medium tiles (Phase 12)
+    MudGolem,    // ImmuneWet
+    StoneGolem,  // ImmuneFire
+    ClayGolem,
+    WaterGolem,
+    BushGolem,
+    WoodGolem,   // CanFight
+    IronGolem,   // CanFight
+    CopperGolem,
 };
+
+// Capability flags (bitfield on Entity, initialised from entityCaps() at spawn):
+enum Capability : uint32_t {
+    CanExecuteRoutine = 1u << 0,  // runs the Routine VM
+    Pushable          = 1u << 1,  // shoved one tile on player/golem bump
+    CanFight          = 1u << 2,  // deals damage in combat (IronGolem, WoodGolem)
+    ImmuneFire        = 1u << 3,  // unaffected by fire stimulus (StoneGolem)
+    ImmuneWet         = 1u << 4,  // unaffected by wet stimulus (MudGolem)
+};
+
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
 
-enum class TileType  { Grass, BareEarth, Portal, Fire, Puddle };
+enum class TileType {
+    Grass, BareEarth, Portal, Fire, Puddle,
+    // Summoning mediums — each yields one golem type (Phase 12)
+    Mud, Stone, Clay, Bush, Wood, Iron, Copper,
+    // Fluid (Phase 14)
+    Water,   // carries a depth level; spreads until level ≤ 0.1, then becomes Puddle
+};
 
 // AudioSystem-internal playback enum (audio.hpp):
 enum class SFX {
     Step, Dig, Plant, CollectMushroom,
-    RecordStart, RecordStop, DeployAgent,
+    RecordStart, RecordStop, Summon,
     PortalCreate, PortalEnter, GridSwitch,
     GoblinHit, AgentStep,
 };
@@ -152,13 +183,13 @@ enum class MusicLayer {
 // Game-side event enum (game.hpp) — Game emits these; main.cpp maps them to SFX:
 enum class AudioEvent {
     PlayerStep, Dig, Plant, CollectMushroom,
-    RecordStart, RecordStop, DeployAgent,
+    RecordStart, RecordStop, Summon,
     PortalCreate, PortalEnter, GridSwitch,
     GoblinHit, AgentStep,
 };
 
 enum class VisualEventType {
-    Dig, CollectMushroom, DeployAgent,
+    Dig, CollectMushroom, Summon,
     GoblinHit, GoblinDie, PlayerLand,
     PortalEnter, GridSwitch,
 };
@@ -174,19 +205,20 @@ struct VisualEvent {
 using RoutineID = uint32_t;
 
 struct AgentExecState {
-    uint32_t pc;
-    uint32_t waitTicks;
-    // Future: call stack for CALL/RET (depth 8, GPU-safe fixed size)
-    // uint32_t callStack[8]; uint8_t callDepth;
+    static constexpr int CALL_STACK_DEPTH = 8;
+    uint32_t pc        = 0;
+    uint32_t waitTicks = 0;
+    uint16_t callStack[CALL_STACK_DEPTH] = {};  // CALL return addresses
+    int      callDepth = 0;
 };
 
 // Stimulus conditions testable by JUMP_IF / JUMP_IF_NOT (defined in routine.hpp):
 enum class Condition : uint8_t { None, Fire, Wet, EntityAhead, AtEdge };
-// Note: Wet = stimulus (tile property); Water = fluid (separate dynamics system).
+// Wet fires on Puddle or Water tiles. Water = fluid; Wet = stimulus an agent can sense.
 
 constexpr int TILE_ENTITY_CAP = 8;
 
-// Full opcode set (MOVE_REL/WAIT/HALT implemented; rest planned for Phase 13):
+// Full opcode set (all implemented as of Phase 13):
 enum class OpCode : uint8_t {
     MOVE_REL, WAIT, HALT,
     DIG, PLANT,
@@ -244,7 +276,7 @@ each frame:
 - `bool hasGamepad()`     — true when a controller is connected
 
 **Action enum** — logical intent, not physical key:
-`MoveUp MoveDown MoveLeft MoveRight Strafe Dig Plant PlacePortal Record CycleRecording Deploy SwitchGrid PanUp PanDown PanLeft PanRight ResetCamera ZoomModifier Quit Confirm ToggleControls ToggleRecordings ToggleRebind`
+`MoveUp MoveDown MoveLeft MoveRight Strafe Dig Plant PlacePortal Record CycleRecording Summon SwitchGrid PanUp PanDown PanLeft PanRight ResetCamera ZoomModifier Quit Confirm ToggleControls ToggleRecordings ToggleRebind`
 
 **InputMap** — `unordered_map<Action, SDL_Keycode>`. `InputMap::defaults()` returns the
 standard WASD layout. `save(path)` / `load(path)` persist bindings as plain text
@@ -283,6 +315,7 @@ struct Entity {
     int        layer;        // draw order (lower = drawn first)
     int        mana;
     int        health;
+    uint32_t   capabilities = 0;  // bitmask of Capability flags (initialised by entityCaps() at spawn)
 
     // Stimulus-response flags (set each tick by tickFire / tickVoltage):
     bool       lit         = false;  // Lightbulb: true when tile has ≥1V
@@ -316,6 +349,18 @@ class Grid {
     Scheduler   scheduler;
     EventBus    events;
     vector<EntityID> entities;
+
+    // Fire simulation:
+    unordered_map<TilePos, int>  tileFireExp;     // ticks a Grass tile has been adjacent to fire (→ catches at 50)
+    unordered_map<TilePos, Tick> fireTileExpiry;  // tick at which each Fire tile reverts to BareEarth
+    unordered_map<EntityID, int> entityFireExp;   // ticks a burnable entity has been adjacent to fire (→ burns at 250)
+    unordered_map<EntityID, Tick> entityBurnEnd;  // tick at which a burning entity despawns
+
+    // Voltage (BFS-computed each tick from Battery entities):
+    unordered_map<TilePos, int>  voltage;
+
+    // Water levels (Phase 14):
+    unordered_map<TilePos, float> waterLevel;     // per-tile depth; ≤0.1 → Puddle, removed from map
 };
 
 class Game {
@@ -324,7 +369,7 @@ class Game {
     Recorder                    recorder_;
     GridID                      activeGridID_;
     GridID                      nextGridID_;      // monotonically increasing
-    optional<PendingTransfer>   pendingTransfer_; // applied between ticks
+    vector<PendingTransfer>     pendingTransfers_; // applied between ticks
 };
 ```
 
@@ -395,14 +440,19 @@ Two-phase:
 **Collision resolution** by `(mover type, occupant type)`:
 
 ```
-          │ Player   Goblin   Mushroom  Poop
-──────────┼──────────────────────────────────
-Player    │  —       Block*   Collect   Pass   *bump combat: push + damage
-Goblin    │ Combat   Block    Pass      Pass
-Poop      │  Pass    Hit      Pass      Pass
+            │ Player   Goblin   Mushroom  Poop
+────────────┼──────────────────────────────────
+Player      │  —       Block*   Collect   Pass   *bump combat: push + damage
+Goblin      │ Combat   Block    Pass      Pass
+Poop        │  Pass    Hit      Pass      Pass
+IronGolem   │  Block   Hit      Pass      Pass
+WoodGolem   │  Block   Hit      Pass      Pass
+MudGolem    │  Block   Block    Pass      Pass
+(all other  │  Block   Block    Pass      Pass
+ golems)
 ```
 
-*Table covers Phase 8 entity types only. Collision rules for golem types added in Phase 12 — TBD.*
+Golems with `CanFight` (IronGolem, WoodGolem) deal damage to Goblins. All golems block the player and are blocked by the player.
 
 **Swap prevention**: all movement intentions collected first, then resolved
 together. A→B and B→A in the same tick → both blocked.
@@ -452,10 +502,11 @@ class Terrain {
 sparse `unordered_map<TilePos, StimulusField>` per `Grid`. Spread and decay are one generic pass.
 Adding a new stimulus type = new enum value; no new tick code.
 
-**Wet vs Water:** `Wet` is a stimulus (a tile property set by any fluid source — water, rain, etc.)
-that agents can sense via `JUMP_IF Wet`. `Water` is a separate fluid entity with its own dynamics
-(full fluid simulation deferred; design TBD). A water tile sets the `Wet` stimulus on itself and
-adjacent tiles.
+**Wet vs Water:** `Wet` is a stimulus that agents can sense via `JUMP_IF Wet`. It fires when an
+agent stands on a `Puddle` or `Water` tile. `Water` is a fluid tile type with its own spreading
+dynamics (Phase 14 — implemented). A Water tile carries a depth level stored in `Grid::waterLevel`;
+each tick `tickWater()` spreads volume to adjacent same-or-lower-level tiles, conserving total
+volume. When a tile's level drops to ≤ 0.1 it converts to `Puddle` and is removed from the map.
 
 ### Alchemy Engine
 
@@ -487,14 +538,16 @@ before entity AI and set flags on affected entities, which the renderer reads to
 apply visual effects.
 
 **Fire (`tickFire`):**
-- `tileFireExp`: maps `TilePos → Tick` — the first tick a tile was exposed to fire.
+- `tileFireExp`: maps `TilePos → int` — ticks a Grass tile has been adjacent to fire.
   `Campfire` entities write to this for all 8 surrounding tiles each tick.
-- `fireTileExpiry`: maps `TilePos → Tick` — when a `Fire` tile reverts to `BareEarth`.
-  A `Grass` tile with ≥50 ticks exposure is converted to `Fire`; `Fire` expires
-  after a further 500 ticks.
-- `entityFireExp`: maps `EntityID → Tick` — first tick a burnable entity was exposed.
+  A tile reaching ≥50 ticks converts to `Fire`.
+- `fireTileExpiry`: maps `TilePos → Tick` — when a `Fire` tile reverts to `BareEarth`
+  (500 ticks after ignition).
+- `entityFireExp`: maps `EntityID → int` — ticks a burnable entity has been adjacent to fire.
   `TreeStump` and `Log` ignite (`burning = true`) after 250 ticks; `entityBurnEnd`
   records when they will despawn (ignition + 500 ticks).
+- **Fire × Water (Phase 14):** any `Fire` tile adjacent to a `Water` tile is immediately
+  extinguished (reverted to `BareEarth`, removed from `fireTileExpiry`) each tick.
 
 **Voltage (`tickVoltage`):**
 - `voltage`: BFS-computed map from `TilePos → int`. `Battery` entities seed the BFS
@@ -512,23 +565,31 @@ Routines are programs. Agents are threads. The GPU kernel is the interpreter.
 Each agent holds an `AgentExecState` — a program counter and wait counter.
 One instruction executes per tick.
 
-**Implemented opcodes:**
+**All opcodes (implemented as of Phase 13):**
 ```
-MOVE_REL  → move one tile relative to agent facing (dir = RelDir: Forward/Back/Left/Right)
-WAIT      → pause for ticks ticks
-HALT      → agent despawns
+MOVE_REL  dir              → move one tile relative to agent facing (Forward/Back/Left/Right)
+WAIT      ticks            → pause for N ticks
+HALT                       → agent despawns
+DIG                        → dig tile in facing direction
+PLANT                      → plant mushroom ahead if BareEarth
+JUMP      addr             → unconditional jump to PC addr
+JUMP_IF   cond threshold addr → jump if stimuli[cond] > threshold
+JUMP_IF_NOT cond threshold addr → jump if stimuli[cond] <= threshold
+CALL      addr             → push return addr onto call stack, jump (depth limit: 8; overflow → halt)
+RET                        → pop call stack and return to caller (empty stack → halt)
 ```
 
-**Planned opcodes (Phase 13):**
+**Stimulus vector** — computed per-agent each tick in `tickVM()`:
+```cpp
+uint8_t stimuli[8];
+stimuli[Condition::Fire]        = (tile == TileType::Fire)   ? 255 : 0;
+stimuli[Condition::Wet]         = (tile == TileType::Puddle ||
+                                   tile == TileType::Water)  ? 255 : 0;
+stimuli[Condition::EntityAhead] = entity-is-ahead            ? 255 : 0;
+stimuli[Condition::AtEdge]      = at-grid-boundary           ? 255 : 0;
 ```
-DIG             → dig tile in facing direction
-PLANT           → plant mushroom ahead if BareEarth
-JUMP addr       → unconditional jump to PC addr
-JUMP_IF    cond threshold addr → jump if stimulus[cond] > threshold
-JUMP_IF_NOT cond threshold addr → jump if stimulus[cond] <= threshold
-CALL addr       → push return addr, jump (call stack depth 8)
-RET             → pop call stack, return to caller
-```
+
+**Recorder** also supports `recordDig()` and `recordPlant()` — emits a WAIT if time has passed since the last move, then the DIG/PLANT opcode.
 
 **Instruction format:** flat struct — all fields always present, unused fields default to zero.
 Chosen over a tagged union for ease of serialisation and studio editor access. See `routine.hpp`.
@@ -537,15 +598,20 @@ Chosen over a tagged union for ease of serialisation and studio editor access. S
 
 ### Golem System
 
-Golems are summoned by facing a tile containing a summoning medium and pressing the summon key.
-Summoning is a world interaction verb — like hoeing or planting, it can be performed by the
-player or by other entities with the right capability.
+Golems are summoned by pressing `E`. If the tile ahead is a medium tile, the matching golem type
+is spawned there; otherwise a Mud Golem is spawned on any tile. **Medium tiles are not consumed**
+— summoning is reusable. Summoning costs mana scaled by golem tier.
 
 Eight mediums yield eight golem types. See `ENTITIES.md` for the full capability table.
 
-All golems execute player-recorded routines via the VM. Golems are the only agents that deal
-damage (Iron Golem is the primary combat unit). Summoning costs mana; the cost scales with
-golem tier.
+All golems (and all routine agents) execute player-recorded routines via the VM and **despawn
+when the routine reaches HALT**. Golems capable of combat deal damage (Iron Golem is the primary
+combat unit).
+
+The `SUMMON` opcode lets agents summon new golems mid-routine. The opcode encodes the target
+recording index in `instr.addr` (set at record time), so the spawned golem receives the intended
+script. SUMMON is recorded unconditionally when `E` is pressed during recording — intent is
+captured regardless of tile contents, like DIG.
 
 **Vocalizations:** each golem type emits a Simlish-style vocalization on summon (short phoneme
 sequence, unique per type).
@@ -744,7 +810,7 @@ No SDL dependency so these types are usable in unit tests without a display.
 
 ### Persistence
 
-Binary save format (version 7). Auto-loaded on startup, auto-saved on quit (Esc).
+Binary save format (version 9). Auto-loaded on startup, auto-saved on quit (Esc).
 
 **Versioning policy:** bump version on every layout change; version mismatch = fresh world (no
 migration). The CPU save format is a prototype — a full GPU redesign post-Phase 20 will replace
@@ -753,7 +819,7 @@ it entirely, so migration code is not worth writing.
 **Format:**
 ```
 magic: "GRID" (4 bytes)
-version: uint8 = 7
+version: uint8 = 9
 activeGridID: uint32
 nextGridID: uint32
 
@@ -847,7 +913,7 @@ Default keyboard bindings (all remappable via K panel or `settings.dat`):
 | `C` | If tile ahead is `BareEarth` and `mana >= 1`: plant mushroom, restore terrain, deduct 1 mana. |
 | `R` | Toggle recording. On stop, saves `Recording` with default name "Script N". |
 | `Q` | Cycle `selectedRecording`. |
-| `E` | Deploy `selectedRecording` as a routine agent spawned ahead of player (currently `Poop` — placeholder, renamed Phase 12). |
+| `E` | Summon golem ahead. Medium tile → matching type; any other tile → Mud Golem. Costs mana. Shows `SummonPreview` tooltip. |
 | `O` | Create portal tile ahead; spawn linked 20×20 room grid. |
 | `Tab` | Toggle between world and studio (direct transfer, no portal). |
 | `H` | Toggle controls reference panel. |
@@ -864,6 +930,15 @@ Default keyboard bindings (all remappable via K panel or `settings.dat`):
 | Player + Mushroom | Player gains 3 mana. Mushroom despawns. |
 | Player + Goblin | Bump combat: goblin takes `player.mana` damage, is pushed back. |
 | Poop + Goblin | Goblin takes hit. |
+| Any entity + Chest | Entity gains +5 mana. Chest despawns. |
+
+**Environmental interactions:**
+| Tile | Effect on entity |
+|---|---|
+| Water | Entity speed halved on arrival (`speed = baseSpeed * 0.5`). |
+| Fire | Fire tile adjacent to Water is immediately extinguished each tick. |
+
+**Mana floor:** player mana never drops below 1 — enforced after every mana-spending action (Plant, Deploy, Summon).
 
 ---
 
@@ -899,7 +974,11 @@ grid_game/
 │   ├── test_terminal_renderer.cpp
 │   ├── test_fire_voltage.cpp
 │   ├── test_phase10.cpp
-│   └── test_input_map.cpp
+│   ├── test_input_map.cpp
+│   ├── test_phase11.cpp   ← recording cost, deploy, mana floor
+│   ├── test_phase12.cpp   ← golem types, entityCaps, isGolem, collision
+│   ├── test_phase13.cpp   ← DIG/PLANT/JUMP/JUMP_IF/CALL/RET opcodes, Recorder
+│   └── test_phase14.cpp   ← Water tile, tickWater, fire×water, mana floor
 └── src/
     ├── main.cpp
     ├── types.hpp             ← TilePos, Vec2f, Bounds, Camera, enums, lerp, toVec, TilePosHash
@@ -931,7 +1010,7 @@ Decisions made through conversation; recorded here to avoid revisiting them unne
 |---|---|---|
 | 1 | Entity model | Keep type-driven dispatch + capabilities bitfield for now. Alternatives (component bag, full ECS) not worth the complexity at current entity-type count. Revisit before Phase 17 when entity variety peaks. |
 | 2 | Instruction format | Flat struct — all fields always present, unused fields zero. Chosen over tagged union for ease of serialisation and studio editor field access. Implemented in `routine.hpp`. |
-| 3 | Stimulus abstraction | Generic `StimulusField { type, intensity, decay }` per tile. `Wet` is a stimulus (any fluid source sets it). `Water` is a fluid entity with its own dynamics (deferred). VM checks `Wet`, not `Water`. |
+| 3 | Stimulus abstraction | Generic `StimulusField { type, intensity, decay }` per tile. `Wet` is a stimulus (any fluid source sets it). `Water` is a fluid tile type with volume-conserving spreading dynamics (`tickWater`, Phase 14). VM checks `Wet` (fires on Puddle or Water tiles), not `Water` directly. |
 | 4 | Multi-grid scaling | Hibernation: no player in grid → analyse routines, pre-schedule outputs, hibernate. Player enters → cancel outputs, snap agents, resume. Exact (no approximation). Reuses existing Scheduler. |
 | 5 | GPU goal | CPU simulation is a feature prototype. Full GPU redesign (Vulkan compute or similar) post-Phase 20. Struct-of-arrays layout, fixed-size slots, parallel tick logic. No incremental migration — full rewrite. |
 | 6 | Save format versioning | Bump version on every layout change; mismatch = fresh world. No migration code. Format will be replaced in GPU rewrite. |

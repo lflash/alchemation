@@ -25,8 +25,7 @@ InputMap InputMap::defaults() {
         { Action::PlacePortal,      SDLK_o         },
         { Action::Record,           SDLK_r         },
         { Action::CycleRecording,   SDLK_q         },
-        { Action::Deploy,           SDLK_e         },
-        { Action::Summon,           SDLK_g         },
+        { Action::Summon,           SDLK_e         },
         { Action::SwitchGrid,       SDLK_TAB       },
         { Action::PanUp,            SDLK_UP        },
         { Action::PanDown,          SDLK_DOWN      },
@@ -48,7 +47,7 @@ InputMap InputMap::defaults() {
 static constexpr const char* ACTION_NAMES[] = {
     "MoveUp", "MoveDown", "MoveLeft", "MoveRight", "Strafe",
     "Dig", "Plant", "PlacePortal",
-    "Record", "CycleRecording", "Deploy", "Summon",
+    "Record", "CycleRecording", "Summon",
     "SwitchGrid",
     "PanUp", "PanDown", "PanLeft", "PanRight", "ResetCamera", "ZoomModifier",
     "Quit", "Confirm", "ToggleControls", "ToggleRecordings", "ToggleRebind",
@@ -127,7 +126,6 @@ GamepadMap GamepadMap::defaults() {
     // Recording
     m.setButton(Action::Record,          SDL_CONTROLLER_BUTTON_BACK);
     m.setButton(Action::CycleRecording,  SDL_CONTROLLER_BUTTON_LEFTSTICK);
-    m.setButton(Action::Deploy,          SDL_CONTROLLER_BUTTON_B);
     // Grid
     m.setButton(Action::SwitchGrid,      SDL_CONTROLLER_BUTTON_START);
     // Camera — right stick

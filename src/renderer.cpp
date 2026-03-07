@@ -890,7 +890,7 @@ void Renderer::drawRecordingsPanel(const std::vector<RecordingInfo>& list,
     if (renaming)
         drawText("\xe2\x86\xb5 confirm   Esc cancel", X + PAD, ty, hintCol);  // ↵
     else
-        drawText("Q cycle   E deploy   \xe2\x86\xb5 rename", X + PAD, ty, hintCol);
+        drawText("Q cycle   \xe2\x86\xb5 rename   Del delete", X + PAD, ty, hintCol);
 }
 
 void Renderer::drawControlsMenu() {
@@ -943,7 +943,7 @@ void Renderer::drawControlsMenu() {
     row("C",             "Plant mushroom");
     row("R",             "Toggle recording");
     row("Q",             "Cycle recording");
-    row("E",             "Deploy agent");
+    row("E",             "Summon golem");
     row("O",             "Create room portal");
     row("Tab",           "Toggle studio");
     sep();
@@ -963,7 +963,7 @@ void Renderer::drawRebindPanel(const InputMap& map, int selectedRow, bool listen
         "Move Up",          "Move Down",       "Move Left",        "Move Right",
         "Strafe (hold)",
         "Dig",              "Plant Mushroom",  "Place Portal",
-        "Record",           "Cycle Recording", "Deploy Agent",
+        "Record",           "Cycle Recording", "Summon Golem",
         "Switch Grid",
         "Pan Up",           "Pan Down",        "Pan Left",         "Pan Right",
         "Reset Camera",     "Zoom (hold)",
@@ -1255,6 +1255,7 @@ void Renderer::drawInstructionPanel(const Recording& rec, int selectedRow,
             case OpCode::JUMP_IF_NOT:text = "JMPIFN " + std::to_string(instr.addr);                break;
             case OpCode::CALL:       text = "CALL "   + std::to_string(instr.addr);                break;
             case OpCode::RET:        text = "RET";                                                  break;
+            case OpCode::SUMMON:     text = "SUMMON";                                               break;
         }
 
         std::string prefix = (isScrub ? ">" : " ") + std::to_string(idx) + " ";

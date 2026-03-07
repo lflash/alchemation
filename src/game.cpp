@@ -153,6 +153,13 @@ Game::Game() {
     spawnStatic(EntityType::Lightbulb, -1,  0);   // on puddle → lit
     spawnStatic(EntityType::Lightbulb,  3,  0);   // on grass  → unlit
 
+    // ── Studio: medium tiles for summon testing ───────────────────────────────
+    // Player enters studio at {0,0} facing S; place mediums one step south.
+    Grid& studio = grids_.at(GRID_STUDIO);
+    studio.terrain.setType({ 0,  1}, TileType::Mud);
+    studio.terrain.setType({ 1,  1}, TileType::Stone);
+    studio.terrain.setType({-1,  1}, TileType::Clay);
+
     // ── Phase 14 demo: water pool south-east of spawn ────────────────────────
     // Starting level 1.0 each; will spread and thin until level drops to Puddle.
     const TilePos waterDemo[] = {{20, 20}, {21, 20}, {20, 21}};
@@ -252,6 +259,16 @@ SummonPreview Game::playerSummonPreview() const {
 void Game::renameRecording(size_t index, const std::string& name) {
     if (index < recorder_.recordings.size())
         recorder_.recordings[index].name = name;
+}
+
+void Game::deleteRecording(size_t index) {
+    if (index >= recorder_.recordings.size()) return;
+    recorder_.recordings.erase(recorder_.recordings.begin() + (ptrdiff_t)index);
+    // Keep selectedRecording_ valid.
+    if (recorder_.recordings.empty())
+        selectedRecording_ = 0;
+    else if (selectedRecording_ >= recorder_.recordings.size())
+        selectedRecording_ = recorder_.recordings.size() - 1;
 }
 
 // ─── Draw order ──────────────────────────────────────────────────────────────
@@ -393,8 +410,9 @@ static bool resolveDestHeight(TilePos& dest, const TilePos& from, const Grid& gr
 // ─── Player input ─────────────────────────────────────────────────────────────
 
 void Game::tickPlayerInput(const Input& input) {
-    Grid&   grid   = activeGrid();
-    Entity* player = registry_.get(playerID_);
+    Grid&   grid     = activeGrid();
+    Entity* player   = registry_.get(playerID_);
+    bool    inStudio = (activeGridID_ == GRID_STUDIO);
 
     // r: toggle recording
     if (input.pressed(Action::Record)) {
@@ -412,29 +430,6 @@ void Game::tickPlayerInput(const Input& input) {
     if (input.pressed(Action::CycleRecording) && !recorder_.recordings.empty())
         selectedRecording_ = (selectedRecording_ + 1) % recorder_.recordings.size();
 
-    // e: deploy selected recording as Poop agent in front of player
-    if (input.pressed(Action::Deploy) && player &&
-        !recorder_.recordings.empty() &&
-        selectedRecording_ < recorder_.recordings.size()) {
-
-        const Recording& rec  = recorder_.recordings[selectedRecording_];
-        int              cost = rec.manaCost();
-
-        if (player->mana >= cost) {
-            player->mana -= cost;
-            if (player->mana < 1) player->mana = 1;
-            TilePos  spawnPos = player->pos + dirToDelta(player->facing);
-            EntityID pid      = registry_.spawn(EntityType::Poop, spawnPos);
-            Entity*  pe       = registry_.get(pid);
-            pe->facing        = player->facing;
-            grid.add(pid, *pe);
-            agentStates_[pid]     = AgentExecState{};
-            agentRecordings_[pid] = rec;
-            audioEvents_.push_back(AudioEvent::DeployAgent);
-            visualEvents_.push_back({ VisualEventType::DeployAgent,
-                                      toVec(spawnPos), static_cast<float>(spawnPos.z) });
-        }
-    }
 
     // Tab: toggle between world and studio
     if (input.pressed(Action::SwitchGrid) && player && player->isIdle()) {
@@ -491,7 +486,7 @@ void Game::tickPlayerInput(const Input& input) {
         if (allowed.count(playerID_)) {
             player->destination = newDest;
             if (recorder_.isRecording())
-                recorder_.recordMove(delta, facingBefore);
+                recorder_.recordMove(delta, facingBefore, input.held(Action::Strafe));
         } else {
             // Bump interactions
             Bounds destBounds = boundsAt(newDest, player->size);
@@ -573,12 +568,11 @@ void Game::tickPlayerInput(const Input& input) {
     }
 
     if (input.pressed(Action::Plant)) {
-        if (grid.terrain.typeAt(ahead) == TileType::BareEarth && player->mana >= 1) {
+        if (grid.terrain.typeAt(ahead) == TileType::BareEarth && (inStudio || player->mana >= 1)) {
             EntityID mid = registry_.spawn(EntityType::Mushroom, ahead);
             grid.add(mid, *registry_.get(mid));
             grid.terrain.restore(ahead);
-            player->mana--;
-            if (player->mana < 1) player->mana = 1;
+            if (!inStudio) { player->mana--; if (player->mana < 1) player->mana = 1; }
             recorder_.recordPlant();
             audioEvents_.push_back(AudioEvent::Plant);
         }
@@ -587,12 +581,14 @@ void Game::tickPlayerInput(const Input& input) {
 
     // G: summon golem from medium tile ahead
     if (input.pressed(Action::Summon) && player) {
+        // Always record the intent when recording, regardless of success.
+        recorder_.recordSummon(selectedRecording_);
+
         TilePos ahead = player->pos + dirToDelta(player->facing);
         const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
-        if (gi && player->mana >= gi->manaCost) {
-            player->mana -= gi->manaCost;
-            if (player->mana < 1) player->mana = 1;
-            grid.terrain.dig(ahead);   // consume medium tile → BareEarth
+        if (!gi) gi = &GOLEM_TABLE[0];  // default: Mud Golem
+        if (inStudio || player->mana >= gi->manaCost) {
+            if (!inStudio) { player->mana -= gi->manaCost; if (player->mana < 1) player->mana = 1; }
 
             EntityID gid = registry_.spawn(gi->type, ahead);
             Entity*  ge  = registry_.get(gid);
@@ -675,6 +671,7 @@ void Game::tickGoblinWander(Grid& grid) {
 
 void Game::tickVM(Grid& grid) {
     std::vector<EntityID> toRemove;
+    std::vector<std::pair<EntityID, Recording>> toAdd;  // defer insertion to avoid iterator invalidation
 
     for (auto& [id, state] : agentStates_) {
         if (!grid.hasEntity(id)) continue;
@@ -704,12 +701,9 @@ void Game::tickVM(Grid& grid) {
         VMResult res = vm_.step(state, agentRecordings_[id], ent->facing, stimuli);
 
         if (res.halt) {
-            if (ent->type == EntityType::Poop) {
-                // Poop despawns when its routine ends
-                grid.remove(id, *ent);
-                registry_.destroy(id);
-            }
-            // Golems and other routine agents stop executing but stay alive
+            // All routine agents despawn when their script ends.
+            grid.remove(id, *ent);
+            registry_.destroy(id);
             toRemove.push_back(id);
         } else if (res.wantMove) {
             TilePos newDest = ent->pos + res.moveDelta;
@@ -721,7 +715,8 @@ void Game::tickVM(Grid& grid) {
                 auto allowed = resolveMoves(intentions, grid.spatial, registry_);
                 if (allowed.count(id)) {
                     ent->destination = newDest;
-                    ent->facing      = toDirection(res.moveDelta);
+                    if (!res.isStrafe)
+                        ent->facing = toDirection(res.moveDelta);
                     audioEvents_.push_back(AudioEvent::AgentStep);
                 }
             }
@@ -739,12 +734,34 @@ void Game::tickVM(Grid& grid) {
                 grid.terrain.restore(target);
                 audioEvents_.push_back(AudioEvent::Plant);
             }
+        } else if (res.wantSummon) {
+            TilePos target = ent->pos + dirToDelta(ent->facing);
+            const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(target));
+            if (!gi) gi = &GOLEM_TABLE[0];  // default: Mud Golem
+            {
+                EntityID gid = registry_.spawn(gi->type, target);
+                Entity*  ge  = registry_.get(gid);
+                ge->facing   = ent->facing;
+                grid.add(gid, *ge);
+                // Assign the recording encoded in the SUMMON instruction.
+                Recording rec = (res.summonRecIdx < recorder_.recordings.size())
+                    ? recorder_.recordings[res.summonRecIdx]
+                    : agentRecordings_[id];
+                toAdd.emplace_back(gid, std::move(rec));
+                audioEvents_.push_back(AudioEvent::Summon);
+                visualEvents_.push_back({ VisualEventType::Summon,
+                                          toVec(target), static_cast<float>(target.z) });
+            }
         }
     }
 
     for (EntityID id : toRemove) {
         agentStates_.erase(id);
         agentRecordings_.erase(id);
+    }
+    for (auto& [gid, rec] : toAdd) {
+        agentStates_[gid]     = AgentExecState{};
+        agentRecordings_[gid] = std::move(rec);
     }
 }
 
@@ -1249,6 +1266,12 @@ bool Game::load(const std::string& path) {
         for (const auto& [pos, type] : grid.terrain.overrides())
             if (type == TileType::Water && !grid.waterLevel.count(pos))
                 grid.waterLevel[pos] = 1.0f;
+
+    // Re-apply static studio medium tiles (cleared by clearOverrides above).
+    Grid& studio = grids_.at(GRID_STUDIO);
+    if (!studio.terrain.overrides().count({ 0,  1})) studio.terrain.setType({ 0,  1}, TileType::Mud);
+    if (!studio.terrain.overrides().count({ 1,  1})) studio.terrain.setType({ 1,  1}, TileType::Stone);
+    if (!studio.terrain.overrides().count({-1,  1})) studio.terrain.setType({-1,  1}, TileType::Clay);
 
     return true;
 }

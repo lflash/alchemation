@@ -18,7 +18,7 @@
 
 enum class AudioEvent {
     PlayerStep, Dig, Plant, CollectMushroom,
-    RecordStart, RecordStop, DeployAgent, Summon,
+    RecordStart, RecordStop, Summon,
     PortalCreate, PortalEnter, GridSwitch,
     GoblinHit, AgentStep,
 };
@@ -29,7 +29,7 @@ enum class AudioEvent {
 // frame and spawns particles / triggers screen-level effects accordingly.
 
 enum class VisualEventType {
-    Dig, CollectMushroom, DeployAgent, Summon,
+    Dig, CollectMushroom, Summon,
     GoblinHit, GoblinDie, PlayerLand,
     PortalEnter, GridSwitch,
 };
@@ -118,6 +118,7 @@ public:
     // Recordings panel.
     std::vector<RecordingInfo> recordingList() const;
     void renameRecording(size_t index, const std::string& name);
+    void deleteRecording(size_t index);
 
     // Recording access (Phase 15).
     size_t           recordingCount()      const { return recorder_.recordings.size(); }

@@ -26,7 +26,8 @@ VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
         case OpCode::MOVE_REL: {
             TilePos delta = resolveRelDir(agentFacing, instr.dir);
             ++state.pc;
-            return { .halt = false, .wantMove = true, .moveDelta = delta };
+            return { .halt = false, .wantMove = true, .moveDelta = delta,
+                     .isStrafe = (instr.threshold != 0) };
         }
 
         case OpCode::DIG:
@@ -36,6 +37,10 @@ VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
         case OpCode::PLANT:
             ++state.pc;
             return { .wantPlant = true };
+
+        case OpCode::SUMMON:
+            ++state.pc;
+            return { .wantSummon = true, .summonRecIdx = instr.addr };
 
         case OpCode::JUMP:
             state.pc = instr.addr;

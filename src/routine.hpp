@@ -18,6 +18,7 @@ enum class OpCode : uint8_t {
     JUMP_IF_NOT,    // jump if stimulus[cond] <= threshold; addr, cond, threshold
     CALL,           // push return addr, jump; addr = target PC
     RET,            // pop return addr, jump back
+    SUMMON,         // summon golem from medium tile ahead; new golem inherits agent's recording
 };
 
 // ─── RelDir ──────────────────────────────────────────────────────────────────
@@ -75,6 +76,7 @@ constexpr int instrCost(OpCode op, RelDir dir = RelDir::Forward) {
         case OpCode::MOVE_REL: return (dir == RelDir::Back) ? 2 : 1;
         case OpCode::DIG:      return 3;
         case OpCode::PLANT:    return 2;
+        case OpCode::SUMMON:   return 5;
         default:               return 0;   // WAIT, HALT, JUMP*, CALL, RET
     }
 }

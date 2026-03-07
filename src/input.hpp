@@ -13,7 +13,7 @@ enum class Action {
     // Terrain
     Dig, Plant, PlacePortal,
     // Recording / agents
-    Record, CycleRecording, Deploy, Summon,
+    Record, CycleRecording, Summon,
     // Grid
     SwitchGrid,
     // Camera
