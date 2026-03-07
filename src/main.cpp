@@ -12,6 +12,33 @@
 #include "audio.hpp"
 #include "ui.hpp"
 
+// ─── Terrain-aware tile picking ───────────────────────────────────────────────
+//
+// screenToTile assumes tileZ == cam.z (f == 1). For elevated tiles, f > 1 and
+// the tile is shifted on screen. This function does a two-pass correction:
+// first pick at cam.z to get an approximate (x,y), then look up the actual
+// terrain level there and redo the inverse projection at that z.
+
+static TilePos screenToTileAccurate(int px, int py,
+                                    const Camera& cam, const Terrain& terrain) {
+    // Pass 1: assume z = cam.z
+    TilePos t0 = Renderer::screenToTile(px, py, cam);
+    int z0 = terrain.levelAt(t0);
+
+    // Pass 2: re-solve using z0
+    float ts   = Renderer::TILE_SIZE * cam.zoom;
+    float tsH  = Renderer::TILE_H    * cam.zoom;
+    float step = static_cast<float>(Renderer::Z_STEP) * cam.zoom;
+    float dz   = static_cast<float>(z0) - cam.z;
+    float f    = 1.0f + dz / static_cast<float>(Renderer::Z_PERSP);
+    float tileX = cam.pos.x + (px - Renderer::VIEWPORT_W * 0.5f) / (ts * f);
+    float tileY = cam.pos.y + (py - Renderer::VIEWPORT_H * 0.5f + dz * step * f) / tsH;
+
+    return { static_cast<int>(std::floor(tileX)),
+             static_cast<int>(std::floor(tileY)),
+             z0 };
+}
+
 // ─── Entity display name ──────────────────────────────────────────────────────
 
 static const char* entityTypeName(EntityType t) {
@@ -118,7 +145,7 @@ int main() {
             if (e.type == SDL_MOUSEMOTION) {
                 mouseX = e.motion.x;
                 mouseY = e.motion.y;
-                hoveredTile = Renderer::screenToTile(mouseX, mouseY, camera);
+                hoveredTile = screenToTileAccurate(mouseX, mouseY, camera, game.terrain());
 
                 // Update context menu hovered item.
                 if (ui.contextMenu.active) {
@@ -182,7 +209,7 @@ int main() {
                 if (e.button.button == SDL_BUTTON_RIGHT) {
                     if (!ui.isOpen()) {
                         ui.contextMenu.active = false;
-                        TilePos tile = Renderer::screenToTile(mx, my, camera);
+                        TilePos tile = screenToTileAccurate(mx, my, camera, game.terrain());
                         contextTile  = tile;
                         const Entity*  ent   = game.entityAtTile(tile);
                         TileType       ttype = game.terrain().typeAt(tile);
