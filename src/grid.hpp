@@ -61,6 +61,12 @@ public:
     // ── Voltage (computed fresh each tick by BFS from Battery entities) ───────
     std::unordered_map<TilePos, int, TilePosHash>  voltage;
 
+    // ── Water levels (Phase 14) ───────────────────────────────────────────────
+    // Per-tile depth of water (arbitrary units). Updated by tickWater().
+    // Tiles with level ≤ 0.1 are converted to Puddle and removed from this map.
+    // Total volume is conserved as water spreads.
+    std::unordered_map<TilePos, float, TilePosHash> waterLevel;
+
     bool isBounded() const { return width > 0 && height > 0; }
     bool inBounds(TilePos p) const {
         return !isBounded() || (p.x >= 0 && p.x < width &&

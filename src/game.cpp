@@ -154,11 +154,12 @@ Game::Game() {
     spawnStatic(EntityType::Lightbulb,  3,  0);   // on grass  → unlit
 
     // ── Phase 14 demo: water pool south-east of spawn ────────────────────────
-    // Placed at (20,20) — far enough away that water spreading won't reach the
-    // spawn area during tests (~50 ticks).
-    world.terrain.setType({20, 20}, TileType::Water);
-    world.terrain.setType({21, 20}, TileType::Water);
-    world.terrain.setType({20, 21}, TileType::Water);
+    // Starting level 1.0 each; will spread and thin until level drops to Puddle.
+    const TilePos waterDemo[] = {{20, 20}, {21, 20}, {20, 21}};
+    for (const TilePos& p : waterDemo) {
+        world.terrain.setType(p, TileType::Water);
+        world.waterLevel[p] = 1.0f;
+    }
 }
 
 // ─── Top-level tick ──────────────────────────────────────────────────────────
@@ -718,6 +719,7 @@ void tickFire(Grid& grid, EntityRegistry& registry, Tick currentTick) {
             grid.terrain.setType(pos, TileType::BareEarth);
             grid.fireTileExpiry.erase(pos);
             grid.tileFireExp.erase(pos);
+            grid.waterLevel.erase(pos);   // in case fire tile was converted from water
         }
     }
 
@@ -844,38 +846,61 @@ void tickVoltage(Grid& grid, EntityRegistry& registry) {
 
 // ─── Water simulation ─────────────────────────────────────────────────────────
 //
-// Each tick, every Water tile tries to expand to adjacent non-water tiles that are
-// at the same height or lower (and no more than 1 level lower — no waterfall leaps).
-// New tiles are batched so water expands by exactly one step per tick.
+// Each water tile carries a floating-point level (depth). Each tick it distributes
+// its level equally among itself and eligible adjacent non-water tiles. Total
+// volume is conserved. Tiles that drop to ≤ 0.1 convert to Puddle and stop spreading.
 
 void tickWater(Grid& grid) {
     static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
 
-    // Collect all current Water tiles.
-    std::vector<TilePos> waterTiles;
-    for (const auto& [pos, type] : grid.terrain.overrides())
-        if (type == TileType::Water) waterTiles.push_back(pos);
+    // Accumulate level deltas for this tick (applied after all sources are processed).
+    std::unordered_map<TilePos, float, TilePosHash> delta;
 
-    // Expand to eligible adjacent tiles.
-    std::vector<TilePos> toFlood;
-    for (const TilePos& pos : waterTiles) {
-        int srcLevel = grid.terrain.levelAt(pos);
+    for (const auto& [pos, level] : grid.waterLevel) {
+        if (level <= 0.1f) continue;   // will be converted to Puddle below
+
+        int srcTerrain = grid.terrain.levelAt(pos);
+
+        std::vector<TilePos> eligible;
         for (const auto& d : kDirs4) {
             TilePos adj = pos + d;
-            // Don't overwrite portals, fire, or other significant tile types.
             TileType adjType = grid.terrain.typeAt(adj);
-            if (adjType == TileType::Water || adjType == TileType::Fire ||
-                adjType == TileType::Portal) continue;
-            int dstLevel = grid.terrain.levelAt(adj);
-            // Water flows downhill or level; won't leap off cliffs.
-            if (dstLevel > srcLevel) continue;
-            if (srcLevel - dstLevel > 1) continue;
-            toFlood.push_back(adj);
+            if (adjType == TileType::Water || adjType == TileType::Portal ||
+                adjType == TileType::Fire) continue;
+            int dstTerrain = grid.terrain.levelAt(adj);
+            if (dstTerrain > srcTerrain || srcTerrain - dstTerrain > 1) continue;
+            eligible.push_back(adj);
+        }
+
+        if (eligible.empty()) continue;
+
+        // Distribute level evenly: origin keeps 1 share, each neighbor gets 1 share.
+        float share = level / static_cast<float>(eligible.size() + 1);
+        delta[pos] -= level - share;   // origin loses the distributed portion
+        for (const TilePos& n : eligible)
+            delta[n] += share;
+    }
+
+    // Apply deltas.
+    for (const auto& [pos, dv] : delta) {
+        float newLevel = grid.waterLevel[pos] + dv;
+        if (newLevel <= 0.1f) {
+            grid.waterLevel.erase(pos);
+            grid.terrain.setType(pos, TileType::Puddle);
+        } else {
+            grid.waterLevel[pos] = newLevel;
+            grid.terrain.setType(pos, TileType::Water);
         }
     }
 
-    for (const TilePos& pos : toFlood)
-        grid.terrain.setType(pos, TileType::Water);
+    // Convert any remaining sub-threshold water tiles to Puddle.
+    std::vector<TilePos> toPuddle;
+    for (const auto& [pos, level] : grid.waterLevel)
+        if (level <= 0.1f) toPuddle.push_back(pos);
+    for (const TilePos& pos : toPuddle) {
+        grid.terrain.setType(pos, TileType::Puddle);
+        grid.waterLevel.erase(pos);
+    }
 }
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
@@ -1125,6 +1150,12 @@ bool Game::load(const std::string& path) {
     selectedRecording_ = static_cast<size_t>(rd<uint64_t>(f));
     if (selectedRecording_ >= recorder_.recordings.size())
         selectedRecording_ = 0;
+
+    // Initialise waterLevel for any Water tiles found in saved terrain overrides.
+    for (auto& [id, grid] : grids_)
+        for (const auto& [pos, type] : grid.terrain.overrides())
+            if (type == TileType::Water && !grid.waterLevel.count(pos))
+                grid.waterLevel[pos] = 1.0f;
 
     return true;
 }

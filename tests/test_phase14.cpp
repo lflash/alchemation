@@ -40,8 +40,7 @@ TEST_CASE("Terrain setType can set and read Water") {
 // ─── tickWater: flow ─────────────────────────────────────────────────────────
 
 TEST_CASE("tickWater: water expands to adjacent same-level tile in one tick") {
-    // Scan a small area of the Perlin terrain to find two adjacent tiles at
-    // the same level. These are guaranteed to exist in any reasonable noise field.
+    // Find two adjacent tiles at the same terrain level.
     Terrain ref;
     const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
     TilePos src{0,0,0}, dst{0,0,0};
@@ -60,16 +59,60 @@ TEST_CASE("tickWater: water expands to adjacent same-level tile in one tick") {
 
     Grid grid{1};
     grid.terrain.setType(src, TileType::Water);
+    grid.waterLevel[src] = 1.0f;
     tickWater(grid);
+    // After one tick, water should have spread to the neighbour.
     CHECK(grid.terrain.typeAt(dst) == TileType::Water);
 }
 
-TEST_CASE("tickWater: existing water tile stays Water after tickWater") {
+TEST_CASE("tickWater: high-level water stays Water after one tick") {
+    // A tile with level 1.0 spreading to 1 neighbour keeps 0.5 — above threshold.
     Grid grid{1};
     TilePos p{5, 5, 0};
     grid.terrain.setType(p, TileType::Water);
+    grid.waterLevel[p] = 1.0f;
     tickWater(grid);
     CHECK(grid.terrain.typeAt(p) == TileType::Water);
+}
+
+TEST_CASE("tickWater: low-level water converts to Puddle") {
+    // A tile with level 0.05 (below 0.1 threshold) should convert to Puddle
+    // without spreading.
+    Grid grid{1};
+    TilePos p{5, 5, 0};
+    grid.terrain.setType(p, TileType::Water);
+    grid.waterLevel[p] = 0.05f;
+    tickWater(grid);
+    CHECK(grid.terrain.typeAt(p) == TileType::Puddle);
+    CHECK(grid.waterLevel.count(p) == 0);
+}
+
+TEST_CASE("tickWater: total volume is conserved after one tick") {
+    // Seed a single water tile at level 1.0 in an area with same-level neighbours.
+    Terrain ref;
+    const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
+    TilePos src{0,0,0};
+    bool found = false;
+    for (int x = -20; x <= 20 && !found; ++x) {
+        for (int y = -20; y <= 20 && !found; ++y) {
+            TilePos s{x, y, 0};
+            int sl = ref.levelAt(s);
+            int count = 0;
+            for (const auto& d : kDirs4)
+                if (ref.levelAt(s + d) == sl) ++count;
+            if (count >= 1) { src = s; found = true; }
+        }
+    }
+    REQUIRE(found);
+
+    Grid grid{1};
+    grid.terrain.setType(src, TileType::Water);
+    grid.waterLevel[src] = 1.0f;
+    tickWater(grid);
+
+    float total = 0.0f;
+    for (const auto& [pos, lvl] : grid.waterLevel) total += lvl;
+    CHECK(total == doctest::Approx(1.0f).epsilon(0.001f));
 }
 
 TEST_CASE("tickWater: water does not overwrite Portal tiles") {
@@ -77,6 +120,7 @@ TEST_CASE("tickWater: water does not overwrite Portal tiles") {
     TilePos water{0, 0, 0};
     TilePos portal{1, 0, 0};
     grid.terrain.setType(water,  TileType::Water);
+    grid.waterLevel[water] = 1.0f;
     grid.terrain.setType(portal, TileType::Portal);
 
     tickWater(grid);
@@ -89,6 +133,7 @@ TEST_CASE("tickWater: water does not overwrite Fire tiles") {
     TilePos water{0, 0, 0};
     TilePos fire{1, 0, 0};
     grid.terrain.setType(water, TileType::Water);
+    grid.waterLevel[water] = 1.0f;
     grid.terrain.setType(fire,  TileType::Fire);
 
     tickWater(grid);
