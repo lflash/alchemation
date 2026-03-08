@@ -7,23 +7,23 @@
 
 // ─── Shallow water simulation ──────────────────────────────────────────────────
 //
-// Simplified shallow water equations on a discrete tile grid.
-// Per water entity (one per wet tile):
+// Flux-based spreading: each tick, water flows to adjacent tiles with lower
+// surface height (h + terrain level).
 //
-//   1. Gravity step:  accelerate (vx, vy) toward lower surface height
-//                     surface(p) = h(p) + terrain.levelAt(p)
-//   2. Advect step:   transfer mass in velocity direction; clamp to avoid over-draining
+// Flux per direction = min(surface_diff * RATE, h * MAX_FLUX_DIR).
+// A tile can only overflow onto a new (dry) neighbour when its depth h is
+// above POOL_DEPTH.  Below that threshold the water equalises with existing
+// wet neighbours and stays put — forming a stable puddle or shore.
 //
-// Volume is approximately conserved (small loss at despawn threshold).
 // Tiles blocked by Portal or Fire do not receive flow.
 
 void tickFluid(Grid& grid, ComponentStore<FluidComponent>& fluids,
                EntityRegistry& registry) {
     static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
-    constexpr float G      = 0.4f;    // gravity acceleration per tick
-    constexpr float DAMP   = 0.97f;   // velocity damping per tick
-    constexpr float H_MIN  = 0.02f;   // below this → despawn
-    constexpr float MAX_FLUX = 0.25f; // max fraction of h transferred per tick per direction
+    constexpr float H_MIN        = 0.02f;  // below this → despawn
+    constexpr float RATE         = 0.25f;  // fraction of surface diff transferred
+    constexpr float MAX_FLUX_DIR = 0.10f;  // max fraction of h per direction per tick
+    constexpr float POOL_DEPTH   = 0.30f;  // source must be deeper than this to wet new tiles
 
     // ── Build tile → EntityID map for fast neighbour lookup ───────────────────
     std::unordered_map<TilePos, EntityID, TilePosHash> waterMap;
@@ -31,14 +31,6 @@ void tickFluid(Grid& grid, ComponentStore<FluidComponent>& fluids,
         const Entity* e = registry.get(eid);
         if (e && e->type == EntityType::Water && fluids.has(eid))
             waterMap[e->pos] = eid;
-    }
-
-    // ── Snapshot velocities so gravity step reads consistent state ─────────────
-    struct VSnap { float vx, vy; };
-    std::unordered_map<EntityID, VSnap> vsnap;
-    for (auto& [pos, eid] : waterMap) {
-        FluidComponent* fc = fluids.get(eid);
-        vsnap[eid] = { fc->vx, fc->vy };
     }
 
     // ── Helper: surface height at a tile (h + terrain level) ──────────────────
@@ -51,53 +43,46 @@ void tickFluid(Grid& grid, ComponentStore<FluidComponent>& fluids,
     auto canFlow = [&](TilePos from, TilePos to) -> bool {
         TileType toType = grid.terrain.typeAt(to);
         if (toType == TileType::Portal || toType == TileType::Fire) return false;
-        // Allow flow only if terrain height difference ≤ 1 (consistent with movement).
         return std::abs(grid.terrain.levelAt(to) - grid.terrain.levelAt(from)) <= 1;
     };
 
-    // ── Gravity step: update velocity from surface gradient ───────────────────
-    for (auto& [pos, eid] : waterMap) {
-        FluidComponent* fc = fluids.get(eid);
-        float dvx = G * (surfaceAt({pos.x-1,pos.y,pos.z}) - surfaceAt({pos.x+1,pos.y,pos.z})) * 0.5f;
-        float dvy = G * (surfaceAt({pos.x,pos.y-1,pos.z}) - surfaceAt({pos.x,pos.y+1,pos.z})) * 0.5f;
-        fc->vx = (fc->vx + dvx) * DAMP;
-        fc->vy = (fc->vy + dvy) * DAMP;
-    }
-
-    // ── Advect step: transfer mass based on velocity ───────────────────────────
-    std::unordered_map<TilePos, float, TilePosHash> newH;  // newly wet tiles
-    std::unordered_map<EntityID, float>             dh;    // deltas for existing cells
+    // ── Flux step: transfer mass to lower neighbours ───────────────────────────
+    std::unordered_map<TilePos, float, TilePosHash> newH;
+    std::unordered_map<EntityID, float>             dh;
 
     for (auto& [pos, eid] : waterMap) {
         FluidComponent* fc = fluids.get(eid);
-        float h = fc->h;
+        float h  = fc->h;
+        float S  = surfaceAt(pos);
 
-        // x-direction
-        if (std::abs(fc->vx) > 0.001f) {
-            TilePos to = {pos.x + (fc->vx > 0 ? 1 : -1), pos.y, pos.z};
-            if (canFlow(pos, to)) {
-                float flux = std::min(std::abs(fc->vx) * h, h * MAX_FLUX);
-                if (flux > H_MIN) {
-                    dh[eid] -= flux;
-                    auto it = waterMap.find(to);
-                    if (it != waterMap.end()) dh[it->second] += flux;
-                    else                      newH[to] += flux;
-                }
-            }
+        float fluxes[4] = {};
+        float totalFlux = 0.f;
+        for (int d = 0; d < 4; ++d) {
+            TilePos npos = pos + kDirs4[d];
+            if (!canFlow(pos, npos)) continue;
+            float diff = S - surfaceAt(npos);
+            if (diff <= 0.f) continue;
+            float flux = std::min(diff * RATE, h * MAX_FLUX_DIR);
+            // Only overflow onto a new dry tile when source is deep enough.
+            bool isWet = waterMap.count(npos) > 0;
+            if (!isWet && h <= POOL_DEPTH) continue;
+            fluxes[d]  = flux;
+            totalFlux += flux;
         }
 
-        // y-direction
-        if (std::abs(fc->vy) > 0.001f) {
-            TilePos to = {pos.x, pos.y + (fc->vy > 0 ? 1 : -1), pos.z};
-            if (canFlow(pos, to)) {
-                float flux = std::min(std::abs(fc->vy) * h, h * MAX_FLUX);
-                if (flux > H_MIN) {
-                    dh[eid] -= flux;
-                    auto it = waterMap.find(to);
-                    if (it != waterMap.end()) dh[it->second] += flux;
-                    else                      newH[to] += flux;
-                }
-            }
+        if (totalFlux < 1e-5f) continue;
+
+        // Scale down if total outflow would exceed available water.
+        float scale = (totalFlux > h * 0.99f) ? (h * 0.99f / totalFlux) : 1.f;
+
+        for (int d = 0; d < 4; ++d) {
+            if (fluxes[d] <= 0.f) continue;
+            float flux   = fluxes[d] * scale;
+            TilePos npos = pos + kDirs4[d];
+            dh[eid] -= flux;
+            auto it = waterMap.find(npos);
+            if (it != waterMap.end()) dh[it->second] += flux;
+            else                      newH[npos]      += flux;
         }
     }
 
@@ -109,6 +94,11 @@ void tickFluid(Grid& grid, ComponentStore<FluidComponent>& fluids,
         fc->h += delta;
         if (fc->h < H_MIN) toDespawn.push_back(eid);
     }
+    // Also catch entities whose h was already below H_MIN with no outflow.
+    for (auto& [pos, eid] : waterMap) {
+        FluidComponent* fc = fluids.get(eid);
+        if (fc && fc->h < H_MIN) toDespawn.push_back(eid);
+    }
     for (EntityID eid : toDespawn) {
         Entity* e = registry.get(eid);
         if (e) grid.remove(eid, *e);
@@ -119,9 +109,7 @@ void tickFluid(Grid& grid, ComponentStore<FluidComponent>& fluids,
     // ── Spawn Water entities for newly wet tiles ──────────────────────────────
     for (auto& [pos, h] : newH) {
         if (h < H_MIN) continue;
-        // z from terrain so the water entity sits at the right height level.
         TilePos spawnPos = {pos.x, pos.y, grid.terrain.levelAt(pos)};
-        // Skip if already occupied by a water entity (shouldn't happen but guard it).
         if (waterMap.count(spawnPos)) continue;
         EntityID newEid = registry.spawn(EntityType::Water, spawnPos);
         Entity*  e      = registry.get(newEid);

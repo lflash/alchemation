@@ -161,8 +161,8 @@ enum class TileType {
     Grass, BareEarth, Portal, Fire, Puddle,
     // Summoning mediums — each yields one golem type (Phase 12)
     Mud, Stone, Clay, Bush, Wood, Iron, Copper,
-    // Fluid (Phase 14)
-    Water,   // carries a depth level; spreads until level ≤ 0.1, then becomes Puddle
+    // Straw (Phase 18)
+    Straw,   // result of scything Grass; harvestable material
 };
 
 // AudioSystem-internal playback enum (audio.hpp):
@@ -502,11 +502,13 @@ class Terrain {
 sparse `unordered_map<TilePos, StimulusField>` per `Grid`. Spread and decay are one generic pass.
 Adding a new stimulus type = new enum value; no new tick code.
 
-**Wet vs Water:** `Wet` is a stimulus that agents can sense via `JUMP_IF Wet`. It fires when an
-agent stands on a `Puddle` or `Water` tile. `Water` is a fluid tile type with its own spreading
-dynamics (Phase 14 — implemented). A Water tile carries a depth level stored in `Grid::waterLevel`;
-each tick `tickWater()` spreads volume to adjacent same-or-lower-level tiles, conserving total
-volume. When a tile's level drops to ≤ 0.1 it converts to `Puddle` and is removed from the map.
+**Wet vs Water:** `Wet` is a stimulus agents sense via `JUMP_IF Wet`. It fires when an agent
+stands on a tile occupied by a `EntityType::Water` entity with `h > epsilon`. Water is not a
+tile type — it is an entity carrying a `FluidComponent { float h, vx, vy }`. Each tick
+`tickFluid()` transfers depth between adjacent cells using a flux-based equalisation model:
+water spreads to lower-surface neighbours proportional to the height difference, but only
+overflows onto new (dry) tiles when the source depth exceeds `POOL_DEPTH` (0.30). Below that
+threshold water stays put, forming a stable puddle or shore.
 
 ### Alchemy Engine
 
@@ -935,8 +937,8 @@ Default keyboard bindings (all remappable via K panel or `settings.dat`):
 **Environmental interactions:**
 | Tile | Effect on entity |
 |---|---|
-| Water | Entity speed halved on arrival (`speed = baseSpeed * 0.5`). |
-| Fire | Fire tile adjacent to Water is immediately extinguished each tick. |
+| Water entity | Entity speed halved on arrival (`speed = baseSpeed * 0.5`). Water is `EntityType::Water` with a `FluidComponent`; all movers pass through (CollisionResult::Pass). |
+| Fire | Fire tile adjacent to a Water entity is immediately extinguished each tick (→ BareEarth). |
 
 **Mana floor:** player mana never drops below 1 — enforced after every mana-spending action (Plant, Deploy, Summon).
 
@@ -1035,6 +1037,15 @@ height system (tiles above a `levelAt` threshold become mountain terrain regardl
 - **Terrain**: Fire tiles, hostile environment.
 - **Creatures**: TBD.
 - **Ore deposits**: Iron, Sulphur. Spawn as ore entities (see Ore & Smelting below).
+
+#### Lake
+- **Terrain**: Low-elevation depression pre-seeded with Water entities at world generation.
+  The fluid simulation fills the basin and maintains a stable water surface; depth varies
+  with terrain. Shoreline forms naturally where water depth drops below `POOL_DEPTH`.
+- **Creatures**: TBD (fish, amphibians, water spirits — deferred).
+- **Materials**: Water (collectable via bucket-type item, TBD).
+- **Ecosystem**: Lake tiles slow movement. Fire tiles adjacent to the lake are extinguished.
+  Lake biome selected by biome noise in conjunction with low terrain height.
 
 #### Mountains
 - **Terrain**: High-elevation tiles driven by the height system (levelAt threshold).

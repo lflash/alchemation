@@ -520,53 +520,57 @@ Reworked the golem summoning system after Phase 15/16:
 
 ---
 
-## Phase 17 — Fluid Dynamics
+## Phase 17 — Fluid Dynamics ✓
 
 Introduces `ComponentStore<T>` as the first ECS scaffold, and replaces the old
 `TileType::Water` / `tickWater()` model with entity-based shallow water simulation.
 
-### ComponentStore
-- [ ] `ComponentStore<T>` — thin wrapper: `unordered_map<EntityID, T>` with `add()`, `get()`,
+### ComponentStore ✓
+- [x] `ComponentStore<T>` — thin wrapper: `unordered_map<EntityID, T>` with `add()`, `get()`,
       `remove()`, `has()`, `all()`. Lives in `component_store.hpp`. No dependencies.
-- [ ] `FluidComponent { float h, vx, vy; }` — first component. Stored in a
+- [x] `FluidComponent { float h, vx, vy; }` — first component. Stored in a
       `ComponentStore<FluidComponent>` owned by `Game`.
 
-### Fluid entities
-- [ ] `EntityType::Water` added; one Water entity per wet tile
-- [ ] `TileType::Water` removed from enum; old `tickWater()` removed from `stimulus.cpp`
-- [ ] Water entities have no sprite, no shadow, no facing indicator — rendered as a tile overlay
+### Fluid entities ✓
+- [x] `EntityType::Water` added; one Water entity per wet tile
+- [x] `TileType::Water` removed from enum; old `tickWater()` removed from `stimulus.cpp`
+- [x] Water entities have no sprite, no shadow, no facing indicator — rendered as a tile overlay
       based on `FluidComponent::h`
+- [x] All movers pass through Water entities (`resolveCollision` returns Pass for Water occupant)
 
-### Shallow water simulation (`tickFluid`)
-- [ ] Per-tick update of `(h, vx, vy)` for every entity with a `FluidComponent`
-- [ ] **Force step**: add gravity contribution from terrain height gradient to velocity
-- [ ] **Advect step**: transfer mass between neighbouring cells proportional to velocity;
-      clamp to avoid negative depth
-- [ ] Spawn new Water entity + FluidComponent for newly wet neighbour tiles
-- [ ] Despawn Water entity when `h` drops below threshold
+### Shallow water simulation (`tickFluid`) ✓
+- [x] Flux-based equalisation: each tick water flows to adjacent tiles with lower surface height
+      (`h + terrain level`); flux = `min(diff * RATE, h * MAX_FLUX_DIR)` per direction
+- [x] Water only overflows onto new (dry) tiles when source depth `h > POOL_DEPTH` (0.30);
+      below that threshold it equalises with existing wet neighbours and forms a stable puddle/shore
+- [x] Total outflow scaled so source never drains more than 99% of `h` in one tick
+- [x] Spawn new Water entity + FluidComponent for newly wet neighbour tiles
+- [x] Despawn Water entity when `h` drops below `H_MIN` (0.02)
 
-### Preserved behaviours
-- [ ] `Wet` stimulus condition: fires when entity's tile has a Water entity with `h > epsilon`
-- [ ] Water slows movement (speed halved on arrival at tile occupied by Water entity)
-- [ ] Fire × Water extinguish: Fire tile adjacent to Water entity → BareEarth (in `tickFire`)
+### Preserved behaviours ✓
+- [x] `Wet` stimulus condition: fires when entity's tile has a Water entity with `h > epsilon`
+- [x] Water slows movement (speed halved on arrival at tile occupied by Water entity)
+- [x] Fire × Water extinguish: Fire tile adjacent to Water entity → BareEarth (in `tickFire`)
 
-### Save format
-- [ ] Bump save version; serialise Water entities and their `FluidComponent` data
+### Save format ✓
+- [x] Save version bumped v9 → v10; Water entities serialised with `FluidComponent` (h, vx, vy)
 
-### Tests
-- [ ] `ComponentStore`: add, get, remove, has; iterate all; get on missing ID returns nullptr
-- [ ] `FluidComponent` present on Water entity; absent on Goblin
-- [ ] Water spreads to adjacent lower tile over N ticks
-- [ ] Water entity despawns when `h` reaches zero
-- [ ] `Wet` condition fires when standing on Water entity tile; not on dry tile
-- [ ] Fire adjacent to Water entity → extinguished
+### Tests ✓ (18 new tests across test_phase14.cpp and test_phase17.cpp)
+- [x] `ComponentStore`: add, get, remove, has; iterate all; get on missing ID returns nullptr
+- [x] `FluidComponent` present on Water entity; absent on Goblin
+- [x] Water spreads to adjacent lower tile over N ticks
+- [x] Water entity despawns when `h` reaches zero
+- [x] `Wet` condition fires when standing on Water entity tile; not on dry tile
+- [x] Fire adjacent to Water entity → extinguished
+- [x] Water does not flow into Portal or Fire tiles
+- [x] `fluidOverlay()` returns water tiles for active grid
 
 ---
 
 ## Phase 18 — World Generation
 
 ### Biome map
-- [ ] Second Perlin noise layer → biome type per tile (Grassland, Forest, Volcanic; Mountains from height threshold)
+- [ ] Second Perlin noise layer → biome type per tile (Grassland, Forest, Volcanic, Lake; Mountains from height threshold)
 - [ ] `Terrain::biomeAt(TilePos)` — returns `Biome` enum; deterministic, cached like `typeAt`
 - [ ] World gen seeds tile types and entities by biome on first load
 
@@ -583,6 +587,7 @@ Introduces `ComponentStore<T>` as the first ECS scaffold, and replaces the old
 - [ ] Warrens + rabbits seeded in Grassland
 - [ ] Trees seeded densely in Forest biome
 - [ ] Ore entities seeded in clumps in Mountain / Volcanic terrain
+- [ ] Lake basins pre-seeded with Water entities; fluid simulation fills naturally from terrain depression
 
 ### Caves
 - [ ] Cave = bounded room grid containing ore entities; entrance = portal tile in world terrain
