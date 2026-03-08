@@ -19,6 +19,8 @@ enum class OpCode : uint8_t {
     CALL,           // push return addr, jump; addr = target PC
     RET,            // pop return addr, jump back
     SUMMON,         // summon golem from medium tile ahead; new golem inherits agent's recording
+    SCYTHE,         // convert Grass tile ahead to Straw
+    MINE,           // make ore entity ahead Pushable
 };
 
 // ─── RelDir ──────────────────────────────────────────────────────────────────
@@ -77,6 +79,8 @@ constexpr int instrCost(OpCode op, RelDir dir = RelDir::Forward) {
         case OpCode::DIG:      return 3;
         case OpCode::PLANT:    return 2;
         case OpCode::SUMMON:   return 5;
+        case OpCode::SCYTHE:   return 2;
+        case OpCode::MINE:     return 3;
         default:               return 0;   // WAIT, HALT, JUMP*, CALL, RET
     }
 }

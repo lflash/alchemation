@@ -14,6 +14,8 @@ struct VMResult {
     bool    wantPlant  = false;   // plant mushroom in agent's facing direction
     bool     wantSummon   = false;   // summon golem from medium tile in agent's facing direction
     uint16_t summonRecIdx = 0;       // recording index to assign to the summoned golem
+    bool     wantScythe   = false;   // convert Grass ahead to Straw
+    bool     wantMine     = false;   // make ore entity ahead Pushable
 };
 
 class RoutineVM {

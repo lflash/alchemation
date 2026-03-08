@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstring>
 #include <fstream>
+#include <random>
 
 // ─── Summon helpers ───────────────────────────────────────────────────────────
 
@@ -166,6 +167,13 @@ Game::Game() {
         world.add(weid, *registry_.get(weid));
         fluidComponents_.add(weid, {1.0f, 0.f, 0.f});
     }
+
+    // ── Phase 18: pre-mark manually-populated chunks as generated ────────────
+    // Prevents world gen from spawning on top of the hand-placed demo content.
+    // Covers chunks (-1,-1) through (1,1) — a 3×3 block around the origin.
+    for (int cy = -1; cy <= 1; ++cy)
+        for (int cx = -1; cx <= 1; ++cx)
+            world.generatedChunks.insert({cx, cy, 0});
 }
 
 // ─── Top-level tick ──────────────────────────────────────────────────────────
@@ -190,6 +198,11 @@ void Game::tick(const Input& input, Tick currentTick) {
         tickVoltage(grid, registry_);
         tickFluid(grid, fluidComponents_, registry_);
         grid.events.flush();
+        // Lazy world generation: expand the world around the active player.
+        if (!grid.isBounded() && id == GRID_WORLD) {
+            const Entity* player = registry_.get(playerID_);
+            if (player) maybeGenerateChunks(grid, player->pos);
+        }
     }
 }
 
@@ -590,7 +603,32 @@ void Game::tickPlayerInput(const Input& input) {
     }
 
 
-    // G: summon golem from medium tile ahead
+    // G: scythe — convert Grass ahead to Straw
+    if (input.pressed(Action::Scythe) && player) {
+        if (grid.terrain.typeAt(ahead) == TileType::Grass) {
+            grid.terrain.setType(ahead, TileType::Straw);
+            recorder_.recordScythe();
+        }
+    }
+
+    // M: mine — make ore entity ahead Pushable
+    if (input.pressed(Action::Mine) && player) {
+        for (EntityID cid : grid.spatial.at(ahead)) {
+            Entity* cand = registry_.get(cid);
+            if (!cand) continue;
+            bool isOre = (cand->type == EntityType::IronOre  ||
+                          cand->type == EntityType::CopperOre ||
+                          cand->type == EntityType::CoalOre   ||
+                          cand->type == EntityType::SulphurOre);
+            if (isOre) {
+                cand->capabilities |= Capability::Pushable;
+                recorder_.recordMine();
+                break;
+            }
+        }
+    }
+
+    // E: summon golem from medium tile ahead
     if (input.pressed(Action::Summon) && player) {
         // Always record the intent when recording, regardless of success.
         recorder_.recordSummon(selectedRecording_);
@@ -723,6 +761,21 @@ void Game::tickVM(Grid& grid) {
                 grid.terrain.restore(target);
                 audioEvents_.push_back(AudioEvent::Plant);
             }
+        } else if (res.wantScythe) {
+            TilePos target = ent->pos + dirToDelta(ent->facing);
+            if (grid.terrain.typeAt(target) == TileType::Grass)
+                grid.terrain.setType(target, TileType::Straw);
+        } else if (res.wantMine) {
+            TilePos target = ent->pos + dirToDelta(ent->facing);
+            for (EntityID cid : grid.spatial.at(target)) {
+                Entity* cand = registry_.get(cid);
+                if (!cand) continue;
+                bool isOre = (cand->type == EntityType::IronOre  ||
+                              cand->type == EntityType::CopperOre ||
+                              cand->type == EntityType::CoalOre   ||
+                              cand->type == EntityType::SulphurOre);
+                if (isOre) { cand->capabilities |= Capability::Pushable; break; }
+            }
         } else if (res.wantSummon) {
             TilePos target = ent->pos + dirToDelta(ent->facing);
             const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(target));
@@ -750,6 +803,91 @@ void Game::tickVM(Grid& grid) {
         agentSlots_[gid] = std::move(slot);
 }
 
+
+// ─── Lazy world generation (Phase 18) ────────────────────────────────────────
+
+// Floor-division that handles negative numerators correctly.
+static int floorDiv(int a, int b) {
+    return a / b - (a % b != 0 && (a ^ b) < 0);
+}
+
+void Game::maybeGenerateChunks(Grid& grid, TilePos playerPos) {
+    int pcx = floorDiv(playerPos.x, CHUNK_SIZE);
+    int pcy = floorDiv(playerPos.y, CHUNK_SIZE);
+
+    for (int cy = pcy - 2; cy <= pcy + 2; ++cy) {
+        for (int cx = pcx - 2; cx <= pcx + 2; ++cx) {
+            TilePos key = {cx, cy, 0};
+            if (grid.generatedChunks.count(key)) continue;
+            grid.generatedChunks.insert(key);
+            generateChunk(grid, cx, cy);
+        }
+    }
+}
+
+void Game::generateChunk(Grid& grid, int cx, int cy) {
+    // Seed RNG deterministically from chunk coordinates.
+    uint32_t seed = static_cast<uint32_t>(cx * 73856093u ^ cy * 19349663u);
+    std::mt19937 rng(seed);
+
+    int x0 = cx * CHUNK_SIZE;
+    int y0 = cy * CHUNK_SIZE;
+
+    // Biome from chunk centre.
+    TilePos centre = {x0 + CHUNK_SIZE / 2, y0 + CHUNK_SIZE / 2, 0};
+    Biome biome = grid.terrain.biomeAt(centre);
+
+    std::uniform_real_distribution<float> chance(0.f, 1.f);
+    std::uniform_int_distribution<int>    xi(x0, x0 + CHUNK_SIZE - 1);
+    std::uniform_int_distribution<int>    yi(y0, y0 + CHUNK_SIZE - 1);
+
+    // Helper: spawn one entity at a random position in the chunk.
+    auto trySpawn = [&](EntityType type, float probability) {
+        if (chance(rng) >= probability) return;
+        int x = xi(rng), y = yi(rng);
+        TilePos p = {x, y, 0};
+        p.z = grid.terrain.levelAt(p);
+        EntityID eid = registry_.spawn(type, p);
+        grid.add(eid, *registry_.get(eid));
+    };
+
+    switch (biome) {
+        case Biome::Grassland:
+            trySpawn(EntityType::Rabbit, 0.30f);
+            trySpawn(EntityType::Warren, 0.10f);
+            break;
+
+        case Biome::Forest:
+            trySpawn(EntityType::Tree,     0.70f);
+            trySpawn(EntityType::Tree,     0.50f);
+            trySpawn(EntityType::Mushroom, 0.20f);
+            break;
+
+        case Biome::Volcanic:
+            trySpawn(EntityType::Rock,       0.60f);
+            trySpawn(EntityType::SulphurOre, 0.30f);
+            trySpawn(EntityType::CoalOre,    0.20f);
+            break;
+
+        case Biome::Lake:
+            // Pre-seed with water to let the fluid system spread it.
+            for (int i = 0; i < 4; ++i) {
+                int x = xi(rng), y = yi(rng);
+                TilePos p = {x, y, 0};
+                p.z = grid.terrain.levelAt(p);
+                EntityID weid = registry_.spawn(EntityType::Water, p);
+                grid.add(weid, *registry_.get(weid));
+                fluidComponents_.add(weid, {1.0f, 0.f, 0.f});
+            }
+            break;
+
+        case Biome::Mountains:
+            trySpawn(EntityType::Rock,      0.50f);
+            trySpawn(EntityType::IronOre,   0.40f);
+            trySpawn(EntityType::CopperOre, 0.30f);
+            break;
+    }
+}
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
@@ -830,6 +968,13 @@ namespace {
                 wr<float>(f, h); wr<float>(f, vx); wr<float>(f, vy);
             }
         }
+
+        // Generated chunks (unbounded grids only; bounded rooms always 0).
+        wr<uint32_t>(f, static_cast<uint32_t>(grid.generatedChunks.size()));
+        for (const TilePos& p : grid.generatedChunks) {
+            wr<int32_t>(f, p.x);
+            wr<int32_t>(f, p.y);
+        }
     }
 }
 
@@ -838,7 +983,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 10);   // version 10: fluid entities (FluidComponent), removed TileType::Water
+    wr<uint8_t>(f, 11);   // version 11: generatedChunks per grid (Phase 18)
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -890,7 +1035,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 10) return false;
+    if (version != 11) return false;
 
     // Clear all state
     for (auto& [id, grid] : grids_) {
@@ -938,6 +1083,7 @@ bool Game::load(const std::string& path) {
         grid.width   = width;
         grid.height  = height;
         grid.paused  = paused;
+        grid.generatedChunks.clear();
 
         // Portals
         uint32_t portalCount = rd<uint32_t>(f);
@@ -978,6 +1124,14 @@ bool Game::load(const std::string& path) {
                 float vy = rd<float>(f);
                 fluidComponents_.add(eid, {h, vx, vy});
             }
+        }
+
+        // Generated chunks
+        uint32_t chunkCount = rd<uint32_t>(f);
+        for (uint32_t i = 0; i < chunkCount; ++i) {
+            int cx = rd<int32_t>(f);
+            int cy = rd<int32_t>(f);
+            grid.generatedChunks.insert({cx, cy, 0});
         }
     }
 

@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <random>
 
 // ─── AudioEvent ───────────────────────────────────────────────────────────────
 //
@@ -223,4 +224,10 @@ private:
 
     // Player input — only called for the active grid.
     void tickPlayerInput(const Input& input);
+
+    // Lazy world generation (Phase 18).
+    // Generates any unvisited chunks within 2 chunks of playerPos.
+    void maybeGenerateChunks(Grid& grid, TilePos playerPos);
+    // Generates one chunk at chunk coordinates (cx, cy).
+    void generateChunk(Grid& grid, int cx, int cy);
 };

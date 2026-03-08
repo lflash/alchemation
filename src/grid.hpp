@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 
 // ─── Portal ───────────────────────────────────────────────────────────────────
 //
@@ -60,6 +61,10 @@ public:
 
     // ── Voltage (computed fresh each tick by BFS from Battery entities) ───────
     std::unordered_map<TilePos, int, TilePosHash>  voltage;
+
+    // ── Lazy world generation (Phase 18) ──────────────────────────────────────
+    // Keyed by {chunkX, chunkY, 0}. Unbounded grids only.
+    std::unordered_set<TilePos, TilePosHash> generatedChunks;
 
     bool isBounded() const { return width > 0 && height > 0; }
     bool inBounds(TilePos p) const {

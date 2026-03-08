@@ -80,6 +80,8 @@ add_executable(tests
     tests/test_phase14.cpp
     tests/test_phase15.cpp
     tests/test_phase16.cpp
+    tests/test_phase17.cpp
+    tests/test_phase18.cpp
     ${LOGIC_SOURCES}
 )
 

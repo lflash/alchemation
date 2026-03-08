@@ -42,6 +42,14 @@ VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
             ++state.pc;
             return { .wantSummon = true, .summonRecIdx = instr.addr };
 
+        case OpCode::SCYTHE:
+            ++state.pc;
+            return { .wantScythe = true };
+
+        case OpCode::MINE:
+            ++state.pc;
+            return { .wantMine = true };
+
         case OpCode::JUMP:
             state.pc = instr.addr;
             return {};

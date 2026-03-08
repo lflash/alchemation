@@ -11,7 +11,7 @@ enum class Action {
     MoveUp, MoveDown, MoveLeft, MoveRight,
     Strafe,          // hold to move without turning
     // Terrain
-    Dig, Plant, PlacePortal,
+    Dig, Plant, PlacePortal, Scythe, Mine,
     // Recording / agents
     Record, CycleRecording, Summon,
     // Grid

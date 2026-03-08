@@ -22,6 +22,10 @@ static const std::unordered_map<EntityType, std::string> SPRITE_PATHS = {
     { EntityType::Log,         "assets/sprites/logs.png"       },
     { EntityType::Battery,     "assets/sprites/battery.png"    },
     { EntityType::Lightbulb,   "assets/sprites/lightbulb.png"  },
+    // Phase 12 terrain objects — placeholder sprites until art lands
+    { EntityType::Tree,        "assets/sprites/wall.png"       },
+    { EntityType::Rock,        "assets/sprites/wall.png"       },
+    { EntityType::Chest,       "assets/sprites/well.png"       },
     // All golem types share a placeholder sprite until per-type art lands
     { EntityType::MudGolem,    "assets/sprites/golem.png"      },
     { EntityType::StoneGolem,  "assets/sprites/golem.png"      },
@@ -31,6 +35,13 @@ static const std::unordered_map<EntityType, std::string> SPRITE_PATHS = {
     { EntityType::WoodGolem,   "assets/sprites/golem.png"      },
     { EntityType::IronGolem,   "assets/sprites/golem.png"      },
     { EntityType::CopperGolem, "assets/sprites/golem.png"      },
+    // Phase 18 world entities — placeholder sprites until art lands
+    { EntityType::Rabbit,      "assets/sprites/goblin.png"     },
+    { EntityType::Warren,      "assets/sprites/well.png"       },
+    { EntityType::IronOre,     "assets/sprites/wall.png"       },
+    { EntityType::CopperOre,   "assets/sprites/wall.png"       },
+    { EntityType::CoalOre,     "assets/sprites/wall.png"       },
+    { EntityType::SulphurOre,  "assets/sprites/wall.png"       },
 };
 
 // ─── SpriteCache ─────────────────────────────────────────────────────────────
@@ -407,6 +418,11 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
         return { static_cast<uint8_t>(184 * dayFactor),
                  static_cast<uint8_t>(115 * dayFactor),
                  static_cast<uint8_t>( 51 * dayFactor), 255 };
+
+    if (type == TileType::Straw)
+        return { static_cast<uint8_t>(210 * dayFactor),
+                 static_cast<uint8_t>(180 * dayFactor),
+                 static_cast<uint8_t>( 80 * dayFactor), 255 };
 
     if (studioMode_) {
         // Muted blue-grey studio floor.

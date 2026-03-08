@@ -31,6 +31,13 @@ EntityConfig defaultConfig(EntityType type) {
         case EntityType::CopperGolem: return { 0.12f, {0.8f, 0.8f}, 1, 4  };
         // Fluid
         case EntityType::Water:       return { 0.0f,  {1.0f, 1.0f}, -1, 0 };
+        // World entities (Phase 18)
+        case EntityType::Rabbit:      return { 0.0f,  {0.6f, 0.6f}, 1, 2  };
+        case EntityType::Warren:      return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
+        case EntityType::IronOre:     return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
+        case EntityType::CopperOre:   return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
+        case EntityType::CoalOre:     return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
+        case EntityType::SulphurOre:  return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
     }
     return { 0.1f, {0.8f, 0.8f}, 0, 0 };
 }
@@ -62,6 +69,7 @@ uint32_t entityCaps(EntityType type) {
         case EntityType::WoodGolem:   return C::CanExecuteRoutine | C::CanFight;
         case EntityType::IronGolem:   return C::CanExecuteRoutine | C::CanFight;
         case EntityType::CopperGolem: return C::CanExecuteRoutine;
+        // World entities: ores start inert; MINE grants Pushable at runtime.
         default: return 0;
     }
 }

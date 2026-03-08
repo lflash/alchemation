@@ -21,6 +21,10 @@ public:
     // Returns terrain type. Checks manual overrides first, defaults to Grass.
     TileType typeAt(TilePos p) const;
 
+    // Returns the biome at the given tile (deterministic, cached).
+    // Mountains override all other biomes when levelAt(p) >= MOUNTAIN_THRESHOLD.
+    Biome biomeAt(TilePos p) const;
+
     void dig(TilePos p);                    // marks tile as BareEarth
     void restore(TilePos p);               // removes override, tile reverts to Grass
     void setType(TilePos p, TileType t);   // generic type setter

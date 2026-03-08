@@ -64,7 +64,17 @@ enum class EntityType {
     BushGolem, WoodGolem, IronGolem, CopperGolem,
     // Fluid (Phase 17) — one entity per wet tile; carries FluidComponent
     Water,
+    // World entities (Phase 18) — spawned by biome world gen; AI deferred
+    Rabbit, Warren,
+    IronOre, CopperOre, CoalOre, SulphurOre,
 };
+// ─── World generation ─────────────────────────────────────────────────────────
+
+enum class Biome { Grassland, Forest, Volcanic, Lake, Mountains };
+
+// Chunk size for lazy world generation (tiles per side). Easy to change here.
+inline constexpr int CHUNK_SIZE = 16;
+
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };

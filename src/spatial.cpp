@@ -97,7 +97,10 @@ CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
     // Static terrain objects — always block movers that reach them.
     auto isStatic = [](ET t) {
         return t == ET::Tree || t == ET::Rock || t == ET::Campfire ||
-               t == ET::TreeStump || t == ET::Battery || t == ET::Lightbulb;
+               t == ET::TreeStump || t == ET::Battery || t == ET::Lightbulb ||
+               t == ET::Warren ||
+               t == ET::IronOre || t == ET::CopperOre ||
+               t == ET::CoalOre || t == ET::SulphurOre;
     };
 
     switch (mover) {
@@ -105,6 +108,7 @@ CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
             if (occupant == ET::Goblin)   return CR::Block;    // bump → combat
             if (occupant == ET::Mushroom) return CR::Collect;
             if (occupant == ET::Chest)    return CR::Collect;
+            if (occupant == ET::Rabbit)   return CR::Block;
             if (occupant == ET::Log)      return CR::Block;    // bump → push
             if (occupant == ET::Rock)     return CR::Block;    // bump → push
             if (isGolem(occupant))        return CR::Block;

@@ -34,6 +34,12 @@ public:
     // Emit a WAIT (if any pause) then a SUMMON instruction.
     void recordSummon(size_t targetRecIdx);
 
+    // Emit a WAIT (if any pause) then a SCYTHE instruction.
+    void recordScythe();
+
+    // Emit a WAIT (if any pause) then a MINE instruction.
+    void recordMine();
+
     // Append HALT and return the completed Recording. Resets internal state.
     Recording stop();
 
