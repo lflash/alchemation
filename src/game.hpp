@@ -14,6 +14,29 @@
 #include <vector>
 #include <random>
 
+// ─── PlayerAction ────────────────────────────────────────────────────────────
+//
+// The set of actions the player can cycle through with Z and execute with E.
+// Individual shortcut keys still work alongside the cycle system.
+
+enum class PlayerAction {
+    Dig, Plant, Scythe, Mine, Summon, PlacePortal
+};
+
+inline constexpr int PLAYER_ACTION_COUNT = 6;
+
+inline const char* playerActionName(PlayerAction a) {
+    switch (a) {
+        case PlayerAction::Dig:        return "Dig";
+        case PlayerAction::Plant:      return "Plant";
+        case PlayerAction::Scythe:     return "Scythe";
+        case PlayerAction::Mine:       return "Mine";
+        case PlayerAction::Summon:     return "Summon";
+        case PlayerAction::PlacePortal:return "Portal";
+    }
+    return "?";
+}
+
 // ─── AudioEvent ───────────────────────────────────────────────────────────────
 //
 // Game pushes these during tick(); main.cpp drains them each frame and plays
@@ -135,7 +158,10 @@ public:
     void insertMoveRel(size_t recIdx, size_t pos, RelDir dir);
     void reorderInstruction(size_t recIdx, size_t from, size_t to);
 
-    // HUD summon preview: what the player would summon if they pressed G.
+    // Active player action (cycle system — Z cycles, E executes).
+    PlayerAction activePlayerAction() const { return activeAction_; }
+
+    // HUD summon preview: shown only when active action is Summon.
     SummonPreview playerSummonPreview() const;
 
     // Mouse interaction (Phase 16).
@@ -204,6 +230,9 @@ private:
 
     // ECS component stores (Phase 17+)
     ComponentStore<FluidComponent> fluidComponents_;
+
+    // Action cycle state (Phase 18 extension)
+    PlayerAction activeAction_ = PlayerAction::Summon;
 
     // Pending click-move (set by queueClickMove, consumed in tickPlayerInput).
     TilePos pendingClickDelta_ = {0, 0, 0};

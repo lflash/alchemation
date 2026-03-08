@@ -736,6 +736,7 @@ int main() {
 
         // ── HUD & overlays ────────────────────────────────────────────────────
         renderer.drawHUD(game.playerMana(), game.isRecording());
+        renderer.drawActionBar(playerActionName(game.activePlayerAction()));
         renderer.drawSummonPreview(game.playerSummonPreview());
 
         if (ui.is(ActivePanel::Recordings))

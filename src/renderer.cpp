@@ -177,7 +177,8 @@ void Renderer::drawTerrain(const Terrain& terrain) {
             float     lf    = static_cast<float>(level);
             float     h     = terrain.heightAt(p);
             TileType  ttype = terrain.typeAt(p);
-            SDL_Color color = tileColor(h, p, ttype);
+            Biome     biome = terrain.biomeAt(p);
+            SDL_Color color = tileColor(h, p, ttype, biome);
             SDL_Color south = darken(color, 0.55f);
             SDL_Color side  = darken(color, 0.45f);
 
@@ -352,7 +353,7 @@ void Renderer::endFrame() {
     SDL_RenderPresent(sdl);
 }
 
-SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
+SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type, Biome biome) const {
     // Slow day/night cycle: 300-second period, ±15% brightness.
     float dayFactor = 0.85f + 0.15f * std::sin(dayNightT_ / 150.0f * static_cast<float>(M_PI));
 
@@ -435,9 +436,49 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
                  static_cast<uint8_t>(b), 255 };
     }
 
-    // World: flat green with a subtle checkerboard + day/night tint.
-    int g = ((pos.x + pos.y) % 2 == 0) ? 134 : 120;
-    return { 0, static_cast<uint8_t>(g * dayFactor), 0, 255 };
+    // World: biome-tinted grass with subtle checkerboard + day/night tint.
+    bool check = ((pos.x + pos.y) % 2 == 0);
+    switch (biome) {
+        case Biome::Grassland:
+        default: {
+            int gv = check ? 134 : 120;
+            return { 0, static_cast<uint8_t>(gv * dayFactor), 0, 255 };
+        }
+        case Biome::Forest: {
+            // Darker, denser green.
+            int r = check ? 10  : 8;
+            int g = check ? 100 : 88;
+            int b = check ? 18  : 14;
+            return { static_cast<uint8_t>(r * dayFactor),
+                     static_cast<uint8_t>(g * dayFactor),
+                     static_cast<uint8_t>(b * dayFactor), 255 };
+        }
+        case Biome::Volcanic: {
+            // Scorched grey-brown.
+            int r = check ? 90 : 78;
+            int g = check ? 65 : 56;
+            int b = check ? 50 : 42;
+            return { static_cast<uint8_t>(r * dayFactor),
+                     static_cast<uint8_t>(g * dayFactor),
+                     static_cast<uint8_t>(b * dayFactor), 255 };
+        }
+        case Biome::Lake: {
+            // Blue-green tint for shoreline/shallow water.
+            int r = check ? 30  : 24;
+            int g = check ? 105 : 92;
+            int b = check ? 125 : 112;
+            return { static_cast<uint8_t>(r * dayFactor),
+                     static_cast<uint8_t>(g * dayFactor),
+                     static_cast<uint8_t>(b * dayFactor), 255 };
+        }
+        case Biome::Mountains: {
+            // Grey rock face.
+            int v = check ? 108 : 95;
+            return { static_cast<uint8_t>(v * dayFactor),
+                     static_cast<uint8_t>(v * dayFactor),
+                     static_cast<uint8_t>(v * dayFactor), 255 };
+        }
+    }
 }
 
 int Renderer::toPixelX(float tileX, float tileZ) const {
@@ -741,6 +782,42 @@ void Renderer::drawHUD(int mana, bool isRecording) {
     // Recording indicator — red
     if (isRecording)
         drawText(recStr, X + PAD + manaW, ty, {210, 60, 60, 255});
+}
+
+void Renderer::drawActionBar(const char* actionName) {
+    if (!actionName || !font_) return;
+    constexpr int PAD = 8;
+    constexpr int H   = 28;
+    constexpr int X   = 10;
+    constexpr int Y   = 48;   // just below the mana HUD (which is H=30 at Y=10)
+
+    std::string label = std::string("[E] ") + actionName + "  [Z] cycle";
+
+    int textW = 0, textH = 0;
+    TTF_SizeUTF8(font_, label.c_str(), &textW, &textH);
+    int W = PAD + textW + PAD;
+
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(sdl, 10, 10, 10, 180);
+    SDL_Rect panel = {X, Y, W, H};
+    SDL_RenderFillRect(sdl, &panel);
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+    SDL_SetRenderDrawColor(sdl, 70, 70, 70, 255);
+    SDL_RenderDrawRect(sdl, &panel);
+
+    int ty = Y + (H - textH) / 2;
+    // "[E]" in gold, action name in white, "[Z] cycle" in grey.
+    std::string eTag     = "[E] ";
+    std::string name     = actionName;
+    std::string cycleTag = "  [Z] cycle";
+
+    int eW = 0, nameW = 0;
+    TTF_SizeUTF8(font_, eTag.c_str(),     &eW,    nullptr);
+    TTF_SizeUTF8(font_, name.c_str(),     &nameW, nullptr);
+
+    drawText(eTag,     X + PAD,          ty, {220, 185, 50, 255});
+    drawText(name,     X + PAD + eW,     ty, {255, 255, 255, 255});
+    drawText(cycleTag, X + PAD + eW + nameW, ty, {140, 140, 140, 255});
 }
 
 void Renderer::drawSummonPreview(const SummonPreview& preview) {

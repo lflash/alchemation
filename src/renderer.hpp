@@ -132,6 +132,9 @@ public:
     // Draws the always-on HUD (mana counter + recording indicator) top-left.
     void drawHUD(int mana, bool isRecording);
 
+    // Draws the active-action bar below the HUD. actionName is e.g. "Dig", "Summon".
+    void drawActionBar(const char* actionName);
+
     // Draws a summon preview tooltip at the bottom of the screen.
     // No-op if preview.active is false.
     void drawSummonPreview(const SummonPreview& preview);
@@ -254,7 +257,7 @@ private:
     float    lastFdt_     = 0.0f;
     int      rendererTick_ = 0;
 
-    SDL_Color tileColor(float height, TilePos pos, TileType type) const;
+    SDL_Color tileColor(float height, TilePos pos, TileType type, Biome biome) const;
 
     // Convert world tile coordinates to screen pixels using one-point perspective.
     // Vertical world lines converge to a VP at (centre, Z_PERSP*Z_STEP px below centre).

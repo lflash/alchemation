@@ -259,6 +259,7 @@ std::vector<RecordingInfo> Game::recordingList() const {
 }
 
 SummonPreview Game::playerSummonPreview() const {
+    if (activeAction_ != PlayerAction::Summon) return {};
     const Entity* player = registry_.get(playerID_);
     if (!player || !player->isIdle()) return {};
     const Grid& grid = activeGrid();
@@ -454,6 +455,11 @@ void Game::tickPlayerInput(const Input& input) {
     if (input.pressed(Action::CycleRecording) && !recorder_.recordings.empty())
         selectedRecording_ = (selectedRecording_ + 1) % recorder_.recordings.size();
 
+    // z: cycle active player action
+    if (input.pressed(Action::CycleAction))
+        activeAction_ = static_cast<PlayerAction>(
+            (static_cast<int>(activeAction_) + 1) % PLAYER_ACTION_COUNT);
+
 
     // Tab: toggle between world and studio
     if (input.pressed(Action::SwitchGrid) && player && player->isIdle()) {
@@ -581,17 +587,19 @@ void Game::tickPlayerInput(const Input& input) {
 
     }
 
-    // Terrain interaction
+    // ── Terrain / action verbs ────────────────────────────────────────────────
     TilePos ahead = player->pos + dirToDelta(player->facing);
-    if (input.pressed(Action::Dig)) {
+
+    // Action lambdas — shared between individual hotkeys and the E cycle system.
+    auto doDig = [&] {
         grid.terrain.dig(ahead);
         recorder_.recordDig();
         audioEvents_.push_back(AudioEvent::Dig);
         visualEvents_.push_back({ VisualEventType::Dig,
                                   toVec(ahead), static_cast<float>(ahead.z) });
-    }
+    };
 
-    if (input.pressed(Action::Plant)) {
+    auto doPlant = [&] {
         if (grid.terrain.typeAt(ahead) == TileType::BareEarth && (inStudio || player->mana >= 1)) {
             EntityID mid = registry_.spawn(EntityType::Mushroom, ahead);
             grid.add(mid, *registry_.get(mid));
@@ -600,19 +608,16 @@ void Game::tickPlayerInput(const Input& input) {
             recorder_.recordPlant();
             audioEvents_.push_back(AudioEvent::Plant);
         }
-    }
+    };
 
-
-    // G: scythe — convert Grass ahead to Straw
-    if (input.pressed(Action::Scythe) && player) {
+    auto doScythe = [&] {
         if (grid.terrain.typeAt(ahead) == TileType::Grass) {
             grid.terrain.setType(ahead, TileType::Straw);
             recorder_.recordScythe();
         }
-    }
+    };
 
-    // M: mine — make ore entity ahead Pushable
-    if (input.pressed(Action::Mine) && player) {
+    auto doMine = [&] {
         for (EntityID cid : grid.spatial.at(ahead)) {
             Entity* cand = registry_.get(cid);
             if (!cand) continue;
@@ -620,71 +625,62 @@ void Game::tickPlayerInput(const Input& input) {
                           cand->type == EntityType::CopperOre ||
                           cand->type == EntityType::CoalOre   ||
                           cand->type == EntityType::SulphurOre);
-            if (isOre) {
-                cand->capabilities |= Capability::Pushable;
-                recorder_.recordMine();
-                break;
-            }
+            if (isOre) { cand->capabilities |= Capability::Pushable; recorder_.recordMine(); break; }
         }
-    }
+    };
 
-    // E: summon golem from medium tile ahead
-    if (input.pressed(Action::Summon) && player) {
-        // Always record the intent when recording, regardless of success.
+    auto doSummon = [&] {
         recorder_.recordSummon(selectedRecording_);
-
-        TilePos ahead = player->pos + dirToDelta(player->facing);
         const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
-        if (!gi) gi = &GOLEM_TABLE[0];  // default: Mud Golem
-        // Deploy cost = recording complexity (moves); fallback to golem's intrinsic cost.
+        if (!gi) gi = &GOLEM_TABLE[0];
         bool hasRec = !recorder_.recordings.empty() && selectedRecording_ < recorder_.recordings.size();
         int deployCost = hasRec ? recorder_.recordings[selectedRecording_].manaCost() : gi->manaCost;
         if (inStudio || player->mana >= deployCost) {
             if (!inStudio) { player->mana -= deployCost; if (player->mana < 1) player->mana = 1; }
-
             EntityID gid = registry_.spawn(gi->type, ahead);
             Entity*  ge  = registry_.get(gid);
             ge->facing   = player->facing;
             grid.add(gid, *ge);
-
-            // Assign the selected recording if one exists
-            if (!recorder_.recordings.empty() &&
-                selectedRecording_ < recorder_.recordings.size()) {
-                agentSlots_[gid] = { AgentExecState{},
-                                     recorder_.recordings[selectedRecording_] };
-            }
-
+            if (!recorder_.recordings.empty() && selectedRecording_ < recorder_.recordings.size())
+                agentSlots_[gid] = { AgentExecState{}, recorder_.recordings[selectedRecording_] };
             audioEvents_.push_back(AudioEvent::Summon);
             visualEvents_.push_back({ VisualEventType::Summon,
                                       toVec(ahead), static_cast<float>(ahead.z) });
         }
-    }
+    };
 
-    // O: create portal + linked room ahead of player
-    if (input.pressed(Action::PlacePortal) && player) {
+    auto doPortal = [&] {
         TilePos fwd = player->pos + dirToDelta(player->facing);
-        // Only create if the tile is empty and not already a portal
-        if (!grid.portals.count(fwd) &&
-            grid.terrain.typeAt(fwd) != TileType::Portal) {
-
+        if (!grid.portals.count(fwd) && grid.terrain.typeAt(fwd) != TileType::Portal) {
             GridID  newID     = nextGridID_++;
             TilePos roomEntry = { ROOM_W / 2, ROOM_H / 2 };
-            TilePos returnDst = fwd;   // back on the portal tile itself (safe: portal only fires on move-arrival)
-
-            // Create the new bounded grid
             grids_.try_emplace(newID, newID, ROOM_W, ROOM_H);
             Grid& room = grids_.at(newID);
             subscribeEvents(room);
-
-            // Forward portal in current grid
             grid.terrain.setType(fwd, TileType::Portal);
             grid.portals[fwd] = { newID, roomEntry };
-
             audioEvents_.push_back(AudioEvent::PortalCreate);
-
-            // Return portal in new room
             room.terrain.setType(roomEntry, TileType::Portal);
-            room.portals[roomEntry] = { activeGridID_, returnDst };
+            room.portals[roomEntry] = { activeGridID_, fwd };
+        }
+    };
+
+    // Individual shortcut keys.
+    if (input.pressed(Action::Dig))         doDig();
+    if (input.pressed(Action::Plant))       doPlant();
+    if (input.pressed(Action::Scythe))      doScythe();
+    if (input.pressed(Action::Mine))        doMine();
+    if (input.pressed(Action::PlacePortal)) doPortal();
+
+    // E: execute whichever action is currently selected.
+    if (input.pressed(Action::Summon)) {
+        switch (activeAction_) {
+            case PlayerAction::Dig:         doDig();      break;
+            case PlayerAction::Plant:       doPlant();    break;
+            case PlayerAction::Scythe:      doScythe();   break;
+            case PlayerAction::Mine:        doMine();     break;
+            case PlayerAction::Summon:      doSummon();   break;
+            case PlayerAction::PlacePortal: doPortal();   break;
         }
     }
 }
