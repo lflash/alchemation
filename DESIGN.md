@@ -218,12 +218,15 @@ enum class Condition : uint8_t { None, Fire, Wet, EntityAhead, AtEdge };
 
 constexpr int TILE_ENTITY_CAP = 8;
 
-// Full opcode set (all implemented as of Phase 13):
+// Full opcode set (all implemented as of Phase 18):
 enum class OpCode : uint8_t {
     MOVE_REL, WAIT, HALT,
     DIG, PLANT,
     JUMP, JUMP_IF, JUMP_IF_NOT,
     CALL, RET,
+    SUMMON,   // summon golem from medium tile ahead
+    SCYTHE,   // Grass → Straw ahead; cost 2
+    MINE,     // ore entity ahead gains Pushable; cost 3
 };
 
 // Flat instruction struct — all fields always present, unused fields zero.
@@ -1007,9 +1010,27 @@ grid_game/
 ## World & Biomes
 
 ### Biome generation
-A second Perlin noise layer determines biome type. Biomes are large contiguous regions with
-gradual transitions. Mountains are not a separate biome — they emerge from the existing
-height system (tiles above a `levelAt` threshold become mountain terrain regardless of biome).
+A second Perlin noise layer (seed 42, frequency 0.015, FBm 3 octaves) determines biome type.
+Biomes are large contiguous regions with gradual transitions.
+
+**Biome noise thresholds** (value in [−1, 1]):
+- `v < −0.5` → Lake
+- `v < −0.1` → Forest
+- `v < 0.4` → Grassland
+- `v ≥ 0.4` → Volcanic
+
+Mountains are not a separate biome — they override all others when `levelAt(p) >= 3`,
+regardless of biome noise value.
+
+### Lazy chunk generation
+The world is generated lazily in **16×16 tile chunks** (`CHUNK_SIZE = 16`). Each `Grid`
+tracks which chunks have been generated in `generatedChunks`. Each tick, `maybeGenerateChunks()`
+expands a 2-chunk radius around the player. `generateChunk()` seeds `std::mt19937` from
+`(cx * 73856093 ^ cy * 19349663)` for deterministic, chunk-level RNG.
+
+Chunk gen determines the biome from the chunk centre tile, then does probability-based
+entity spawning. The 3×3 chunks around the world origin are pre-marked as generated
+to protect the hand-placed demo content.
 
 ### Biomes
 

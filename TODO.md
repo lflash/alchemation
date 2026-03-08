@@ -567,54 +567,53 @@ Introduces `ComponentStore<T>` as the first ECS scaffold, and replaces the old
 
 ---
 
-## Phase 18 — World Generation
+## Phase 18 — World Generation ✓
 
-### Biome map
-- [ ] Second Perlin noise layer → biome type per tile (Grassland, Forest, Volcanic, Lake; Mountains from height threshold)
-- [ ] `Terrain::biomeAt(TilePos)` — returns `Biome` enum; deterministic, cached like `typeAt`
-- [ ] World gen seeds tile types and entities by biome on first load
+### Biome map ✓
+- [x] Second Perlin noise layer (freq 0.015, FBm 3 oct) → biome type per tile; thresholds: < −0.5 Lake, < −0.1 Forest, < 0.4 Grassland, ≥ 0.4 Volcanic
+- [x] Mountains override when `levelAt(p) >= 3` regardless of biome noise
+- [x] `Terrain::biomeAt(TilePos)` — returns `Biome` enum; deterministic, cached
 
-### New tile type
-- [ ] `TileType::Straw` — result of scything Grass; harvestable material
+### New tile type ✓
+- [x] `TileType::Straw` — result of scything Grass; golden-yellow tile color
 
-### New entity types
-- [ ] `EntityType::Rabbit` — wanders, eats grass tiles, reproduces in warrens
-- [ ] `EntityType::Warren` — static structure; houses rabbits; spawns new warrens when full; despawns when empty for too long
-- [ ] `EntityType::IronOre`, `CopperOre`, `CoalOre`, `SulphurOre` — ore deposit entities; static, embedded in terrain/caves. Mining → gains `Pushable` + collectable (walk-over). Collected loose ore placed on Fire tile → transforms to RawMetal after N ticks.
+### New entity types ✓
+- [x] `EntityType::Rabbit` — spawns inert in Grassland chunks
+- [x] `EntityType::Warren` — static; spawns inert in Grassland chunks
+- [x] `EntityType::IronOre`, `CopperOre`, `CoalOre`, `SulphurOre` — ore deposit entities; static by default; `MINE` grants `Pushable` at runtime (no collection yet)
 
-### Procedural entity spawning
-- [ ] Goblins spawn in clusters in Grassland
-- [ ] Warrens + rabbits seeded in Grassland
-- [ ] Trees seeded densely in Forest biome
-- [ ] Ore entities seeded in clumps in Mountain / Volcanic terrain
-- [ ] Lake basins pre-seeded with Water entities; fluid simulation fills naturally from terrain depression
+### Lazy 16×16 chunk generation ✓
+- [x] `CHUNK_SIZE = 16`; `Grid::generatedChunks` tracks which chunks have been populated
+- [x] `maybeGenerateChunks()` expands 2-chunk radius around player each tick (world grid only)
+- [x] `generateChunk()`: seeds `std::mt19937` from chunk coords; determines biome from chunk centre; spawns per-biome entities:
+  - Grassland: Rabbit (30%), Warren (10%)
+  - Forest: Tree (70% + 50%), Mushroom (20%)
+  - Volcanic: Rock (60%), SulphurOre (30%), CoalOre (20%)
+  - Lake: 4 Water entities pre-seeded (fluid system spreads them)
+  - Mountains: Rock (50%), IronOre (40%), CopperOre (30%)
+- [x] Starting 3×3 chunks pre-marked as generated to protect demo content
 
-### Caves
-- [ ] Cave = bounded room grid containing ore entities; entrance = portal tile in world terrain
-- [ ] Cave closes (portal removed) when all ore inside is mined; new cave opens elsewhere in same biome
-- [ ] Cave interiors seeded with ore at creation
+### New VM opcodes ✓
+- [x] `SCYTHE` (cost 2) — converts Grass ahead to Straw; G key + VM opcode
+- [x] `MINE` (cost 3) — makes ore entity ahead Pushable; M key + VM opcode
+- [x] `Recorder::recordScythe()` and `recordMine()` emit the new opcodes
 
-### Ecosystem simulation
-- [ ] **Grass regrowth** — BareEarth in Grassland slowly converts back to Grass (random chance per tile per tick)
-- [ ] **Tree spread** — Forest biome only: trees colonise adjacent BareEarth over time; player-planted trees outside forest do not spread
-- [ ] **Goblin hunger** — `HungerComponent { int hunger; int threshold; int max; }` on Goblin entities; increments each tick; hunt mode above threshold; despawn at max
-- [ ] **Rabbit AI** — wanders, eats adjacent Grass (→ BareEarth), reproduces into nearest warren
-- [ ] **Warren logic** — spawns Rabbit up to capacity; spawns new Warren nearby when full; despawns after timeout when empty
-- [ ] **Goblin hunt AI** — seeks nearest Rabbit when hungry; rabbit despawns on collision, goblin hunger resets
+### Deferred to later phases
+- [ ] Goblins spawn in Grassland clusters (Ecosystem phase)
+- [ ] Caves — bounded room grids with ore; portal closes when empty (Caves phase)
+- [ ] Ecosystem: grass regrowth, tree spread, goblin hunger, rabbit AI, warren logic
 
-### New VM opcodes
-- [ ] `SCYTHE` — scythes tile ahead: Grass → Straw. Cost TBD.
-- [ ] `MINE` — mines ore entity ahead: entity gains Pushable + collectable state. Cost TBD.
+### Save format ✓
+- [x] Version bumped v10 → v11; `generatedChunks` written per grid (x,y pairs)
 
-### Tests
-- [ ] `biomeAt` is deterministic across repeated calls with same seed
-- [ ] Mountain tiles appear above height threshold regardless of biome noise
-- [ ] World generates without crash on any seed
-- [ ] Grass regrows on BareEarth in Grassland over time
-- [ ] Warren spawns rabbits; despawns when empty
-- [ ] Goblin despawns at max hunger; hunger resets on eating rabbit
-- [ ] Mined ore entity becomes pushable/collectable
-- [ ] Cave portal removed when ore count reaches zero
+### Tests ✓ (12 new tests)
+- [x] `biomeAt` deterministic; cache consistent; mountain override correct; low tiles not Mountains
+- [x] `instrCost` for SCYTHE (2) and MINE (3)
+- [x] VM: SCYTHE/MINE set correct VMResult fields, advance PC
+- [x] Recorder: recordScythe/recordMine emit correct sequences; manaCost sums correctly
+- [x] Input: Scythe and Mine default bindings non-null
+- [x] Chunk idempotency: repeated ticks without movement don't double-spawn entities
+- [x] `CHUNK_SIZE == 16`
 
 ---
 
