@@ -2,6 +2,7 @@
 #include <queue>
 #include <unordered_set>
 #include <vector>
+#include <unordered_map>
 
 // ─── Fire simulation ─────────────────────────────────────────────────────────
 //
@@ -13,21 +14,24 @@ void tickFire(Grid& grid, EntityRegistry& registry, Tick currentTick) {
     static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
 
     // 1. Expire fire tiles whose timer has elapsed → BareEarth.
-    //    Also extinguish any Fire tile adjacent to a Water tile.
+    //    Also extinguish any Fire tile adjacent to a Water entity.
     {
         std::vector<TilePos> done;
         for (const auto& [pos, expiry] : grid.fireTileExpiry) {
             if (currentTick >= expiry) { done.push_back(pos); continue; }
             for (const auto& d : kDirs4) {
-                if (grid.terrain.typeAt(pos + d) == TileType::Water)
-                    { done.push_back(pos); break; }
+                bool hasWater = false;
+                for (EntityID adj : grid.spatial.at(pos + d)) {
+                    const Entity* ae = registry.get(adj);
+                    if (ae && ae->type == EntityType::Water) { hasWater = true; break; }
+                }
+                if (hasWater) { done.push_back(pos); break; }
             }
         }
         for (const TilePos& pos : done) {
             grid.terrain.setType(pos, TileType::BareEarth);
             grid.fireTileExpiry.erase(pos);
             grid.tileFireExp.erase(pos);
-            grid.waterLevel.erase(pos);   // in case fire tile was converted from water
         }
     }
 
@@ -152,61 +156,3 @@ void tickVoltage(Grid& grid, EntityRegistry& registry) {
     }
 }
 
-// ─── Water simulation ─────────────────────────────────────────────────────────
-//
-// Each water tile carries a floating-point level (depth). Each tick it distributes
-// its level equally among itself and eligible adjacent non-water tiles. Total
-// volume is conserved. Tiles that drop to ≤ 0.1 convert to Puddle and stop spreading.
-
-void tickWater(Grid& grid) {
-    static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
-
-    // Accumulate level deltas for this tick (applied after all sources are processed).
-    std::unordered_map<TilePos, float, TilePosHash> delta;
-
-    for (const auto& [pos, level] : grid.waterLevel) {
-        if (level <= 0.1f) continue;   // will be converted to Puddle below
-
-        int srcTerrain = grid.terrain.levelAt(pos);
-
-        std::vector<TilePos> eligible;
-        for (const auto& d : kDirs4) {
-            TilePos adj = pos + d;
-            TileType adjType = grid.terrain.typeAt(adj);
-            if (adjType == TileType::Water || adjType == TileType::Portal ||
-                adjType == TileType::Fire) continue;
-            int dstTerrain = grid.terrain.levelAt(adj);
-            if (dstTerrain > srcTerrain || srcTerrain - dstTerrain > 1) continue;
-            eligible.push_back(adj);
-        }
-
-        if (eligible.empty()) continue;
-
-        // Distribute level evenly: origin keeps 1 share, each neighbor gets 1 share.
-        float share = level / static_cast<float>(eligible.size() + 1);
-        delta[pos] -= level - share;   // origin loses the distributed portion
-        for (const TilePos& n : eligible)
-            delta[n] += share;
-    }
-
-    // Apply deltas.
-    for (const auto& [pos, dv] : delta) {
-        float newLevel = grid.waterLevel[pos] + dv;
-        if (newLevel <= 0.1f) {
-            grid.waterLevel.erase(pos);
-            grid.terrain.setType(pos, TileType::Puddle);
-        } else {
-            grid.waterLevel[pos] = newLevel;
-            grid.terrain.setType(pos, TileType::Water);
-        }
-    }
-
-    // Convert any remaining sub-threshold water tiles to Puddle.
-    std::vector<TilePos> toPuddle;
-    for (const auto& [pos, level] : grid.waterLevel)
-        if (level <= 0.1f) toPuddle.push_back(pos);
-    for (const TilePos& pos : toPuddle) {
-        grid.terrain.setType(pos, TileType::Puddle);
-        grid.waterLevel.erase(pos);
-    }
-}

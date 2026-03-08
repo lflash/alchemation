@@ -91,6 +91,9 @@ CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
     using ET = EntityType;
     using CR = CollisionResult;
 
+    // Water entities are always passable — movers walk through water.
+    if (occupant == ET::Water) return CR::Pass;
+
     // Static terrain objects — always block movers that reach them.
     auto isStatic = [](ET t) {
         return t == ET::Tree || t == ET::Rock || t == ET::Campfire ||

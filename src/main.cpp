@@ -612,6 +612,9 @@ int main() {
         renderer.beginFrame();
         renderer.drawTerrain(game.terrain());
 
+        // Fluid overlay (draw after terrain, before hover and entities).
+        renderer.drawFluidOverlay(game.fluidOverlay());
+
         // Hover highlight (draw before entities so entities appear on top).
         if (hoveredValid) renderer.drawHoverHighlight(hoveredTile);
 

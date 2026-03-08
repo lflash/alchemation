@@ -260,7 +260,7 @@ are renderer-side only — game logic is unaffected.
 
 ---
 
-## GPU Rewrite (future — post Phase 20)
+## GPU Rewrite (future — post Phase 23)
 
 **Decision**: The CPU simulation is a feature prototype, not the final architecture. Once the feature set is fleshed out (roughly post-Phase 20), do a full redesign targeting GPU compute (Vulkan compute shaders or similar).
 
@@ -297,7 +297,7 @@ Pre-Phase 14:
 - [ ] **StimulusField abstraction** — deferred. Fire, voltage, and water have fundamentally different spread models (timer-based, BFS, volume-conserving) that don't compose cleanly into a generic struct without obscuring the logic. Revisit if a fourth stimulus type is added. (was: "fire and voltage not abstracted")
 
 Deferred / as needed:
-- [ ] **Entity model revisit** — current plan uses type-driven dispatch + capabilities bitfield. Works fine at current scale but will get unwieldy past ~15 entity types. Alternatives: component bag (optional per-entity structs carrying their own state), full ECS. Revisit before Phase 17 when entity variety peaks.
+- [ ] **ECS migration** — target architecture is ECS. Introduce `ComponentStore<T>` (wraps `unordered_map<EntityID, T>`) as the component store primitive. `FluidComponent { float h, vx, vy }` is the first instance (Phase 18). Migrate other type-specific state (burn timers, voltage, lit flag) to components incrementally. Core `Entity` struct retains identity fields only.
 - [ ] **Collision resolution hardcoded** — `resolveCollision()` is a nested `switch`. When entity types expand in Phase 12, convert to a 2D lookup table `constexpr CollisionResult COLLISION_TABLE[ET_COUNT][ET_COUNT]` (MEDIUM)
 - [ ] **Save format versioning policy** — bump version on every layout change; mismatch = fresh world (no migration). Document what changed in a comment next to the version constant. Current: v7. (Policy decided — just needs discipline per phase)
 - [ ] **Entity pointer instability** — `EntityRegistry` stores entities in `unordered_map`; pointers/references invalidate on rehash. Callers that cache `Entity*` across ticks may see stale pointers. Audit usages; switch to ID-only access pattern or use a slot-map (MEDIUM)
@@ -469,60 +469,37 @@ environment.
 
 ---
 
-## Phase 16 — Mouse Interaction & UI Layer
+## Phase 16 — Mouse Interaction & UI Layer ✓
 
-The current UI is flat inline code: each panel is a standalone function in `renderer.cpp`
-with hardcoded pixel constants, no text caching, and panel visibility managed by loose
-booleans in `main.cpp`. Phase 15's studio panels (timeline, instruction list, agent strip,
-scrubber) make this untenable. Do the UI layer here alongside mouse so both land together.
+### UI layer ✓
+- [x] `TextCache` — maps `(string, packed-RGBA)` to `SDL_Texture*`; textures created on first use; eliminates per-frame allocation in `drawText`
+- [x] `Rect` — screen-space rectangle with `contains(x,y)` for hit testing
+- [x] `Panel` — background colour + border colour struct
+- [x] `Label` — text + colour + left/centre/right alignment
+- [x] `ListWidget` — scrollable rows; `itemAt(y)` + `scrollTo(index)`
+- [x] `Button` — label + hover/pressed state
+- [x] `UIState` struct — `activePanel` enum (`None`, `Controls`, `Recordings`, `Rebind`); replaces loose bools; `open()`, `close()`, `isOpen()`, `is()`
+- [x] Input routing — mouse and keyboard events go to active panel first; fall through to game if no panel active
 
-### UI layer
+### Mouse interaction ✓
+- [x] Tile picking — `Renderer::screenToTile()` inverse perspective; `screenToTileAccurate()` two-pass terrain-aware version in `main.cpp`
+- [x] Entity picking — `game.entityAtTile(hoveredTile)` in draw order
+- [x] Hover highlight — translucent overlay on hovered tile via `drawHoverHighlight()`
+- [x] Entity hover tooltip — name drawn above cursor via `drawEntityTooltip()`
+- [x] Left-click to move — `game.queueClickMove(hoveredTile)` on valid tile face only
+- [x] Right-click context menu — `Panel` + item list; "Move here", "Dig", entity name label
+- [x] Click ripple effect — `spawnBurst` at clicked tile position
+- [x] Middle-drag to pan — `middleDragging` state; offsets `camOffset`
+- [x] Cursor changes — `setHandCursor(bool)` swaps OS arrow ↔ hand cursor
+- [x] Panel hit testing — left-clicks absorbed by active panel or context menu before reaching world
 
-**Text cache**
-- [ ] `TextCache` — maps `(string, SDL_Color)` to `SDL_Texture*`; textures created on first use,
-      invalidated on TTF font change. Eliminates per-frame surface/texture allocation in `drawText`.
-
-**Widget primitives** (all SDL-free structs; renderer calls draw them)
-- [ ] `Rect { int x, y, w, h }` — screen-space rectangle; `contains(x,y)` for hit testing
-- [ ] `Panel { Rect bounds; RGBA bg; RGBA border }` — filled background + optional border;
-      `draw(renderer)` fills bg, strokes border, clips child draws to bounds
-- [ ] `Label { Rect bounds; std::string text; SDL_Color color }` — single line of text, left/centre/right aligned
-- [ ] `ListWidget { Rect bounds; vector<string> items; int selected; int scrollOffset }` —
-      scrollable list; `draw()` renders visible rows with selection highlight;
-      `itemAt(y)` returns item index under a screen y-coordinate (for click handling)
-- [ ] `Button { Rect bounds; std::string label; bool hovered; bool pressed }` —
-      draws filled bg + label; hover and press state driven by caller
-
-**Panel state — move out of `main.cpp`**
-- [ ] `UIState` struct (owned by `main.cpp`): `activePanel` enum (`None`, `Controls`, `Recordings`,
-      `Rebind`, `Studio*`); replaces the current loose `showControls/showRecordings/showRebind` bools
-- [ ] Input routing: mouse events and keyboard nav go to `activePanel` first; fall through to game only
-      if no panel is active or the panel doesn't consume the event
-
-**Rebuild existing panels using widgets**
-- [ ] `drawHUD` — unchanged (simple, no interaction needed)
-- [ ] `drawControlsMenu` — rebuild as `Panel` + `Label` list
-- [ ] `drawRecordingsPanel` — rebuild as `Panel` + `ListWidget` + rename `Label`
-- [ ] `drawRebindPanel` — rebuild as `Panel` + `ListWidget` (key name as second column)
-
-### Mouse interaction
-
-- [ ] Tile picking — inverse perspective projection maps screen (x, y) + camera z to world `TilePos`
-- [ ] Entity picking — hit-test entities at hovered tile in draw order (topmost first)
-- [ ] Hover highlight — translucent overlay on hovered tile; colour by tile type / interactability
-- [ ] Entity hover — outline or tint; name / stats tooltip
-- [ ] Hover visual effect — subtle pulse on highlighted tile
-- [ ] Left-click to move — player steps toward clicked tile
-- [ ] Left-click to interact — collect mushroom, attack goblin, inspect chest
-- [ ] Right-click context menu — `Panel` + `ListWidget` of available actions for tile/entity under cursor
-- [ ] Click ripple effect — expanding ring particle burst at clicked position
-- [ ] Middle-click / right-drag to pan — alternative to arrow-key camera pan
-- [ ] Cursor changes — OS cursor swaps (pointer → hand, crosshair over enemy)
-- [ ] Panel hit testing — mouse clicks absorbed by any active UI panel before reaching the world
-
-**Tests**
-- [ ] `screenToTile(x, y, camera)` round-trips correctly against `toPixelX/Y` for known positions
-- [ ] Entity at hovered tile is identified correctly in draw order
+**Tests** ✓
+- [x] `screenToTile` round-trips at default camera, offset camera, zoom > 1, elevated camera z
+- [x] `entityAtTile` returns player at player pos; nullptr for empty tile
+- [x] `UIState` open/close/is; opening closes previous panel
+- [x] `Rect::contains` boundary conditions
+- [x] `ListWidget::itemAt` and `scrollTo`
+- [x] `queueClickMove` moves one step toward target; no-op at same tile
 
 ---
 
@@ -543,21 +520,100 @@ Reworked the golem summoning system after Phase 15/16:
 
 ---
 
-## Phase 17 — World Generation
+## Phase 17 — Fluid Dynamics
 
-- [ ] Biome map — second Perlin layer drives region type (forest, plains, swamp, desert)
-- [ ] Procedural entity spawning — goblins in clusters, mushroom patches in forest, trees and rocks by biome
-- [ ] Structures — houses (exterior + linked room grid), ruins, caves
-- [ ] Rivers — pre-seeded Water tiles flowing from high terrain; connects to Phase 14 water system
-- [ ] Roads — connect structures; movement on road tiles at 1.5× speed
+Introduces `ComponentStore<T>` as the first ECS scaffold, and replaces the old
+`TileType::Water` / `tickWater()` model with entity-based shallow water simulation.
 
-**Tests**
-- [ ] World generates without panic on any seed
-- [ ] Biome at a given position is deterministic across repeated generation
+### ComponentStore
+- [ ] `ComponentStore<T>` — thin wrapper: `unordered_map<EntityID, T>` with `add()`, `get()`,
+      `remove()`, `has()`, `all()`. Lives in `component_store.hpp`. No dependencies.
+- [ ] `FluidComponent { float h, vx, vy; }` — first component. Stored in a
+      `ComponentStore<FluidComponent>` owned by `Game`.
+
+### Fluid entities
+- [ ] `EntityType::Water` added; one Water entity per wet tile
+- [ ] `TileType::Water` removed from enum; old `tickWater()` removed from `stimulus.cpp`
+- [ ] Water entities have no sprite, no shadow, no facing indicator — rendered as a tile overlay
+      based on `FluidComponent::h`
+
+### Shallow water simulation (`tickFluid`)
+- [ ] Per-tick update of `(h, vx, vy)` for every entity with a `FluidComponent`
+- [ ] **Force step**: add gravity contribution from terrain height gradient to velocity
+- [ ] **Advect step**: transfer mass between neighbouring cells proportional to velocity;
+      clamp to avoid negative depth
+- [ ] Spawn new Water entity + FluidComponent for newly wet neighbour tiles
+- [ ] Despawn Water entity when `h` drops below threshold
+
+### Preserved behaviours
+- [ ] `Wet` stimulus condition: fires when entity's tile has a Water entity with `h > epsilon`
+- [ ] Water slows movement (speed halved on arrival at tile occupied by Water entity)
+- [ ] Fire × Water extinguish: Fire tile adjacent to Water entity → BareEarth (in `tickFire`)
+
+### Save format
+- [ ] Bump save version; serialise Water entities and their `FluidComponent` data
+
+### Tests
+- [ ] `ComponentStore`: add, get, remove, has; iterate all; get on missing ID returns nullptr
+- [ ] `FluidComponent` present on Water entity; absent on Goblin
+- [ ] Water spreads to adjacent lower tile over N ticks
+- [ ] Water entity despawns when `h` reaches zero
+- [ ] `Wet` condition fires when standing on Water entity tile; not on dry tile
+- [ ] Fire adjacent to Water entity → extinguished
 
 ---
 
-## Phase 18 — Passive Grid Simulation
+## Phase 18 — World Generation
+
+### Biome map
+- [ ] Second Perlin noise layer → biome type per tile (Grassland, Forest, Volcanic; Mountains from height threshold)
+- [ ] `Terrain::biomeAt(TilePos)` — returns `Biome` enum; deterministic, cached like `typeAt`
+- [ ] World gen seeds tile types and entities by biome on first load
+
+### New tile type
+- [ ] `TileType::Straw` — result of scything Grass; harvestable material
+
+### New entity types
+- [ ] `EntityType::Rabbit` — wanders, eats grass tiles, reproduces in warrens
+- [ ] `EntityType::Warren` — static structure; houses rabbits; spawns new warrens when full; despawns when empty for too long
+- [ ] `EntityType::IronOre`, `CopperOre`, `CoalOre`, `SulphurOre` — ore deposit entities; static, embedded in terrain/caves. Mining → gains `Pushable` + collectable (walk-over). Collected loose ore placed on Fire tile → transforms to RawMetal after N ticks.
+
+### Procedural entity spawning
+- [ ] Goblins spawn in clusters in Grassland
+- [ ] Warrens + rabbits seeded in Grassland
+- [ ] Trees seeded densely in Forest biome
+- [ ] Ore entities seeded in clumps in Mountain / Volcanic terrain
+
+### Caves
+- [ ] Cave = bounded room grid containing ore entities; entrance = portal tile in world terrain
+- [ ] Cave closes (portal removed) when all ore inside is mined; new cave opens elsewhere in same biome
+- [ ] Cave interiors seeded with ore at creation
+
+### Ecosystem simulation
+- [ ] **Grass regrowth** — BareEarth in Grassland slowly converts back to Grass (random chance per tile per tick)
+- [ ] **Tree spread** — Forest biome only: trees colonise adjacent BareEarth over time; player-planted trees outside forest do not spread
+- [ ] **Goblin hunger** — `HungerComponent { int hunger; int threshold; int max; }` on Goblin entities; increments each tick; hunt mode above threshold; despawn at max
+- [ ] **Rabbit AI** — wanders, eats adjacent Grass (→ BareEarth), reproduces into nearest warren
+- [ ] **Warren logic** — spawns Rabbit up to capacity; spawns new Warren nearby when full; despawns after timeout when empty
+- [ ] **Goblin hunt AI** — seeks nearest Rabbit when hungry; rabbit despawns on collision, goblin hunger resets
+
+### New VM opcodes
+- [ ] `SCYTHE` — scythes tile ahead: Grass → Straw. Cost TBD.
+- [ ] `MINE` — mines ore entity ahead: entity gains Pushable + collectable state. Cost TBD.
+
+### Tests
+- [ ] `biomeAt` is deterministic across repeated calls with same seed
+- [ ] Mountain tiles appear above height threshold regardless of biome noise
+- [ ] World generates without crash on any seed
+- [ ] Grass regrows on BareEarth in Grassland over time
+- [ ] Warren spawns rabbits; despawns when empty
+- [ ] Goblin despawns at max hunger; hunger resets on eating rabbit
+- [ ] Mined ore entity becomes pushable/collectable
+- [ ] Cave portal removed when ore count reaches zero
+
+---
+
+## Phase 19 — Passive Grid Simulation
 
 ### Design decisions (settled)
 - **Hibernation trigger**: no player in grid → analyse routines, pre-schedule outputs, hibernate. Player enters → cancel pending outputs, snap agents, resume full sim.
@@ -595,7 +651,7 @@ skip full simulation and replace it with pre-scheduled output events.
 
 ---
 
-## Phase 19 — Assets, Audio & Polish
+## Phase 20 — Assets, Audio & Polish
 
 ### New assets
 - [ ] Proper sprite art for all entity types (player, goblin, mushroom, poop, campfire, tree, rock, chest, digger, farmer, guardian)
@@ -612,7 +668,7 @@ skip full simulation and replace it with pre-scheduled output events.
 
 ---
 
-## Phase 20 — Localisation
+## Phase 21 — Localisation
 
 - [ ] String table — all in-game text moved to `assets/locale/en.ini`; source references by key only
 - [ ] `Locale` class — `get(key)` returns `const std::string&`; falls back to key string if missing
@@ -623,7 +679,7 @@ skip full simulation and replace it with pre-scheduled output events.
 
 ---
 
-## Phase 21 — Combat System
+## Phase 22 — Combat System
 
 Design decision on combat style (VATS-style slow-time, stop-time, or turn-based) must be made
 before this phase begins. See `DESIGN.md § Combat`.
@@ -634,7 +690,7 @@ before this phase begins. See `DESIGN.md § Combat`.
 
 ---
 
-## Phase 22 — Platform & Multiplayer
+## Phase 23 — Platform & Multiplayer
 
 - [ ] Touchscreen input layer — all actions accessible via touch, co-equal with keyboard and gamepad
 - [ ] Port to additional platforms per `DESIGN.md § Platform` (order TBD)

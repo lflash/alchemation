@@ -157,12 +157,14 @@ Game::Game() {
     studio.terrain.setType({ 1,  1}, TileType::Stone);
     studio.terrain.setType({-1,  1}, TileType::Clay);
 
-    // ── Phase 14 demo: water pool south-east of spawn ────────────────────────
-    // Starting level 1.0 each; will spread and thin until level drops to Puddle.
+    // ── Phase 17 demo: water pool south-east of spawn ────────────────────────
     const TilePos waterDemo[] = {{20, 20}, {21, 20}, {20, 21}};
     for (const TilePos& p : waterDemo) {
-        world.terrain.setType(p, TileType::Water);
-        world.waterLevel[p] = 1.0f;
+        int lz = world.terrain.levelAt(p);
+        TilePos wp = {p.x, p.y, lz};
+        EntityID weid = registry_.spawn(EntityType::Water, wp);
+        world.add(weid, *registry_.get(weid));
+        fluidComponents_.add(weid, {1.0f, 0.f, 0.f});
     }
 }
 
@@ -186,7 +188,7 @@ void Game::tick(const Input& input, Tick currentTick) {
         tickMovement(grid);
         tickFire(grid, registry_, currentTick);
         tickVoltage(grid, registry_);
-        tickWater(grid);
+        tickFluid(grid, fluidComponents_, registry_);
         grid.events.flush();
     }
 }
@@ -296,6 +298,18 @@ const Entity* Game::entityAtTile(TilePos tile) const {
         if (e && e->pos == tile) return e;
     }
     return nullptr;
+}
+
+std::vector<FluidOverlay> Game::fluidOverlay() const {
+    std::vector<FluidOverlay> out;
+    const Grid& g = activeGrid();
+    for (EntityID eid : g.entities) {
+        const Entity* e = registry_.get(eid);
+        if (!e || e->type != EntityType::Water) continue;
+        const FluidComponent* fc = fluidComponents_.get(eid);
+        if (fc && fc->h > 0.f) out.push_back({e->pos, fc->h});
+    }
+    return out;
 }
 
 void Game::queueClickMove(TilePos target) {
@@ -584,8 +598,11 @@ void Game::tickPlayerInput(const Input& input) {
         TilePos ahead = player->pos + dirToDelta(player->facing);
         const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
         if (!gi) gi = &GOLEM_TABLE[0];  // default: Mud Golem
-        if (inStudio || player->mana >= gi->manaCost) {
-            if (!inStudio) { player->mana -= gi->manaCost; if (player->mana < 1) player->mana = 1; }
+        // Deploy cost = recording complexity (moves); fallback to golem's intrinsic cost.
+        bool hasRec = !recorder_.recordings.empty() && selectedRecording_ < recorder_.recordings.size();
+        int deployCost = hasRec ? recorder_.recordings[selectedRecording_].manaCost() : gi->manaCost;
+        if (inStudio || player->mana >= deployCost) {
+            if (!inStudio) { player->mana -= deployCost; if (player->mana < 1) player->mana = 1; }
 
             EntityID gid = registry_.spawn(gi->type, ahead);
             Entity*  ge  = registry_.get(gid);
@@ -651,7 +668,12 @@ void Game::tickVM(Grid& grid) {
             TileType tileHere = grid.terrain.typeAt(ent->pos);
             if (tileHere == TileType::Fire)
                 stimuli[static_cast<int>(Condition::Fire)] = 1;
-            if (tileHere == TileType::Puddle || tileHere == TileType::Water)
+            bool hasFluid = false;
+            for (EntityID at : grid.spatial.at(ent->pos)) {
+                const Entity* ae = registry_.get(at);
+                if (ae && ae->type == EntityType::Water) { hasFluid = true; break; }
+            }
+            if (tileHere == TileType::Puddle || hasFluid)
                 stimuli[static_cast<int>(Condition::Wet)] = 1;
 
             TilePos ahead = ent->pos + dirToDelta(ent->facing);
@@ -752,7 +774,8 @@ namespace {
 
     // Write one grid's terrain + portals + non-player, non-Poop entities.
     void wrGrid(std::ostream& f, const Grid& grid,
-                EntityID playerID, const EntityRegistry& reg) {
+                EntityID playerID, const EntityRegistry& reg,
+                const ComponentStore<FluidComponent>& fluids) {
         wr<uint32_t>(f, grid.id);
         wr<int32_t>(f,  grid.width);
         wr<int32_t>(f,  grid.height);
@@ -798,6 +821,14 @@ namespace {
             wr<uint8_t>(f, static_cast<uint8_t>(e->facing));
             wr<int32_t>(f, e->mana);
             wr<int32_t>(f, e->health);
+            // Water entities carry extra FluidComponent data.
+            if (e->type == EntityType::Water) {
+                const FluidComponent* fc = fluids.get(eid);
+                float h  = fc ? fc->h  : 0.f;
+                float vx = fc ? fc->vx : 0.f;
+                float vy = fc ? fc->vy : 0.f;
+                wr<float>(f, h); wr<float>(f, vx); wr<float>(f, vy);
+            }
         }
     }
 }
@@ -807,7 +838,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 9);   // version 9: Water tile type, mana floor
+    wr<uint8_t>(f, 10);   // version 10: fluid entities (FluidComponent), removed TileType::Water
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -831,7 +862,7 @@ void Game::save(const std::string& path) const {
 
     for (const auto& [id, grid] : grids_) {
         if (id == GRID_STUDIO) continue;
-        wrGrid(f, grid, playerID_, registry_);
+        wrGrid(f, grid, playerID_, registry_, fluidComponents_);
     }
 
     // Recordings
@@ -859,7 +890,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 9) return false;
+    if (version != 10) return false;
 
     // Clear all state
     for (auto& [id, grid] : grids_) {
@@ -879,6 +910,7 @@ bool Game::load(const std::string& path) {
         else ++it;
     }
     agentSlots_.clear();
+    fluidComponents_.clear();
     pendingTransfers_.clear();
 
     // Player
@@ -940,6 +972,12 @@ bool Game::load(const std::string& path) {
             Entity*  e   = registry_.get(eid);
             e->facing = facing; e->mana = mana; e->health = health;
             grid.add(eid, *e);
+            if (et == EntityType::Water) {
+                float h  = rd<float>(f);
+                float vx = rd<float>(f);
+                float vy = rd<float>(f);
+                fluidComponents_.add(eid, {h, vx, vy});
+            }
         }
     }
 
@@ -975,12 +1013,6 @@ bool Game::load(const std::string& path) {
     selectedRecording_ = static_cast<size_t>(rd<uint64_t>(f));
     if (selectedRecording_ >= recorder_.recordings.size())
         selectedRecording_ = 0;
-
-    // Initialise waterLevel for any Water tiles found in saved terrain overrides.
-    for (auto& [id, grid] : grids_)
-        for (const auto& [pos, type] : grid.terrain.overrides())
-            if (type == TileType::Water && !grid.waterLevel.count(pos))
-                grid.waterLevel[pos] = 1.0f;
 
     // Re-apply static studio medium tiles (cleared by clearOverrides above).
     Grid& studio = grids_.at(GRID_STUDIO);

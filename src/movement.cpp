@@ -54,11 +54,15 @@ void Game::tickMovement(Grid& grid) {
         if (arrived) {
             grid.spatial.move(eid, oldPos, ent->pos, ent->size);
 
-            // Water slows movement: half speed while standing on a Water tile.
+            // Water slows movement: half speed while standing on a Water entity tile.
             if (ent->speed > 0.0f) {
-                TileType tileHere = grid.terrain.typeAt(ent->pos);
-                float    baseSpeed = defaultConfig(ent->type).speed;
-                ent->speed = (tileHere == TileType::Water) ? baseSpeed * 0.5f : baseSpeed;
+                float baseSpeed = defaultConfig(ent->type).speed;
+                bool  onWater   = false;
+                for (EntityID at : grid.spatial.at(ent->pos)) {
+                    const Entity* ae = registry_.get(at);
+                    if (ae && ae->type == EntityType::Water) { onWater = true; break; }
+                }
+                ent->speed = onWater ? baseSpeed * 0.5f : baseSpeed;
             }
             grid.events.emit({ EventType::Arrived, eid });
 

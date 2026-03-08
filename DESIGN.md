@@ -1002,17 +1002,85 @@ grid_game/
 
 ---
 
+## World & Biomes
+
+### Biome generation
+A second Perlin noise layer determines biome type. Biomes are large contiguous regions with
+gradual transitions. Mountains are not a separate biome — they emerge from the existing
+height system (tiles above a `levelAt` threshold become mountain terrain regardless of biome).
+
+### Biomes
+
+#### Grassland
+- **Terrain**: Grass tiles grow back from BareEarth over time (tile conversion, tick-driven).
+  Grass can be scythed → Straw tile. Straw is a harvestable material.
+- **Creatures**: Rabbits (wander, eat grass tiles), Warrens (structure that houses rabbits).
+- **Materials**: Straw.
+- **Ecosystem**: Rabbits reproduce in warrens. Warrens spawn new warrens when full; empty
+  warrens despawn after a timeout. Goblins hunt rabbits when hungry; starve to death if they
+  cannot find food. This produces a natural Lotka-Volterra predator-prey equilibrium:
+  goblins suppress rabbits → rabbits decline → goblins starve → rabbits recover → repeat.
+- **Goblin hunger**: tracked as a `hunger` int counter that increments each tick. Above a
+  threshold the goblin enters hunt mode. At max hunger the goblin despawns. When not hungry
+  the goblin does other things (TBD).
+
+#### Forest
+- **Terrain**: Dense tree coverage. Trees spread naturally within the forest biome only
+  (colonise adjacent BareEarth over time). Trees do not spread outside the forest biome,
+  but the player can plant/grow them elsewhere manually. Stumps do not regrow.
+- **Creatures**: Spirits (behaviour TBD).
+- **Materials**: Wood (from felling trees).
+
+#### Volcanic
+- **Terrain**: Fire tiles, hostile environment.
+- **Creatures**: TBD.
+- **Ore deposits**: Iron, Sulphur. Spawn as ore entities (see Ore & Smelting below).
+
+#### Mountains
+- **Terrain**: High-elevation tiles driven by the height system (levelAt threshold).
+- **Creatures**: TBD.
+- **Ore deposits**: Iron, Copper, Coal. Iron appears in both Mountains and Volcanic.
+
+### Ore & Smelting
+Ore is not a tile type — it is an entity. Ore deposits spawn as clusters of ore entities
+embedded in the landscape or inside caves.
+
+- **Mining**: player or golem mines an ore entity → it becomes *loose* (gains `Pushable`
+  capability, collectable on walk-over like a mushroom or chest).
+- **Smelting**: a loose ore entity placed on a Fire tile → after N ticks → transforms into
+  a RawMetal entity of that ore's type (e.g. LooseIronOre → RawIron). RawMetal is
+  collectable and feeds into crafting/production chains (TBD).
+- **Ore types**: IronOre, CopperOre, CoalOre, SulphurOre.
+
+### Caves
+Caves are bounded room grids (existing portal/room system) containing ore deposits.
+A cave entrance is a portal tile that appears in the world terrain.
+
+- Caves open and close periodically. When a cave's ore is fully mined (no ore entities
+  remain inside), the cave closes (portal removed) and a new cave opens somewhere else
+  in the same biome.
+- Cave interiors use the existing bounded grid system. Ore entities are seeded at cave
+  creation.
+
+### Design principles
+- **Player parity**: almost everything the player can do, golems can be scripted to do.
+  The game is about automating actions. Scything, planting, mining are all VM opcodes.
+- **Emergent systems**: ecosystem dynamics (hunger, predation, grass regrowth, tree spread)
+  arise from simple per-entity and per-tile rules, not scripted events.
+
+---
+
 ## Architectural Decisions
 
 Decisions made through conversation; recorded here to avoid revisiting them unnecessarily.
 
 | # | Topic | Decision |
 |---|---|---|
-| 1 | Entity model | Keep type-driven dispatch + capabilities bitfield for now. Alternatives (component bag, full ECS) not worth the complexity at current entity-type count. Revisit before Phase 17 when entity variety peaks. |
+| 1 | Entity model | **ECS (Entity-Component System)** is the target architecture. For the CPU prototype, introduce a lightweight `ComponentStore<T>` (wraps `unordered_map<EntityID, T>`) as the first step. Components are plain data structs; systems iterate component stores. The flat `Entity` struct retains core identity fields (`id`, `type`, `pos`, `destination`, `moveT`, `facing`, `capabilities`); everything type-specific moves into components over time. `FluidComponent { float h, vx, vy }` is the first instance. The GPU rewrite will use true SoA ECS with fixed-size component arrays and parallel kernels. |
 | 2 | Instruction format | Flat struct — all fields always present, unused fields zero. Chosen over tagged union for ease of serialisation and studio editor field access. Implemented in `routine.hpp`. |
-| 3 | Stimulus abstraction | Generic `StimulusField { type, intensity, decay }` per tile. `Wet` is a stimulus (any fluid source sets it). `Water` is a fluid tile type with volume-conserving spreading dynamics (`tickWater`, Phase 14). VM checks `Wet` (fires on Puddle or Water tiles), not `Water` directly. |
+| 3 | Stimulus abstraction | Generic `StimulusField { type, intensity, decay }` per tile. `Wet` is a stimulus (any fluid source sets it). Fluid is an entity with a `FluidComponent`; `TileType::Water` removed — renderer checks for fluid entity at tile instead. VM checks `Wet` stimulus. |
 | 4 | Multi-grid scaling | Hibernation: no player in grid → analyse routines, pre-schedule outputs, hibernate. Player enters → cancel outputs, snap agents, resume. Exact (no approximation). Reuses existing Scheduler. |
-| 5 | GPU goal | CPU simulation is a feature prototype. Full GPU redesign (Vulkan compute or similar) post-Phase 20. Struct-of-arrays layout, fixed-size slots, parallel tick logic. No incremental migration — full rewrite. |
+| 5 | GPU goal | CPU simulation is a feature prototype. Full GPU redesign (Vulkan compute or similar) post-Phase 20. True SoA ECS: component arrays are GPU buffers, systems are compute kernels, one thread per entity. The `ComponentStore<T>` introduced in the CPU prototype maps directly to a typed GPU buffer. No incremental migration — full rewrite. |
 | 6 | Save format versioning | Bump version on every layout change; mismatch = fresh world. No migration code. Format will be replaced in GPU rewrite. |
 
 ---

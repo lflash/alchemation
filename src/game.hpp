@@ -7,6 +7,7 @@
 #include "recorder.hpp"
 #include "routine_vm.hpp"
 #include "stimulus.hpp"
+#include "fluid.hpp"
 #include <unordered_map>
 #include <string>
 #include <utility>
@@ -142,6 +143,11 @@ public:
     // Queue a one-step move toward target for the next tick.
     void queueClickMove(TilePos target);
 
+    // Fluid overlay (Phase 17).
+    // Returns {pos, h} for every Water entity in the active grid.
+    // Passed to Renderer::drawFluidOverlay() each frame.
+    std::vector<FluidOverlay> fluidOverlay() const;
+
     // Persistence.
     void save(const std::string& path) const;
     bool load(const std::string& path);
@@ -194,6 +200,9 @@ private:
     int                      playerPrevZ_ = 0;
     std::unordered_map<EntityID, AgentSlot> agentSlots_;
     size_t selectedRecording_ = 0;
+
+    // ECS component stores (Phase 17+)
+    ComponentStore<FluidComponent> fluidComponents_;
 
     // Pending click-move (set by queueClickMove, consumed in tickPlayerInput).
     TilePos pendingClickDelta_ = {0, 0, 0};

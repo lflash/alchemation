@@ -408,15 +408,6 @@ SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type) const {
                  static_cast<uint8_t>(115 * dayFactor),
                  static_cast<uint8_t>( 51 * dayFactor), 255 };
 
-    if (type == TileType::Water) {
-        // Animated blue: deeper and more vivid than Puddle, with a gentle slow swell.
-        float wave = 0.8f + 0.2f * std::sin(dayNightT_ * 2.5f
-                                             + pos.x * 0.7f + pos.y * 0.8f);
-        return { static_cast<uint8_t>( 30 * wave),
-                 static_cast<uint8_t>( 80 * wave),
-                 static_cast<uint8_t>(210 * wave), 255 };
-    }
-
     if (studioMode_) {
         // Muted blue-grey studio floor.
         int v = static_cast<int>(height * 18.0f);
@@ -1044,6 +1035,31 @@ void Renderer::drawRebindPanel(const InputMap& map, int selectedRow, bool listen
 }
 
 // ─── Phase 16: Mouse interaction ─────────────────────────────────────────────
+
+void Renderer::drawFluidOverlay(const std::vector<FluidOverlay>& overlay) {
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_BLEND);
+    for (const FluidOverlay& fw : overlay) {
+        float lf = static_cast<float>(fw.pos.z);
+        int sx = toPixelX(fw.pos.x,     lf);
+        int sy = toPixelY(fw.pos.y,     lf);
+        int sw = toPixelX(fw.pos.x + 1, lf) - sx;
+        int sh = static_cast<int>(std::ceil(TILE_H * camera_.zoom));
+
+        // Depth → colour: shallow = light blue-grey, deep = vivid blue.
+        float wave  = 0.85f + 0.15f * std::sin(dayNightT_ * 2.5f
+                              + fw.pos.x * 0.7f + fw.pos.y * 0.8f);
+        float depth = std::min(fw.h, 3.0f) / 3.0f;   // normalise to [0,1]
+        uint8_t r = static_cast<uint8_t>(30  * wave * depth);
+        uint8_t g = static_cast<uint8_t>(80  * wave * depth);
+        uint8_t b = static_cast<uint8_t>(210 * wave);
+        uint8_t a = static_cast<uint8_t>(120 + 100 * depth);
+
+        SDL_SetRenderDrawColor(sdl, r, g, b, a);
+        SDL_Rect rect = { sx, sy, sw, sh };
+        SDL_RenderFillRect(sdl, &rect);
+    }
+    SDL_SetRenderDrawBlendMode(sdl, SDL_BLENDMODE_NONE);
+}
 
 void Renderer::drawHoverHighlight(TilePos tile) {
     float lf = static_cast<float>(tile.z);

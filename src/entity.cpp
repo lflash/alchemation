@@ -29,6 +29,8 @@ EntityConfig defaultConfig(EntityType type) {
         case EntityType::WoodGolem:   return { 0.08f, {0.8f, 0.8f}, 1, 6  };
         case EntityType::IronGolem:   return { 0.06f, {0.8f, 0.8f}, 1, 10 };
         case EntityType::CopperGolem: return { 0.12f, {0.8f, 0.8f}, 1, 4  };
+        // Fluid
+        case EntityType::Water:       return { 0.0f,  {1.0f, 1.0f}, -1, 0 };
     }
     return { 0.1f, {0.8f, 0.8f}, 0, 0 };
 }

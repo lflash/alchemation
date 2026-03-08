@@ -2,6 +2,7 @@
 
 #include "irenderer.hpp"
 #include "effects.hpp"
+#include "fluid.hpp"
 #include "game.hpp"
 #include "ui.hpp"
 #include "studio.hpp"
@@ -190,6 +191,9 @@ public:
                  static_cast<int>(std::floor(tileY)),
                  static_cast<int>(std::round(cam.z)) };
     }
+
+    // Draw water depth overlays on tiles (call after drawTerrain, before entities).
+    void drawFluidOverlay(const std::vector<FluidOverlay>& overlay);
 
     // Draw a translucent white overlay on the hovered tile.
     void drawHoverHighlight(TilePos tile);

@@ -62,6 +62,8 @@ enum class EntityType {
     // Golems — summoned from medium tiles (Phase 12)
     MudGolem, StoneGolem, ClayGolem, WaterGolem,
     BushGolem, WoodGolem, IronGolem, CopperGolem,
+    // Fluid (Phase 17) — one entity per wet tile; carries FluidComponent
+    Water,
 };
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
@@ -70,8 +72,8 @@ enum class TileType {
     Grass, BareEarth, Portal, Fire, Puddle,
     // Summoning mediums — each yields one golem type (Phase 12)
     Mud, Stone, Clay, Bush, Wood, Iron, Copper,
-    // Environmental fluid (Phase 14)
-    Water,
+    // Straw — scythed grass (Phase 18)
+    Straw,
 };
 
 
