@@ -9,12 +9,13 @@ materials in the world, and direct those golems to automate resource collection,
 modification, and production chains. The long-term goal is a rich, living world that feels
 populated and alive.
 
-Agents perceive and react to environmental stimuli mediated by an **alchemy engine** — eight base
-elements (Earth, Air, Water, Fire, Curse, Goo, Holy, Acid) that combine Doodle-God-style to
-produce new materials, effects, and entities. Stimuli are per-tile float fields (fire intensity,
-cold, wetness, voltage, wind) that propagate across the tile grid each tick. Agents sample the
-tile they occupy to determine their reaction. Stimuli are not entities — they are properties of
-space, updated in parallel by the compute backend.
+Agents perceive and react to environmental stimuli mediated by an **alchemy engine** — a principle
+system of ten quantities (Heat, Cold, Wet, Dry, Life, Death, Positive, Negative, Adhesive,
+Repellent) that define every entity and substance in the world. Substances transform when their
+principle profile shifts close enough to a known attractor. Stimuli are fields that radiate from
+entities into surrounding 3D space each tick; agents sample the local field to determine their
+reaction. Fields are not properties of tiles — they propagate from entity sources. Mana is the
+Life principle. See `ALCHEMY.md` for the full system design.
 
 The simulation is designed to eventually run in parallel on the GPU — the agent count
 target (millions) makes CPU-serial execution infeasible at scale. The current C++/SDL2
@@ -67,8 +68,9 @@ visibility, and accurate perspective scaling without a full 3D engine.
   independent simulations (main world, studio, rooms, parallel universes).
 - **Tile hard cap.** A maximum of 8 entities may occupy the same tile simultaneously.
   A move that would exceed this cap is blocked.
-- **Three occupancy layers, independently managed.** Terrain type and stimulus fields
-  are properties of tiles. Entities are a separate system. All three coexist freely.
+- **Two occupancy layers, independently managed.** Terrain type is a property of tiles
+  (appearance only). Entities are a separate system. Fields radiate from entities — tiles
+  carry no field information.
 - **No inventory.** The player carries only mana. All resources exist as world tiles or entities.
 - **No weapons.** The player never deals damage directly. Golems, terrain, and environmental
   effects are the only sources of damage.
@@ -99,7 +101,7 @@ and defeating the King via golems.
 
 ### Entity Placeholders
 
-All current `EntityType` names (`Goblin`, `Mushroom`, `Poop`, `Campfire`, `TreeStump`, `Log`,
+All current `EntityType` names (`Goblin`, `Mushroom`, `Campfire`, `TreeStump`, `Log`,
 `Battery`, `Lightbulb`) are temporary placeholders used during development. They will be renamed
 and replaced as the golem system and alchemy engine take shape. See `ENTITIES.md` for the master
 list.
@@ -122,7 +124,7 @@ using Tick        = uint64_t;
 
 enum class EntityType {
     // Core
-    Player, Goblin, Mushroom, Poop,
+    Player, Goblin, Mushroom,
     // Static stimulus sources
     Campfire,    // static; spreads fire to adjacent tiles
     TreeStump,   // burnable; ignites after fire exposure, despawns when burned
@@ -443,11 +445,11 @@ Two-phase:
 **Collision resolution** by `(mover type, occupant type)`:
 
 ```
-            │ Player   Goblin   Mushroom  Poop
-────────────┼──────────────────────────────────
-Player      │  —       Block*   Collect   Pass   *bump combat: push + damage
-Goblin      │ Combat   Block    Pass      Pass
-Poop        │  Pass    Hit      Pass      Pass
+            │ Player   Goblin   Mushroom
+────────────┼───────────────────────────────────────────────────────
+Player      │  —       Block*   Collect   *bump combat: push + damage
+Goblin      │ Combat   Block    Pass
+MudGolem    │  Block   Hit      Pass      (shares Hit with IronGolem, WoodGolem)
 IronGolem   │  Block   Hit      Pass      Pass
 WoodGolem   │  Block   Hit      Pass      Pass
 MudGolem    │  Block   Block    Pass      Pass
@@ -515,22 +517,31 @@ threshold water stays put, forming a stable puddle or shore.
 
 ### Alchemy Engine
 
-The long-term replacement and expansion of the current fire/voltage stimulus system. All
-environmental interactions are elements of the alchemy system. See `ALCHEMY.md` for the master
-element list, combination table, and stimulus field definitions.
+Every entity optionally carries a `PrincipleProfile` — ten signed `int8_t` values across five
+pairs: Caloric (Heat/Cold), Aqueous (Wet/Dry), Vital (Life/Death), Galvanic (Positive/Negative),
+Cohesion (Adhesive/Repellent). Stored as `ComponentStore<PrincipleProfile>`. Mana is the Life
+principle. See `ALCHEMY.md` for the full system design.
 
-**Spreading effects** (Fire, Electricity, Cold, Wet, Wind, …) propagate across tiles each tick
-via a **spread equation** — a per-tile computation that takes the effect's underlying quantities
-as inputs (e.g. Fire depends on heat and wetness; Electricity depends on voltage and conductivity).
-Agents sense effects via `JUMP_IF` / `JUMP_IF_NOT`. At scale, spread equations are the GPU
-compute kernel. See `ALCHEMY.md` for the full effect and quantity list.
+**Fields** — entities with a `PrincipleProfile` radiate principle fields into surrounding 3D
+space each tick. The field at any location is the sum of contributions from nearby entities with
+distance falloff (1 tile = 1 metre; falloff modelled on real-world physics per field type).
+Fields are computed into a transient per-tile grid each tick and discarded after application.
+Tiles store nothing. Each field is independent.
 
-**Combinations** follow a Doodle-God-style discovery model: combining two elements or materials
-produces a new one. The **Philosopher's Stone** is the terminal combination.
+**Transformation** — a substance's profile shifts over time under the local field. The entity
+crystallises into whichever named substance has the closest profile in 10D principle space
+(attractor model, no threshold). Rate of transformation depends on the substance and field
+intensity.
+
+**Combination** — when two substances occupy the same tile, they combine. The result is a
+weighted average of both profiles (weighted by magnitude), modified by the local field and by
+a catalytic field from nearby non-consumed entities. Result is compared against all attractors.
+
+**Equipment** — players shape field environments by arranging entities in space. No explicit
+vessel entities; no pattern matching. Field intensity determines the outcome.
 
 *Current implementation (pre-alchemy-engine):* fire and voltage are two hardcoded stimulus
-systems. These will be subsumed by the alchemy engine in Phase 14+. See Fire & Voltage Stimuli
-below.
+systems. These will be replaced by the principle system. See Fire & Voltage Stimuli below.
 
 ---
 
@@ -934,7 +945,7 @@ Default keyboard bindings (all remappable via K panel or `settings.dat`):
 |---|---|
 | Player + Mushroom | Player gains 3 mana. Mushroom despawns. |
 | Player + Goblin | Bump combat: goblin takes `player.mana` damage, is pushed back. |
-| Poop + Goblin | Goblin takes hit. |
+| MudGolem + Goblin | Goblin takes hit. |
 | Any entity + Chest | Entity gains +5 mana. Chest despawns. |
 
 **Environmental interactions:**
@@ -959,7 +970,7 @@ grid_game/
 │   ├── fonts/
 │   │   └── DejaVuSansMono.ttf
 │   ├── sprites/
-│   │   ├── player.png  goblin.png  mushroom.png  poop.png
+│   │   ├── player.png  goblin.png  mushroom.png  agent.png
 │   │   ├── campfire.png  treestump.png  log.png
 │   │   └── battery.png  lightbulb.png
 │   ├── sfx/                           ← one-shot sound effects (WAV/OGG)
@@ -1043,9 +1054,16 @@ to protect the hand-placed demo content.
   warrens despawn after a timeout. Goblins hunt rabbits when hungry; starve to death if they
   cannot find food. This produces a natural Lotka-Volterra predator-prey equilibrium:
   goblins suppress rabbits → rabbits decline → goblins starve → rabbits recover → repeat.
-- **Goblin hunger**: tracked as a `hunger` int counter that increments each tick. Above a
-  threshold the goblin enters hunt mode. At max hunger the goblin despawns. When not hungry
-  the goblin does other things (TBD).
+- **Goblin AI** (implemented): conditionless scoring equation; no state machine.
+  `score(d) = hunger*(1-loaded)*approach(prey)*3.0 + loaded*approach(fire)*2.5 + approach(centroid)*0.6 + noise`
+  Goblins hunt rabbits and loose meat, carry food back to campfire, eat to restore mana,
+  attack adjacent rabbits, steal food from player, and maintain pack cohesion. Mana decays
+  every 300 ticks. Speed 0.17 (faster than rabbit 0.15). Single pack for now; multiple
+  packs (each with own campfire) deferred.
+- **Food chain** (implemented): dead rabbit → `Meat` entity (mana = 5 + rabbit.mana).
+  Meat adjacent to Fire for 150 ticks → `CookedMeat` (mana × 4). Both Carriable.
+- **Carry system** (implemented): player picks up/drops Carriable entities (`P`/`B`/`E`).
+  Goblin also picks up, carries, and steals food items.
 
 #### Forest
 - **Terrain**: Dense tree coverage. Trees spread naturally within the forest biome only
@@ -1073,15 +1091,26 @@ to protect the hand-placed demo content.
 - **Creatures**: TBD.
 - **Ore deposits**: Iron, Copper, Coal. Iron appears in both Mountains and Volcanic.
 
+#### Snow
+- **Trigger**: biome noise between Grassland and Mountains (threshold `v ∈ [0.4, 0.65)`).
+  Mountains still override Snow when `levelAt >= 3`.
+- **Terrain**: pale blue-white tile colour. Snow tiles slow movement (speed × 0.6, like Water
+  but without fluid dynamics). Fire tiles adjacent to Snow convert Snow → Puddle (via existing
+  Fire × Water extinguish logic, once Snow is treated as a wet surface).
+- **Creatures**: TBD — arctic animals (arctic rabbit variant, ice golem type).
+- **Ore deposits**: IceOre (cosmetic/craft material, TBD).
+- **Ecosystem**: cold region. Goblins from adjacent Grassland do not naturally enter; provides
+  safe zone for rabbits. Future: blizzard weather events (reduced visibility, movement penalty).
+
 ### Ore & Smelting
 Ore is not a tile type — it is an entity. Ore deposits spawn as clusters of ore entities
 embedded in the landscape or inside caves.
 
 - **Mining**: player or golem mines an ore entity → it becomes *loose* (gains `Pushable`
   capability, collectable on walk-over like a mushroom or chest).
-- **Smelting**: a loose ore entity placed on a Fire tile → after N ticks → transforms into
-  a RawMetal entity of that ore's type (e.g. LooseIronOre → RawIron). RawMetal is
-  collectable and feeds into crafting/production chains (TBD).
+- **Smelting**: a loose ore entity in a high-Heat field → principle profile shifts over time
+  → when profile is closest to the RawMetal attractor → transforms into a RawMetal entity
+  (e.g. IronOre → RawIron). RawMetal is collectable and feeds into production chains (TBD).
 - **Ore types**: IronOre, CopperOre, CoalOre, SulphurOre.
 
 ### Caves
@@ -1110,7 +1139,7 @@ Decisions made through conversation; recorded here to avoid revisiting them unne
 |---|---|---|
 | 1 | Entity model | **ECS (Entity-Component System)** is the target architecture. For the CPU prototype, introduce a lightweight `ComponentStore<T>` (wraps `unordered_map<EntityID, T>`) as the first step. Components are plain data structs; systems iterate component stores. The flat `Entity` struct retains core identity fields (`id`, `type`, `pos`, `destination`, `moveT`, `facing`, `capabilities`); everything type-specific moves into components over time. `FluidComponent { float h, vx, vy }` is the first instance. The GPU rewrite will use true SoA ECS with fixed-size component arrays and parallel kernels. |
 | 2 | Instruction format | Flat struct — all fields always present, unused fields zero. Chosen over tagged union for ease of serialisation and studio editor field access. Implemented in `routine.hpp`. |
-| 3 | Stimulus abstraction | Generic `StimulusField { type, intensity, decay }` per tile. `Wet` is a stimulus (any fluid source sets it). Fluid is an entity with a `FluidComponent`; `TileType::Water` removed — renderer checks for fluid entity at tile instead. VM checks `Wet` stimulus. |
+| 3 | Alchemy / field system | Ten principles across five pairs (Caloric, Aqueous, Vital, Galvanic, Cohesion) stored as `ComponentStore<PrincipleProfile>` (lazy, `int8_t[10]`). Fields radiate from entities into a transient per-tile grid each tick; tiles store nothing permanently. Transformation uses an attractor model — entity crystallises into nearest named substance in 10D principle space. Combination is a magnitude-weighted average of two profiles, modified by local and catalytic fields. See `ALCHEMY.md`. |
 | 4 | Multi-grid scaling | Hibernation: no player in grid → analyse routines, pre-schedule outputs, hibernate. Player enters → cancel outputs, snap agents, resume. Exact (no approximation). Reuses existing Scheduler. |
 | 5 | GPU goal | CPU simulation is a feature prototype. Full GPU redesign (Vulkan compute or similar) post-Phase 20. True SoA ECS: component arrays are GPU buffers, systems are compute kernels, one thread per entity. The `ComponentStore<T>` introduced in the CPU prototype maps directly to a typed GPU buffer. No incremental migration — full rewrite. |
 | 6 | Save format versioning | Bump version on every layout change; mismatch = fresh world. No migration code. Format will be replaced in GPU rewrite. |

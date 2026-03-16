@@ -31,12 +31,12 @@ Current code names that will be replaced as the design solidifies.
 |------------------|------------|----------------------------------------------------------|--------------|
 | `Goblin`         | Enemy      | Generic enemy type — final name/lore TBD                 | TBD          |
 | `Mushroom`       | Resource   | Basic harvestable resource — name likely kept            | TBD          |
-| `Poop`           | Agent      | Deployed routine agent — will become a specific golem    | 12           |
+| `MudGolem`       | Agent      | Default deployed routine agent; also spawned from Mud tiles | 12        |
 | `Campfire`       | Structure  | Fire stimulus source — final form TBD (brazier? hearth?) | TBD          |
 | `TreeStump`      | Terrain obj| Burnable/choppable object — rename to `Tree` or similar  | 12           |
 | `Log`            | Resource   | Dropped resource from chopped tree                       | 12           |
-| `Battery`        | Structure  | Voltage source — will be an alchemy product              | 14           |
-| `Lightbulb`      | Structure  | Voltage indicator — will be an alchemy product           | 14           |
+| `Battery`        | Structure  | Galvanic source — will be an alchemy product; high Positive principle | 22 |
+| `Lightbulb`      | Structure  | Galvanic indicator — will be an alchemy product                       | 22 |
 
 ---
 

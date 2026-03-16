@@ -78,7 +78,7 @@ Tests are written alongside the system they cover.
 - [x] Goblin wanders randomly each tick (1/80 chance per tick)
 - [x] Player + goblin bump combat: goblin takes `player.mana` damage, pushed back
 - [x] Goblin despawns at 0 health
-- [x] Poop + goblin: goblin takes hit
+- [x] MudGolem + goblin: goblin takes hit
 
 **Tests** ✓
 
@@ -302,7 +302,7 @@ Deferred / as needed:
 - [ ] **Save format versioning policy** — bump version on every layout change; mismatch = fresh world (no migration). Document what changed in a comment next to the version constant. Current: v7. (Policy decided — just needs discipline per phase)
 - [ ] **Entity pointer instability** — `EntityRegistry` stores entities in `unordered_map`; pointers/references invalidate on rehash. Callers that cache `Entity*` across ticks may see stale pointers. Audit usages; switch to ID-only access pattern or use a slot-map (MEDIUM)
 - [ ] **Z-level queries unchecked** — a few `SpatialGrid::at()` calls pass a `TilePos` with `z=0` when the intent is "any z". Add a `atAnyZ(x,y)` helper or audit call sites (LOW)
-- [ ] **Entity placeholder audit** — all current `EntityType` names (`Goblin`, `Mushroom`, `Poop`, `Campfire`, `TreeStump`, `Log`, `Battery`, `Lightbulb`) are temporary placeholders. Before Phase 12, update `ENTITIES.md` with final names and rename throughout the codebase. (See `DESIGN.md § Entity Placeholders`)
+- [ ] **Entity placeholder audit** — all current `EntityType` names (`Goblin`, `Mushroom`, `Campfire`, `TreeStump`, `Log`, `Battery`, `Lightbulb`) are temporary placeholders. Before Phase 12, update `ENTITIES.md` with final names and rename throughout the codebase. (See `DESIGN.md § Entity Placeholders`)
 
 ---
 
@@ -512,8 +512,8 @@ Reworked the golem summoning system after Phase 15/16:
 - [x] **Target recording encoded in instruction** — `instr.addr` = selected recording index at record time; summoned golem receives that exact recording (not the summoning agent's own)
 - [x] **No tile consumption** — summoning does not dig/consume the medium tile; medium tiles are reusable
 - [x] **Mud Golem fallback** — summon on any tile (Grass, BareEarth, etc.) defaults to spawning a Mud Golem; medium tiles still yield their specific golem types
-- [x] **All routine agents despawn at HALT** — golems and Poop agents all despawn when their script ends
-- [x] **Deploy action removed** — `Action::Deploy` and Poop-spawning removed; `E` now summons a golem
+- [x] **All routine agents despawn at HALT** — all golem types despawn when their script ends
+- [x] **Deploy action removed** — `Action::Deploy` removed; `E` now summons a golem (defaults to MudGolem)
 - [x] **Strafe recording fix** — `MOVE_REL` instructions store a strafe flag in `instr.threshold`; VM passes `isStrafe` through `VMResult`; agent facing only updates on non-strafe moves; `routinePath` in studio also tracks facing correctly
 - [x] **Studio medium tiles persist through load** — `load()` re-applies Mud/Stone/Clay tiles in GRID_STUDIO after `clearOverrides()`; tiles only restored if not already consumed
 - [x] **tickVM deferred-add fix** — new agents spawned by SUMMON collected in `toAdd` and inserted into `agentStates_` after iteration completes (inserting during `unordered_map` iteration is UB)
@@ -602,6 +602,7 @@ Introduces `ComponentStore<T>` as the first ECS scaffold, and replaces the old
 - [ ] Goblins spawn in Grassland clusters (Ecosystem phase)
 - [ ] Caves — bounded room grids with ore; portal closes when empty (Caves phase)
 - [ ] Ecosystem: grass regrowth, tree spread, goblin hunger, rabbit AI, warren logic
+- [ ] **Snow biome** — cold/white terrain variant; biome noise threshold between Grassland and Mountains; unique tile colour (pale blue-white); entities: IceOre, arctic animals (TBD); snow slows movement (like water but without fluid sim); Fire tiles melt snow to Puddle
 
 ### Save format ✓
 - [x] Version bumped v10 → v11; `generatedChunks` written per grid (x,y pairs)
@@ -617,7 +618,56 @@ Introduces `ComponentStore<T>` as the first ECS scaffold, and replaces the old
 
 ---
 
-## Phase 19 — Passive Grid Simulation
+## Post-Phase 18 — Ecosystem Foundations ✓
+
+Carry system, food chain, hit mechanic, and goblin AI overhaul. All features
+implemented without additional tests (covered by existing 365-test suite).
+
+### Carry system ✓
+- [x] `Entity::carrying` / `Entity::carriedBy` EntityID fields on Entity
+- [x] `Capability::Carriable` — Mushroom, Rabbit, Meat, CookedMeat
+- [x] `P` / `PickUp` action picks up the nearest Carriable entity ahead (checks z ±1)
+- [x] `B` / `Drop` action places carried entity one tile ahead of player
+- [x] `E` key context-aware: executes `PickUp` if empty-handed, `Drop` if carrying
+- [x] `PickUp` action swapped to `Drop` and vice-versa (context flip)
+- [x] `stepMovement` fix: speed-0 entities (Rock, Tree) teleport instantly when pushed — `isIdle()` was permanently false because `pos != destination` never resolved
+- [x] Carried entity synced to carrier position each tick in `tickMovement`
+
+### Food chain ✓
+- [x] `EntityType::Meat` — spawns when a rabbit dies (starvation or goblin kill); `mana = 5 + rabbit.mana`; Carriable
+- [x] `EntityType::CookedMeat` — produced after Meat is adjacent to Fire for 150 ticks (3 s); `mana = 4 × raw mana`; Carriable
+- [x] `tickCooking()` — per-grid, per-tick; `cookingStart_` map tracks first adjacency tick; resets if meat is carried
+- [x] Placeholder sprites: Meat → `golem.png`, CookedMeat → `campfire.png`
+
+### Hit action ✓
+- [x] `PlayerAction::Hit` added to cycle; `H` direct key binding
+- [x] `doHit` lambda — deals 1 mana damage to first entity ahead (checks z ±1)
+- [x] `PLAYER_ACTION_COUNT` bumped to 9
+
+### Goblin AI overhaul ✓
+- [x] `tickGoblinWander` renamed to `tickGoblinAI(Grid&, Tick)`; signature extended
+- [x] Goblin speed increased 0.1 → 0.17 (faster than rabbit's 0.15)
+- [x] **Conditionless scoring equation** (no state machine):
+      `score(d) = hunger*(1-loaded)*approach(d,prey)*3.0 + loaded*approach(d,fire)*2.5 + (1-loaded)*approach(d,centroid)*0.6 + noise`
+- [x] Mana decay every 300 ticks (hunger drives behaviour)
+- [x] Hunt: nearest Rabbit, loose Meat/CookedMeat, or player carrying food within 20 tiles
+- [x] Hit: attacks adjacent rabbit each idle tick (−1 mana; rabbit at 0 → Meat drop)
+- [x] Pick up: grabs adjacent loose Meat/CookedMeat automatically
+- [x] Steal: transfers food item from adjacent player when player carries food
+- [x] Carry: when loaded, scores toward nearest Campfire/Fire tile
+- [x] Eat: when adjacent to fire with carried food → `mana += food.mana`, destroy food
+- [x] Pack cohesion: pull toward centroid of all goblins (PACK_W = 0.6)
+
+---
+
+## Phase 19 — Content Expansion (mechanics, entities, assets)
+
+Details TBD — this phase will add a significant volume of new mechanics, entity types,
+and art/audio assets. Design to be settled in conversation before implementation begins.
+
+---
+
+## Phase 20 — Passive Grid Simulation
 
 ### Design decisions (settled)
 - **Hibernation trigger**: no player in grid → analyse routines, pre-schedule outputs, hibernate. Player enters → cancel pending outputs, snap agents, resume full sim.
@@ -655,10 +705,10 @@ skip full simulation and replace it with pre-scheduled output events.
 
 ---
 
-## Phase 20 — Assets, Audio & Polish
+## Phase 21 — Assets, Audio & Polish
 
 ### New assets
-- [ ] Proper sprite art for all entity types (player, goblin, mushroom, poop, campfire, tree, rock, chest, digger, farmer, guardian)
+- [ ] Proper sprite art for all entity types (player, goblin, mushroom, campfire, tree, rock, chest, golem types, digger, farmer, guardian)
 - [ ] Terrain tile sprites — textured tiles (grass, bare earth, stone, water, fire)
 - [ ] Wall and structure tiles for room interiors
 - [ ] Real audio — replace placeholder WAV with composed OGG tracks (SFX + music layers)
@@ -672,7 +722,45 @@ skip full simulation and replace it with pre-scheduled output events.
 
 ---
 
-## Phase 21 — Localisation
+## Phase 22 — Alchemy Engine
+
+Implement the principle system. See `ALCHEMY.md` for full design.
+
+### PrincipleProfile component
+- [ ] `PrincipleProfile` struct — `int8_t heat, cold, wet, dry, life, death, positive, negative, adhesive, repellent`
+- [ ] `ComponentStore<PrincipleProfile>` — lazy; added to entities that participate in alchemy
+- [ ] Assign starting profiles to relevant entity types (fire, water, grass, ore, etc.)
+
+### Field simulation (Caloric, Aqueous, Vital)
+- [ ] `tickFieldRadiation()` — build transient per-tile field grid from nearby entity profiles each tick; falloff by 3D distance (1 tile = 1 metre, real-world physics per field type)
+- [ ] `tickFieldAbsorption()` — apply field values to entity profiles; rate scales with field intensity
+- [ ] Heat: radiates outward, stronger upward
+- [ ] Cold: radiates outward, stronger downward
+- [ ] Wet: diffusion outward and downward; dissipates without active source
+- [ ] Dry: diffusion outward and upward
+
+### Galvanic simulation
+- [ ] `tickGalvanic()` — replace hardcoded voltage BFS with proper electrodynamics: charge on entities, current through conductive paths, magnetic fields from moving charge
+
+### Cohesion simulation
+- [ ] `tickCohesion()` — Adhesive/Repellent values on nearby entities apply forces to entity movement; resolved before movement phase
+
+### Transformation
+- [ ] `tickTransformation()` — per-entity attractor check; entity crystallises into nearest named substance in 10D principle space; rate depends on substance and field intensity
+- [ ] Attractor registry — canonical `PrincipleProfile` for each named substance
+
+### Combination
+- [ ] `tickCombination()` — triggered when two substances share a tile (one entering, or both arriving same tick)
+- [ ] Result = magnitude-weighted average of two profiles + local field influence + catalytic field from nearby non-consumed entities
+- [ ] Result checked against attractor registry
+
+### Replace hardcoded systems
+- [ ] Replace `tickFire` / `tileFireExp` / `entityFireExp` with principle-based Heat field + transformation (Grass → GrassOnFire → Ash)
+- [ ] Replace `tickVoltage` BFS with `tickGalvanic`
+
+---
+
+## Phase 23 — Localisation
 
 - [ ] String table — all in-game text moved to `assets/locale/en.ini`; source references by key only
 - [ ] `Locale` class — `get(key)` returns `const std::string&`; falls back to key string if missing
@@ -683,7 +771,7 @@ skip full simulation and replace it with pre-scheduled output events.
 
 ---
 
-## Phase 22 — Combat System
+## Phase 23 — Combat System
 
 Design decision on combat style (VATS-style slow-time, stop-time, or turn-based) must be made
 before this phase begins. See `DESIGN.md § Combat`.
@@ -694,7 +782,7 @@ before this phase begins. See `DESIGN.md § Combat`.
 
 ---
 
-## Phase 23 — Platform & Multiplayer
+## Phase 24 — Platform & Multiplayer
 
 - [ ] Touchscreen input layer — all actions accessible via touch, co-equal with keyboard and gamepad
 - [ ] Port to additional platforms per `DESIGN.md § Platform` (order TBD)
