@@ -109,6 +109,7 @@ CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
             if (occupant == ET::Mushroom) return CR::Collect;
             if (occupant == ET::Chest)    return CR::Collect;
             if (occupant == ET::Rabbit)   return CR::Block;
+            if (occupant == ET::Warren)   return CR::Pass;     // enter warren via portal
             if (occupant == ET::Log)      return CR::Block;    // bump → push
             if (occupant == ET::Rock)     return CR::Block;    // bump → push
             if (isGolem(occupant))        return CR::Block;
@@ -122,10 +123,6 @@ CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
             if (isStatic(occupant))       return CR::Block;
             return CR::Pass;
 
-        case ET::Poop:
-            if (occupant == ET::Goblin)   return CR::Hit;
-            return CR::Pass;
-
         case ET::Mushroom:
             return CR::Pass;
 
@@ -135,7 +132,7 @@ CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
             if (occupant == ET::Player)   return CR::Block;
             if (occupant == ET::Goblin) {
                 // Fighting golems strike goblins; others are blocked
-                if (mover == ET::IronGolem || mover == ET::WoodGolem)
+                if (mover == ET::MudGolem || mover == ET::IronGolem || mover == ET::WoodGolem)
                     return CR::Hit;
                 return CR::Block;
             }

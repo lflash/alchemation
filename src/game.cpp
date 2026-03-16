@@ -40,28 +40,28 @@ static const GolemInfo* golemForMedium(TileType t) {
 
 // ─── transferEntity ───────────────────────────────────────────────────────────
 
-void transferEntity(EntityID eid, Grid& from, Grid& to,
+void transferEntity(EntityID eid, Field& from, Field& to,
                     EntityRegistry& registry, TilePos dest) {
     Entity* e = registry.get(eid);
     if (!e) return;
     from.remove(eid, *e);
     e->pos = e->destination = dest;
-    e->moveT = 0.0f;
+    e->moveProgress = 0.0f;
     to.add(eid, *e);
 }
 
 // ─── Event subscriptions ─────────────────────────────────────────────────────
 //
-// Called for every grid (world, studio, and each dynamic room). Subscribes the
+// Called for every field (world, studio, and each dynamic room). Subscribes the
 // mushroom-collection handler. Portal detection happens in tickMovement instead
-// of here to avoid modifying grids from inside an event callback.
+// of here to avoid modifying fields from inside an event callback.
 
-void Game::subscribeEvents(Grid& grid) {
-    grid.events.subscribe(EventType::Arrived, [this](const Event& ev) {
+void Game::subscribeEvents(Field& field) {
+    field.events.subscribe(EventType::Arrived, [this](const Event& ev) {
         if (ev.subject != playerID_) return;
         Entity* player = registry_.get(playerID_);
         if (!player) return;
-        Grid& g = activeGrid();
+        Field& g = activeField();
         for (EntityID cid : g.spatial.at(player->pos)) {
             if (cid == playerID_) continue;
             Entity* cand = registry_.get(cid);
@@ -90,14 +90,14 @@ void Game::subscribeEvents(Grid& grid) {
 
 // ─── Construction ─────────────────────────────────────────────────────────────
 
-Game::Game() {
-    grids_.try_emplace(GRID_WORLD,  GRID_WORLD);
-    grids_.try_emplace(GRID_STUDIO, GRID_STUDIO);
+Game::Game() : worldRng_(std::random_device{}()) {
+    fields_.try_emplace(FIELD_WORLD,  FIELD_WORLD);
+    fields_.try_emplace(FIELD_STUDIO, FIELD_STUDIO);
 
-    subscribeEvents(grids_.at(GRID_WORLD));
-    subscribeEvents(grids_.at(GRID_STUDIO));
+    subscribeEvents(fields_.at(FIELD_WORLD));
+    subscribeEvents(fields_.at(FIELD_STUDIO));
 
-    Grid& world = grids_.at(GRID_WORLD);
+    Field& world = fields_.at(FIELD_WORLD);
 
     TilePos playerStart = {0, 0, 0};
     playerStart.z = world.terrain.levelAt(playerStart);
@@ -144,6 +144,7 @@ Game::Game() {
     // Battery at {-4,0} powers a puddle chain running east.
     // Lightbulb at {-1,0} sits on the third puddle (2V) and will be lit.
     // Second lightbulb at {3,0} is on plain grass — unlit.
+    spawnStatic(EntityType::Rock,      -5,  0);   // carriable stone beside battery
     spawnStatic(EntityType::Battery,   -4,  0);
     world.terrain.setType({-3, 0}, TileType::Puddle);   // 4V
     world.terrain.setType({-2, 0}, TileType::Puddle);   // 3V
@@ -153,7 +154,7 @@ Game::Game() {
 
     // ── Studio: medium tiles for summon testing ───────────────────────────────
     // Player enters studio at {0,0} facing S; place mediums one step south.
-    Grid& studio = grids_.at(GRID_STUDIO);
+    Field& studio = fields_.at(FIELD_STUDIO);
     studio.terrain.setType({ 0,  1}, TileType::Mud);
     studio.terrain.setType({ 1,  1}, TileType::Stone);
     studio.terrain.setType({-1,  1}, TileType::Clay);
@@ -176,32 +177,93 @@ Game::Game() {
             world.generatedChunks.insert({cx, cy, 0});
 }
 
+// ─── Warren management ───────────────────────────────────────────────────────
+
+FieldID Game::createWarrenInterior(EntityID warrenEid, TilePos worldPos) {
+    FieldID fid = nextFieldID_++;
+    fields_.try_emplace(fid, fid, WARREN_W, WARREN_H);
+    Field& interior = fields_.at(fid);
+    subscribeEvents(interior);
+
+    // Exit portal at centre of interior → world warren tile.
+    TilePos centre = { WARREN_W / 2, WARREN_H / 2, 0 };
+    interior.terrain.setType(centre, TileType::Portal);
+    interior.portals[centre] = { FIELD_WORLD, worldPos };
+
+    // Entry portal on the world side → interior (one step north of centre).
+    TilePos entryInside = { WARREN_W / 2, WARREN_H / 2 - 1, 0 };
+    Field& world = fields_.at(FIELD_WORLD);
+    world.terrain.setType(worldPos, TileType::Portal);
+    world.portals[worldPos] = { fid, entryInside };
+
+    warrenData_[warrenEid] = { fid, worldPos };
+    return fid;
+}
+
+void Game::onRabbitDied(EntityID rabbitEid) {
+    auto it = rabbitSlots_.find(rabbitEid);
+    if (it == rabbitSlots_.end()) return;
+
+    EntityID warrenEid     = it->second.warrenEid;
+    FieldID  warrenFieldID = it->second.warrenFieldID;
+    rabbitSlots_.erase(it);
+
+    // Check if any remaining rabbit still belongs to this warren.
+    for (const auto& [rid, slot] : rabbitSlots_)
+        if (slot.warrenEid == warrenEid) return;  // warren still inhabited
+
+    // Last rabbit gone — destroy the warren entity and its interior field.
+    auto wd = warrenData_.find(warrenEid);
+    if (wd != warrenData_.end()) {
+        // Remove all entities in the interior field from the registry.
+        auto fit = fields_.find(warrenFieldID);
+        if (fit != fields_.end()) {
+            for (EntityID eid : fit->second.entities)
+                registry_.destroy(eid);
+            fields_.erase(fit);
+        }
+        warrenData_.erase(wd);
+    }
+    // Remove the warren entity itself from the world.
+    Entity* warren = registry_.get(warrenEid);
+    if (warren) {
+        Field& world = fields_.at(FIELD_WORLD);
+        world.remove(warrenEid, *warren);
+        registry_.destroy(warrenEid);
+    }
+}
+
 // ─── Top-level tick ──────────────────────────────────────────────────────────
 
 void Game::tick(const Input& input, Tick currentTick) {
     applyPendingTransfer();
 
-    // Capture before the loop: tickPlayerInput() may change activeGridID_ mid-loop,
-    // and we must not call it twice (once for the old grid, once for the new one).
-    GridID activeAtStart = activeGridID_;
+    // Capture before the loop: tickPlayerInput() may change activeFieldID_ mid-loop,
+    // and we must not call it twice (once for the old field, once for the new one).
+    FieldID activeAtStart = activeFieldID_;
 
-    // All non-paused grids tick every frame.
-    // Player input only applies to the active grid.
-    for (auto& [id, grid] : grids_) {
-        if (grid.paused) continue;
-        tickScheduler(grid, currentTick);
+    // All non-paused fields tick every frame.
+    // Player input only applies to the active field.
+    for (auto& [id, field] : fields_) {
+        if (field.paused) continue;
+        tickScheduler(field, currentTick);
         if (id == activeAtStart) tickPlayerInput(input);
-        tickGoblinWander(grid);
-        tickVM(grid);
-        tickMovement(grid);
-        tickFire(grid, registry_, currentTick);
-        tickVoltage(grid, registry_);
-        tickFluid(grid, fluidComponents_, registry_);
-        grid.events.flush();
+        tickGoblinAI(field, currentTick);
+        tickRabbitAI(field, currentTick);
+        tickRabbitBreeding(field);
+        tickResponseMovement(field, currentTick);
+        tickVM(field);
+        tickMovement(field);
+        tickFire(field, registry_, currentTick);
+        tickCooking(field, currentTick);
+        tickVoltage(field, registry_);
+        tickFluid(field, fluidComponents_, registry_);
+        if (id == FIELD_WORLD) tickLongGrass(field, registry_, worldRng_);
+        field.events.flush();
         // Lazy world generation: expand the world around the active player.
-        if (!grid.isBounded() && id == GRID_WORLD) {
+        if (!field.isBounded() && id == FIELD_WORLD) {
             const Entity* player = registry_.get(playerID_);
-            if (player) maybeGenerateChunks(grid, player->pos);
+            if (player) maybeGenerateChunks(field, player->pos);
         }
     }
 }
@@ -210,12 +272,12 @@ void Game::tick(const Input& input, Tick currentTick) {
 
 void Game::applyPendingTransfer() {
     for (auto& t : pendingTransfers_) {
-        if (grids_.count(t.fromGrid) && grids_.count(t.toGrid)) {
-            transferEntity(t.eid, grids_.at(t.fromGrid), grids_.at(t.toGrid),
+        if (fields_.count(t.fromField) && fields_.count(t.toField)) {
+            transferEntity(t.eid, fields_.at(t.fromField), fields_.at(t.toField),
                            registry_, t.toPos);
             if (t.eid == playerID_) {
-                activeGridID_     = t.toGrid;
-                gridJustSwitched_ = true;
+                activeFieldID_     = t.toField;
+                fieldJustSwitched_ = true;
                 audioEvents_.push_back(AudioEvent::PortalEnter);
                 visualEvents_.push_back({ VisualEventType::PortalEnter, {0,0}, 0 });
             }
@@ -241,19 +303,19 @@ TilePos Game::playerDestination() const {
     return p ? p->destination : TilePos{0, 0};
 }
 
-float Game::playerMoveT() const {
+float Game::playerMoveProgress() const {
     const Entity* p = registry_.get(playerID_);
-    return p ? p->moveT : 0.0f;
+    return p ? p->moveProgress : 0.0f;
 }
 
-std::vector<RecordingInfo> Game::recordingList() const {
-    std::vector<RecordingInfo> result;
-    for (size_t i = 0; i < recorder_.recordings.size(); ++i) {
-        const Recording& rec = recorder_.recordings[i];
+std::vector<RoutineInfo> Game::routineList() const {
+    std::vector<RoutineInfo> result;
+    for (size_t i = 0; i < recorder_.routines.size(); ++i) {
+        const Routine& rec = recorder_.routines[i];
         int steps = 0;
         for (const auto& instr : rec.instructions)
             if (instr.op != OpCode::HALT) ++steps;
-        result.push_back({ i, rec.name, steps, rec.manaCost(), i == selectedRecording_ });
+        result.push_back({ i, rec.name, steps, rec.manaCost(), i == selectedRoutine_ });
     }
     return result;
 }
@@ -262,35 +324,35 @@ SummonPreview Game::playerSummonPreview() const {
     if (activeAction_ != PlayerAction::Summon) return {};
     const Entity* player = registry_.get(playerID_);
     if (!player || !player->isIdle()) return {};
-    const Grid& grid = activeGrid();
+    const Field& grid = activeField();
     TilePos ahead = player->pos + dirToDelta(player->facing);
     const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
     if (!gi) return {};
     return { true, gi->type, gi->name, gi->manaCost, player->mana >= gi->manaCost };
 }
 
-void Game::renameRecording(size_t index, const std::string& name) {
-    if (index < recorder_.recordings.size())
-        recorder_.recordings[index].name = name;
+void Game::renameRoutine(size_t index, const std::string& name) {
+    if (index < recorder_.routines.size())
+        recorder_.routines[index].name = name;
 }
 
-void Game::deleteRecording(size_t index) {
-    if (index >= recorder_.recordings.size()) return;
-    recorder_.recordings.erase(recorder_.recordings.begin() + (ptrdiff_t)index);
-    // Keep selectedRecording_ valid.
-    if (recorder_.recordings.empty())
-        selectedRecording_ = 0;
-    else if (selectedRecording_ >= recorder_.recordings.size())
-        selectedRecording_ = recorder_.recordings.size() - 1;
+void Game::deleteRoutine(size_t index) {
+    if (index >= recorder_.routines.size()) return;
+    recorder_.routines.erase(recorder_.routines.begin() + (ptrdiff_t)index);
+    // Keep selectedRoutine_ valid.
+    if (recorder_.routines.empty())
+        selectedRoutine_ = 0;
+    else if (selectedRoutine_ >= recorder_.routines.size())
+        selectedRoutine_ = recorder_.routines.size() - 1;
 }
 
 // ─── Draw order ──────────────────────────────────────────────────────────────
 
 std::vector<const Entity*> Game::drawOrder() const {
-    const Grid& grid = activeGrid();
+    const Field& field = activeField();
     std::vector<const Entity*> result;
-    result.reserve(grid.entities.size());
-    for (EntityID eid : grid.entities) {
+    result.reserve(field.entities.size());
+    for (EntityID eid : field.entities) {
         const Entity* e = registry_.get(eid);
         if (e) result.push_back(e);
     }
@@ -298,7 +360,7 @@ std::vector<const Entity*> Game::drawOrder() const {
               [](const Entity* a, const Entity* b) {
                   if (a->pos.y != b->pos.y) return a->pos.y < b->pos.y;
                   if (a->pos.z != b->pos.z) return a->pos.z < b->pos.z;
-                  return a->layer < b->layer;
+                  return a->drawOrder < b->drawOrder;
               });
     return result;
 }
@@ -306,7 +368,7 @@ std::vector<const Entity*> Game::drawOrder() const {
 // ─── Mouse interaction (Phase 16) ─────────────────────────────────────────────
 
 const Entity* Game::entityAtTile(TilePos tile) const {
-    const Grid& g = activeGrid();
+    const Field& g = activeField();
     for (EntityID eid : g.entities) {
         const Entity* e = registry_.get(eid);
         if (e && e->pos == tile) return e;
@@ -316,7 +378,7 @@ const Entity* Game::entityAtTile(TilePos tile) const {
 
 std::vector<FluidOverlay> Game::fluidOverlay() const {
     std::vector<FluidOverlay> out;
-    const Grid& g = activeGrid();
+    const Field& g = activeField();
     for (EntityID eid : g.entities) {
         const Entity* e = registry_.get(eid);
         if (!e || e->type != EntityType::Water) continue;
@@ -364,16 +426,16 @@ static void fixAddrsInsert(std::vector<Instruction>& instrs, size_t insertPos) {
 }
 
 void Game::deleteInstruction(size_t recIdx, size_t instrIdx) {
-    if (recIdx >= recorder_.recordings.size()) return;
-    Recording& rec = recorder_.recordings[recIdx];
+    if (recIdx >= recorder_.routines.size()) return;
+    Routine& rec = recorder_.routines[recIdx];
     if (instrIdx >= rec.instructions.size()) return;
     fixAddrsDelete(rec.instructions, instrIdx);
     rec.instructions.erase(rec.instructions.begin() + (ptrdiff_t)instrIdx);
 }
 
 void Game::insertWait(size_t recIdx, size_t pos, uint16_t ticks) {
-    if (recIdx >= recorder_.recordings.size()) return;
-    Recording& rec = recorder_.recordings[recIdx];
+    if (recIdx >= recorder_.routines.size()) return;
+    Routine& rec = recorder_.routines[recIdx];
     size_t insertAt = std::min(pos, rec.instructions.size());
     Instruction instr;
     instr.op    = OpCode::WAIT;
@@ -383,8 +445,8 @@ void Game::insertWait(size_t recIdx, size_t pos, uint16_t ticks) {
 }
 
 void Game::insertMoveRel(size_t recIdx, size_t pos, RelDir dir) {
-    if (recIdx >= recorder_.recordings.size()) return;
-    Recording& rec = recorder_.recordings[recIdx];
+    if (recIdx >= recorder_.routines.size()) return;
+    Routine& rec = recorder_.routines[recIdx];
     size_t insertAt = std::min(pos, rec.instructions.size());
     Instruction instr;
     instr.op  = OpCode::MOVE_REL;
@@ -394,8 +456,8 @@ void Game::insertMoveRel(size_t recIdx, size_t pos, RelDir dir) {
 }
 
 void Game::reorderInstruction(size_t recIdx, size_t from, size_t to) {
-    if (recIdx >= recorder_.recordings.size()) return;
-    Recording& rec = recorder_.recordings[recIdx];
+    if (recIdx >= recorder_.routines.size()) return;
+    Routine& rec = recorder_.routines[recIdx];
     size_t n = rec.instructions.size();
     if (from >= n || to >= n || from == to) return;
     Instruction moved = rec.instructions[from];
@@ -406,7 +468,7 @@ void Game::reorderInstruction(size_t recIdx, size_t from, size_t to) {
 
 // ─── Scheduler ───────────────────────────────────────────────────────────────
 
-void Game::tickScheduler(Grid& grid, Tick currentTick) {
+void Game::tickScheduler(Field& grid, Tick currentTick) {
     for (auto& action : grid.scheduler.popDue(currentTick)) {
         if (action.type == ActionType::Despawn) {
             Entity* target = registry_.get(action.entity);
@@ -426,24 +488,24 @@ void Game::tickScheduler(Grid& grid, Tick currentTick) {
 // step is legal (≤ 1 level). Bounded grids have flat floors, so dest.z is
 // unchanged and this always returns true for them.
 
-static bool resolveDestHeight(TilePos& dest, const TilePos& from, const Grid& grid) {
-    if (!grid.isBounded())
-        dest.z = grid.terrain.levelAt(dest);
+static bool resolveDestHeight(TilePos& dest, const TilePos& from, const Field& field) {
+    if (!field.isBounded())
+        dest.z = field.terrain.levelAt(dest);
     return std::abs(dest.z - from.z) <= 1;
 }
 
 // ─── Player input ─────────────────────────────────────────────────────────────
 
 void Game::tickPlayerInput(const Input& input) {
-    Grid&   grid     = activeGrid();
+    Field&  grid     = activeField();
     Entity* player   = registry_.get(playerID_);
-    bool    inStudio = (activeGridID_ == GRID_STUDIO);
+    bool    inStudio = (activeFieldID_ == FIELD_STUDIO);
 
     // r: toggle recording
     if (input.pressed(Action::Record)) {
         if (recorder_.isRecording()) {
             recorder_.stop();
-            selectedRecording_ = recorder_.recordings.size() - 1;
+            selectedRoutine_ = recorder_.routines.size() - 1;
             audioEvents_.push_back(AudioEvent::RecordStop);
         } else {
             recorder_.start();
@@ -451,9 +513,9 @@ void Game::tickPlayerInput(const Input& input) {
         }
     }
 
-    // q: cycle selected recording
-    if (input.pressed(Action::CycleRecording) && !recorder_.recordings.empty())
-        selectedRecording_ = (selectedRecording_ + 1) % recorder_.recordings.size();
+    // q: cycle selected routine
+    if (input.pressed(Action::CycleRecording) && !recorder_.routines.empty())
+        selectedRoutine_ = (selectedRoutine_ + 1) % recorder_.routines.size();
 
     // z: cycle active player action
     if (input.pressed(Action::CycleAction))
@@ -463,19 +525,19 @@ void Game::tickPlayerInput(const Input& input) {
 
     // Tab: toggle between world and studio
     if (input.pressed(Action::SwitchGrid) && player && player->isIdle()) {
-        if (activeGridID_ == GRID_WORLD) {
+        if (activeFieldID_ == FIELD_WORLD) {
             playerWorldPos_ = player->pos;
-            transferEntity(playerID_, grids_.at(GRID_WORLD), grids_.at(GRID_STUDIO),
+            transferEntity(playerID_, fields_.at(FIELD_WORLD), fields_.at(FIELD_STUDIO),
                            registry_, {0, 0});
-            activeGridID_ = GRID_STUDIO;
-        } else if (activeGridID_ == GRID_STUDIO) {
-            transferEntity(playerID_, grids_.at(GRID_STUDIO), grids_.at(GRID_WORLD),
+            activeFieldID_ = FIELD_STUDIO;
+        } else if (activeFieldID_ == FIELD_STUDIO) {
+            transferEntity(playerID_, fields_.at(FIELD_STUDIO), fields_.at(FIELD_WORLD),
                            registry_, playerWorldPos_);
-            activeGridID_ = GRID_WORLD;
+            activeFieldID_ = FIELD_WORLD;
         }
-        gridJustSwitched_ = true;
-        audioEvents_.push_back(AudioEvent::GridSwitch);
-        visualEvents_.push_back({ VisualEventType::GridSwitch, {0,0}, 0 });
+        fieldJustSwitched_ = true;
+        audioEvents_.push_back(AudioEvent::FieldSwitch);
+        visualEvents_.push_back({ VisualEventType::FieldSwitch, {0,0}, 0 });
         player = registry_.get(playerID_);
     }
 
@@ -630,19 +692,19 @@ void Game::tickPlayerInput(const Input& input) {
     };
 
     auto doSummon = [&] {
-        recorder_.recordSummon(selectedRecording_);
+        recorder_.recordSummon(selectedRoutine_);
         const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
         if (!gi) gi = &GOLEM_TABLE[0];
-        bool hasRec = !recorder_.recordings.empty() && selectedRecording_ < recorder_.recordings.size();
-        int deployCost = hasRec ? recorder_.recordings[selectedRecording_].manaCost() : gi->manaCost;
+        bool hasRec = !recorder_.routines.empty() && selectedRoutine_ < recorder_.routines.size();
+        int deployCost = hasRec ? recorder_.routines[selectedRoutine_].manaCost() : gi->manaCost;
         if (inStudio || player->mana >= deployCost) {
             if (!inStudio) { player->mana -= deployCost; if (player->mana < 1) player->mana = 1; }
             EntityID gid = registry_.spawn(gi->type, ahead);
             Entity*  ge  = registry_.get(gid);
             ge->facing   = player->facing;
             grid.add(gid, *ge);
-            if (!recorder_.recordings.empty() && selectedRecording_ < recorder_.recordings.size())
-                agentSlots_[gid] = { AgentExecState{}, recorder_.recordings[selectedRecording_] };
+            if (!recorder_.routines.empty() && selectedRoutine_ < recorder_.routines.size())
+                agentSlots_[gid] = { AgentExecState{}, recorder_.routines[selectedRoutine_] };
             audioEvents_.push_back(AudioEvent::Summon);
             visualEvents_.push_back({ VisualEventType::Summon,
                                       toVec(ahead), static_cast<float>(ahead.z) });
@@ -652,16 +714,79 @@ void Game::tickPlayerInput(const Input& input) {
     auto doPortal = [&] {
         TilePos fwd = player->pos + dirToDelta(player->facing);
         if (!grid.portals.count(fwd) && grid.terrain.typeAt(fwd) != TileType::Portal) {
-            GridID  newID     = nextGridID_++;
+            FieldID newID     = nextFieldID_++;
             TilePos roomEntry = { ROOM_W / 2, ROOM_H / 2 };
-            grids_.try_emplace(newID, newID, ROOM_W, ROOM_H);
-            Grid& room = grids_.at(newID);
+            fields_.try_emplace(newID, newID, ROOM_W, ROOM_H);
+            Field& room = fields_.at(newID);
             subscribeEvents(room);
             grid.terrain.setType(fwd, TileType::Portal);
             grid.portals[fwd] = { newID, roomEntry };
             audioEvents_.push_back(AudioEvent::PortalCreate);
             room.terrain.setType(roomEntry, TileType::Portal);
-            room.portals[roomEntry] = { activeGridID_, fwd };
+            room.portals[roomEntry] = { activeFieldID_, fwd };
+        }
+    };
+
+    // For pick-up and drop, compute the actual terrain height at the ahead tile
+    // so we search the right z-level on the unbounded world grid.
+    auto aheadAt = [&](int dz = 0) -> TilePos {
+        TilePos p = ahead;
+        p.z = grid.isBounded() ? 0 : grid.terrain.levelAt(ahead);
+        p.z += dz;
+        return p;
+    };
+
+    auto doPickUp = [&] {
+        if (player->carrying != INVALID_ENTITY) return;  // already holding something
+        // Search ±1 z-levels to handle height variation on the world grid.
+        for (int dz : {0, 1, -1}) {
+            TilePos checkPos = aheadAt(dz);
+            for (EntityID cid : grid.spatial.at(checkPos)) {
+                Entity* cand = registry_.get(cid);
+                if (!cand || cid == playerID_) continue;
+                if (!cand->hasCapability(Capability::Carriable)) continue;
+                grid.spatial.remove(cid, cand->pos, cand->size);
+                cand->carriedBy = playerID_;
+                player->carrying = cid;
+                return;
+            }
+        }
+    };
+
+    auto doDrop = [&] {
+        if (player->carrying == INVALID_ENTITY) return;
+        Entity* carried = registry_.get(player->carrying);
+        if (!carried) { player->carrying = INVALID_ENTITY; return; }
+        TilePos dropPos = aheadAt();
+        Bounds dropBounds = boundsAt(dropPos, carried->size);
+        bool blocked = false;
+        for (EntityID oid : grid.spatial.at(dropPos)) {
+            const Entity* occ = registry_.get(oid);
+            if (!occ || oid == playerID_) continue;
+            if (overlaps(dropBounds, boundsAt(occ->pos, occ->size))) {
+                if (resolveCollision(carried->type, occ->type) == CollisionResult::Block) {
+                    blocked = true; break;
+                }
+            }
+        }
+        if (!blocked) {
+            carried->pos         = dropPos;
+            carried->destination = dropPos;
+            carried->moveProgress = 0.0f;
+            carried->carriedBy   = INVALID_ENTITY;
+            grid.spatial.add(player->carrying, dropPos, carried->size);
+            player->carrying = INVALID_ENTITY;
+        }
+    };
+
+    auto doHit = [&] {
+        for (int dz : {0, 1, -1}) {
+            for (EntityID cid : grid.spatial.at(aheadAt(dz))) {
+                Entity* cand = registry_.get(cid);
+                if (!cand || cid == playerID_) continue;
+                if (cand->mana > 0) --cand->mana;
+                return;
+            }
         }
     };
 
@@ -671,6 +796,9 @@ void Game::tickPlayerInput(const Input& input) {
     if (input.pressed(Action::Scythe))      doScythe();
     if (input.pressed(Action::Mine))        doMine();
     if (input.pressed(Action::PlacePortal)) doPortal();
+    if (input.pressed(Action::PickUp))      doPickUp();
+    if (input.pressed(Action::Drop))        doDrop();
+    if (input.pressed(Action::Hit))         doHit();
 
     // E: execute whichever action is currently selected.
     if (input.pressed(Action::Summon)) {
@@ -681,13 +809,21 @@ void Game::tickPlayerInput(const Input& input) {
             case PlayerAction::Mine:        doMine();     break;
             case PlayerAction::Summon:      doSummon();   break;
             case PlayerAction::PlacePortal: doPortal();   break;
+            // Context-aware: PickUp drops if already carrying, Drop picks up if not.
+            case PlayerAction::PickUp:
+                if (player->carrying != INVALID_ENTITY) doDrop(); else doPickUp();
+                break;
+            case PlayerAction::Drop:
+                if (player->carrying == INVALID_ENTITY) doPickUp(); else doDrop();
+                break;
+            case PlayerAction::Hit:         doHit();      break;
         }
     }
 }
 
 // ─── Routine VM ──────────────────────────────────────────────────────────────
 
-void Game::tickVM(Grid& grid) {
+void Game::tickVM(Field& grid) {
     std::vector<EntityID>   toRemove;
     std::vector<std::pair<EntityID, AgentSlot>> toAdd;  // defer insertion to avoid iterator invalidation
 
@@ -721,7 +857,7 @@ void Game::tickVM(Grid& grid) {
                 stimuli[static_cast<int>(Condition::AtEdge)] = 1;
         }
 
-        VMResult res = vm_.step(slot.state, slot.rec, ent->facing, stimuli);
+        VMResult res = vm_.step(slot.state, slot.routine, ent->facing, stimuli);
 
         if (res.halt) {
             // All routine agents despawn when their script ends.
@@ -781,11 +917,11 @@ void Game::tickVM(Grid& grid) {
                 Entity*  ge  = registry_.get(gid);
                 ge->facing   = ent->facing;
                 grid.add(gid, *ge);
-                // Assign the recording encoded in the SUMMON instruction.
-                Recording rec = (res.summonRecIdx < recorder_.recordings.size())
-                    ? recorder_.recordings[res.summonRecIdx]
-                    : slot.rec;
-                toAdd.emplace_back(gid, AgentSlot{{}, std::move(rec)});
+                // Assign the routine encoded in the SUMMON instruction.
+                Routine routine = (res.summonRoutineIdx < recorder_.routines.size())
+                    ? recorder_.routines[res.summonRoutineIdx]
+                    : slot.routine;
+                toAdd.emplace_back(gid, AgentSlot{{}, std::move(routine)});
                 audioEvents_.push_back(AudioEvent::Summon);
                 visualEvents_.push_back({ VisualEventType::Summon,
                                           toVec(target), static_cast<float>(target.z) });
@@ -803,11 +939,64 @@ void Game::tickVM(Grid& grid) {
 // ─── Lazy world generation (Phase 18) ────────────────────────────────────────
 
 // Floor-division that handles negative numerators correctly.
+// ─── Cooking ─────────────────────────────────────────────────────────────────
+
+static constexpr Tick COOK_TICKS = 150;  // 3 seconds at 50 Hz
+
+void Game::tickCooking(Field& grid, Tick currentTick) {
+    // Check every Meat entity; if adjacent to a fire tile, advance its cook timer.
+    for (EntityID eid : std::vector<EntityID>(grid.entities)) {
+        Entity* ent = registry_.get(eid);
+        if (!ent || ent->type != EntityType::Meat) continue;
+        if (ent->carriedBy != INVALID_ENTITY) {
+            // Carried meat can't cook; reset any in-progress timer.
+            cookingStart_.erase(eid);
+            continue;
+        }
+
+        // Check 4-directional neighbours for a fire tile.
+        bool nearFire = false;
+        const TilePos dirs[4] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
+        for (const TilePos& d : dirs) {
+            if (grid.terrain.typeAt(ent->pos + d) == TileType::Fire) {
+                nearFire = true; break;
+            }
+        }
+
+        if (!nearFire) {
+            cookingStart_.erase(eid);
+            continue;
+        }
+
+        // Start timer if not already cooking.
+        if (!cookingStart_.count(eid))
+            cookingStart_[eid] = currentTick;
+
+        if (currentTick - cookingStart_[eid] < COOK_TICKS)
+            continue;
+
+        // Convert to CookedMeat with 4× mana.
+        int cookedMana = ent->mana * 4;
+        TilePos pos    = ent->pos;
+
+        // Remove raw meat.
+        grid.remove(eid, *ent);
+        registry_.destroy(eid);
+        cookingStart_.erase(eid);
+
+        // Spawn cooked meat.
+        EntityID cid   = registry_.spawn(EntityType::CookedMeat, pos);
+        Entity*  cooked = registry_.get(cid);
+        cooked->mana   = cookedMana;
+        grid.add(cid, *cooked);
+    }
+}
+
 static int floorDiv(int a, int b) {
     return a / b - (a % b != 0 && (a ^ b) < 0);
 }
 
-void Game::maybeGenerateChunks(Grid& grid, TilePos playerPos) {
+void Game::maybeGenerateChunks(Field& grid, TilePos playerPos) {
     int pcx = floorDiv(playerPos.x, CHUNK_SIZE);
     int pcy = floorDiv(playerPos.y, CHUNK_SIZE);
 
@@ -821,7 +1010,7 @@ void Game::maybeGenerateChunks(Grid& grid, TilePos playerPos) {
     }
 }
 
-void Game::generateChunk(Grid& grid, int cx, int cy) {
+void Game::generateChunk(Field& grid, int cx, int cy) {
     // Seed RNG deterministically from chunk coordinates.
     uint32_t seed = static_cast<uint32_t>(cx * 73856093u ^ cy * 19349663u);
     std::mt19937 rng(seed);
@@ -848,10 +1037,33 @@ void Game::generateChunk(Grid& grid, int cx, int cy) {
     };
 
     switch (biome) {
-        case Biome::Grassland:
-            trySpawn(EntityType::Rabbit, 0.30f);
-            trySpawn(EntityType::Warren, 0.10f);
+        case Biome::Grassland: {
+            // Spawn a warren first; rabbits are seeded inside it.
+            EntityID warrenEid = INVALID_ENTITY;
+            if (chance(rng) < 0.30f) {
+                int wx = xi(rng), wy = yi(rng);
+                TilePos wp = {wx, wy, 0};
+                wp.z = grid.terrain.levelAt(wp);
+                warrenEid = registry_.spawn(EntityType::Warren, wp);
+                grid.add(warrenEid, *registry_.get(warrenEid));
+                FieldID wgid = createWarrenInterior(warrenEid, wp);
+                Field& interior = fields_.at(wgid);
+                // Seed 4 rabbits inside the warren.
+                TilePos rp = { WARREN_W / 2 - 2, WARREN_H / 2, 0 };
+                for (int i = 0; i < 4; ++i) {
+                    TilePos rpos = { rp.x + i, rp.y, 0 };
+                    EntityID reid = registry_.spawn(EntityType::Rabbit, rpos);
+                    Entity* re = registry_.get(reid);
+                    re->mana = RABBIT_MANA_HUNGRY - 1; // start hungry → will emerge
+                    interior.add(reid, *re);
+                    rabbitSlots_[reid] = { warrenEid, wgid };
+                }
+            }
+            trySpawn(EntityType::LongGrass, 0.60f);
+            trySpawn(EntityType::LongGrass, 0.60f);
+            trySpawn(EntityType::LongGrass, 0.40f);
             break;
+        }
 
         case Biome::Forest:
             trySpawn(EntityType::Tree,     0.70f);
@@ -906,8 +1118,8 @@ namespace {
         return s;
     }
 
-    // Write one grid's terrain + portals + non-player, non-Poop entities.
-    void wrGrid(std::ostream& f, const Grid& grid,
+    // Write one field's terrain + portals + non-player, non-Agent entities.
+    void wrGrid(std::ostream& f, const Field& grid,
                 EntityID playerID, const EntityRegistry& reg,
                 const ComponentStore<FluidComponent>& fluids) {
         wr<uint32_t>(f, grid.id);
@@ -921,7 +1133,7 @@ namespace {
             wr<int32_t>(f, pos.x);
             wr<int32_t>(f, pos.y);
             wr<int32_t>(f, pos.z);
-            wr<uint32_t>(f, portal.targetGrid);
+            wr<uint32_t>(f, portal.targetField);
             wr<int32_t>(f, portal.targetPos.x);
             wr<int32_t>(f, portal.targetPos.y);
             wr<int32_t>(f, portal.targetPos.z);
@@ -938,12 +1150,12 @@ namespace {
         }
 
 
-        // Entities (skip player and Poop)
+        // Entities (skip player)
         std::vector<EntityID> toSave;
         for (EntityID eid : grid.entities)
             if (eid != playerID) {
                 const Entity* e = reg.get(eid);
-                if (e && e->type != EntityType::Poop) toSave.push_back(eid);
+                if (e) toSave.push_back(eid);
             }
         wr<uint32_t>(f, static_cast<uint32_t>(toSave.size()));
         for (EntityID eid : toSave) {
@@ -983,10 +1195,10 @@ void Game::save(const std::string& path) const {
 
     // Player
     const Entity* player = registry_.get(playerID_);
-    GridID  playerGrid = activeGridID_;
+    FieldID playerGrid = activeFieldID_;
     TilePos ppos = player ? player->pos : TilePos{0, 0};
     // If in studio, save player back in world at the stored world position
-    if (activeGridID_ == GRID_STUDIO) { playerGrid = GRID_WORLD; ppos = playerWorldPos_; }
+    if (activeFieldID_ == FIELD_STUDIO) { playerGrid = FIELD_WORLD; ppos = playerWorldPos_; }
     wr<uint32_t>(f, playerGrid);
     wr<int32_t>(f,  ppos.x);
     wr<int32_t>(f,  ppos.y);
@@ -994,21 +1206,21 @@ void Game::save(const std::string& path) const {
     wr<uint8_t>(f,  player ? static_cast<uint8_t>(player->facing) : 0);
     wr<int32_t>(f,  player ? player->mana : 0);
 
-    // Grids (all except studio)
+    // Fields (all except studio)
     uint32_t gridCount = 0;
-    for (const auto& [id, _] : grids_)
-        if (id != GRID_STUDIO) ++gridCount;
+    for (const auto& [id, _] : fields_)
+        if (id != FIELD_STUDIO) ++gridCount;
     wr<uint32_t>(f, gridCount);
-    wr<uint32_t>(f, nextGridID_);
+    wr<uint32_t>(f, nextFieldID_);
 
-    for (const auto& [id, grid] : grids_) {
-        if (id == GRID_STUDIO) continue;
+    for (const auto& [id, grid] : fields_) {
+        if (id == FIELD_STUDIO) continue;
         wrGrid(f, grid, playerID_, registry_, fluidComponents_);
     }
 
-    // Recordings
-    wr<uint32_t>(f, static_cast<uint32_t>(recorder_.recordings.size()));
-    for (const Recording& rec : recorder_.recordings) {
+    // Routines
+    wr<uint32_t>(f, static_cast<uint32_t>(recorder_.routines.size()));
+    for (const Routine& rec : recorder_.routines) {
         wrStr(f, rec.name);
         wr<uint32_t>(f, static_cast<uint32_t>(rec.instructions.size()));
         for (const Instruction& ins : rec.instructions) {
@@ -1020,7 +1232,7 @@ void Game::save(const std::string& path) const {
             wr<uint8_t>(f, ins.threshold);
         }
     }
-    wr<uint64_t>(f, static_cast<uint64_t>(selectedRecording_));
+    wr<uint64_t>(f, static_cast<uint64_t>(selectedRoutine_));
 }
 
 bool Game::load(const std::string& path) {
@@ -1034,20 +1246,20 @@ bool Game::load(const std::string& path) {
     if (version != 11) return false;
 
     // Clear all state
-    for (auto& [id, grid] : grids_) {
-        for (EntityID eid : std::vector<EntityID>(grid.entities)) {
+    for (auto& [id, field] : fields_) {
+        for (EntityID eid : std::vector<EntityID>(field.entities)) {
             Entity* e = registry_.get(eid);
-            if (e) grid.remove(eid, *e);
+            if (e) field.remove(eid, *e);
             registry_.destroy(eid);
         }
-        grid.terrain.clearOverrides();
-        grid.portals.clear();
-        grid.paused = false;
+        field.terrain.clearOverrides();
+        field.portals.clear();
+        field.paused = false;
     }
-    // Remove dynamic grids (keep world + studio)
-    for (auto it = grids_.begin(); it != grids_.end(); ) {
-        if (it->first != GRID_WORLD && it->first != GRID_STUDIO)
-            it = grids_.erase(it);
+    // Remove dynamic fields (keep world + studio)
+    for (auto it = fields_.begin(); it != fields_.end(); ) {
+        if (it->first != FIELD_WORLD && it->first != FIELD_STUDIO)
+            it = fields_.erase(it);
         else ++it;
     }
     agentSlots_.clear();
@@ -1055,27 +1267,27 @@ bool Game::load(const std::string& path) {
     pendingTransfers_.clear();
 
     // Player
-    GridID    playerGrid = rd<uint32_t>(f);
+    FieldID   playerGrid = rd<uint32_t>(f);
     TilePos   ppos       = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
     Direction pfacing    = static_cast<Direction>(rd<uint8_t>(f));
     int       pmana    = rd<int32_t>(f);
 
-    // Grids
+    // Fields
     uint32_t gridCount = rd<uint32_t>(f);
-    nextGridID_        = rd<uint32_t>(f);
+    nextFieldID_       = rd<uint32_t>(f);
 
     for (uint32_t g = 0; g < gridCount; ++g) {
-        GridID gid    = rd<uint32_t>(f);
+        FieldID gid   = rd<uint32_t>(f);
         int    width  = rd<int32_t>(f);
         int    height = rd<int32_t>(f);
         bool   paused = rd<uint8_t>(f) != 0;
 
-        // Ensure grid exists
-        if (!grids_.count(gid)) {
-            grids_.try_emplace(gid, gid, width, height);
-            subscribeEvents(grids_.at(gid));
+        // Ensure field exists
+        if (!fields_.count(gid)) {
+            fields_.try_emplace(gid, gid, width, height);
+            subscribeEvents(fields_.at(gid));
         }
-        Grid& grid   = grids_.at(gid);
+        Field& grid  = fields_.at(gid);
         grid.width   = width;
         grid.height  = height;
         grid.paused  = paused;
@@ -1085,9 +1297,9 @@ bool Game::load(const std::string& path) {
         uint32_t portalCount = rd<uint32_t>(f);
         for (uint32_t i = 0; i < portalCount; ++i) {
             TilePos  pos       = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
-            GridID   tGrid     = rd<uint32_t>(f);
+            FieldID  tField    = rd<uint32_t>(f);
             TilePos  tPos      = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
-            grid.portals[pos]  = { tGrid, tPos };
+            grid.portals[pos]  = { tField, tPos };
         }
 
         // Terrain overrides
@@ -1131,21 +1343,21 @@ bool Game::load(const std::string& path) {
         }
     }
 
-    // Spawn player in saved grid
-    if (!grids_.count(playerGrid)) playerGrid = GRID_WORLD;
+    // Spawn player in saved field
+    if (!fields_.count(playerGrid)) playerGrid = FIELD_WORLD;
     playerID_ = registry_.spawn(EntityType::Player, ppos);
     Entity* player = registry_.get(playerID_);
     player->facing = pfacing;
     player->mana   = pmana;
-    grids_.at(playerGrid).add(playerID_, *player);
-    activeGridID_   = playerGrid;
-    playerWorldPos_ = (playerGrid == GRID_WORLD) ? ppos : TilePos{0, 0};
+    fields_.at(playerGrid).add(playerID_, *player);
+    activeFieldID_  = playerGrid;
+    playerWorldPos_ = (playerGrid == FIELD_WORLD) ? ppos : TilePos{0, 0};
 
-    // Recordings
-    recorder_.recordings.clear();
+    // Routines
+    recorder_.routines.clear();
     uint32_t recCount = rd<uint32_t>(f);
     for (uint32_t i = 0; i < recCount; ++i) {
-        Recording rec;
+        Routine rec;
         rec.name = rdStr(f);
         uint32_t instrCount = rd<uint32_t>(f);
         for (uint32_t j = 0; j < instrCount; ++j) {
@@ -1158,14 +1370,14 @@ bool Game::load(const std::string& path) {
             ins.threshold = rd<uint8_t>(f);
             rec.instructions.push_back(ins);
         }
-        recorder_.recordings.push_back(std::move(rec));
+        recorder_.routines.push_back(std::move(rec));
     }
-    selectedRecording_ = static_cast<size_t>(rd<uint64_t>(f));
-    if (selectedRecording_ >= recorder_.recordings.size())
-        selectedRecording_ = 0;
+    selectedRoutine_ = static_cast<size_t>(rd<uint64_t>(f));
+    if (selectedRoutine_ >= recorder_.routines.size())
+        selectedRoutine_ = 0;
 
     // Re-apply static studio medium tiles (cleared by clearOverrides above).
-    Grid& studio = grids_.at(GRID_STUDIO);
+    Field& studio = fields_.at(FIELD_STUDIO);
     if (!studio.terrain.overrides().count({ 0,  1})) studio.terrain.setType({ 0,  1}, TileType::Mud);
     if (!studio.terrain.overrides().count({ 1,  1})) studio.terrain.setType({ 1,  1}, TileType::Stone);
     if (!studio.terrain.overrides().count({-1,  1})) studio.terrain.setType({-1,  1}, TileType::Clay);

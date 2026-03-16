@@ -2,12 +2,14 @@
 
 #include "types.hpp"
 #include "entity.hpp"
-#include "grid.hpp"
+#include "field.hpp"
 #include "input.hpp"
 #include "recorder.hpp"
 #include "routine_vm.hpp"
-#include "stimulus.hpp"
+#include "effectSpread.hpp"
 #include "fluid.hpp"
+#include "alchemy.hpp"
+#include "component_store.hpp"
 #include <unordered_map>
 #include <string>
 #include <utility>
@@ -20,10 +22,10 @@
 // Individual shortcut keys still work alongside the cycle system.
 
 enum class PlayerAction {
-    Dig, Plant, Scythe, Mine, Summon, PlacePortal
+    Dig, Plant, Scythe, Mine, Summon, PlacePortal, PickUp, Drop, Hit
 };
 
-inline constexpr int PLAYER_ACTION_COUNT = 6;
+inline constexpr int PLAYER_ACTION_COUNT = 9;
 
 inline const char* playerActionName(PlayerAction a) {
     switch (a) {
@@ -33,6 +35,9 @@ inline const char* playerActionName(PlayerAction a) {
         case PlayerAction::Mine:       return "Mine";
         case PlayerAction::Summon:     return "Summon";
         case PlayerAction::PlacePortal:return "Portal";
+        case PlayerAction::PickUp:     return "PickUp";
+        case PlayerAction::Drop:       return "Drop";
+        case PlayerAction::Hit:        return "Hit";
     }
     return "?";
 }
@@ -45,7 +50,7 @@ inline const char* playerActionName(PlayerAction a) {
 enum class AudioEvent {
     PlayerStep, Dig, Plant, CollectMushroom,
     RecordStart, RecordStop, Summon,
-    PortalCreate, PortalEnter, GridSwitch,
+    PortalCreate, PortalEnter, FieldSwitch,
     GoblinHit, AgentStep,
 };
 
@@ -57,7 +62,7 @@ enum class AudioEvent {
 enum class VisualEventType {
     Dig, CollectMushroom, Summon,
     GoblinHit, GoblinDie, PlayerLand,
-    PortalEnter, GridSwitch,
+    PortalEnter, FieldSwitch,
 };
 
 struct VisualEvent {
@@ -81,9 +86,9 @@ struct SummonPreview {
     bool        canAfford = false;
 };
 
-// ─── RecordingInfo ────────────────────────────────────────────────────────────
+// ─── RoutineInfo ─────────────────────────────────────────────────────────────
 
-struct RecordingInfo {
+struct RoutineInfo {
     size_t      index;
     std::string name;
     int         steps;
@@ -91,21 +96,45 @@ struct RecordingInfo {
     bool        selected;
 };
 
+// ─── RabbitSlot / WarrenData ──────────────────────────────────────────────────
+
+struct RabbitSlot {
+    EntityID warrenEid;     // warren entity in FIELD_WORLD
+    FieldID  warrenFieldID; // warren interior field
+    Tick     emergedAt = 0; // tick when rabbit last emerged to world (for cooldown)
+};
+
+struct WarrenData {
+    FieldID  fieldID;   // interior field
+    TilePos  worldPos;  // warren entity's world tile (portal entry point)
+};
+
+// Rabbit satiety constants (using entity.mana as the satiety value).
+inline constexpr int RABBIT_MANA_MAX    = 20;
+inline constexpr int RABBIT_MANA_FULL   = 16;  // return to warren above this
+inline constexpr int RABBIT_MANA_HUNGRY =  8;  // emerge from warren below this
+inline constexpr int RABBIT_EAT_GAIN    =  6;  // mana gained per LongGrass eaten
+inline constexpr int RABBIT_DECAY_RATE  = 500; // ticks between mana decay steps (~10 s/mana)
+
+// Warren interior size.
+inline constexpr int WARREN_W = 8;
+inline constexpr int WARREN_H = 8;
+
 // ─── AgentSlot ────────────────────────────────────────────────────────────────
 //
-// Bundles per-agent VM execution state with its assigned recording.
+// Bundles per-agent VM execution state with its assigned routine.
 // Stored in Game::agentSlots_, keyed by EntityID.
 
 struct AgentSlot {
     AgentExecState state;
-    Recording      rec;
+    Routine        routine;
 };
 
-// ─── Grid ID constants ────────────────────────────────────────────────────────
+// ─── Field ID constants ───────────────────────────────────────────────────────
 
-constexpr GridID GRID_WORLD  = 1;
-constexpr GridID GRID_STUDIO = 2;
-constexpr GridID GRID_DYN_START = 3;   // dynamic grids start here
+constexpr FieldID FIELD_WORLD     = 1;
+constexpr FieldID FIELD_STUDIO    = 2;
+constexpr FieldID FIELD_DYN_START = 3;   // dynamic fields start here
 
 // ─── Room dimensions ─────────────────────────────────────────────────────────
 
@@ -114,7 +143,7 @@ constexpr int ROOM_H = 20;
 
 // ─── transferEntity ───────────────────────────────────────────────────────────
 
-void transferEntity(EntityID eid, Grid& from, Grid& to,
+void transferEntity(EntityID eid, Field& from, Field& to,
                     EntityRegistry& registry, TilePos dest);
 
 // ─── Game ─────────────────────────────────────────────────────────────────────
@@ -126,31 +155,31 @@ public:
     void tick(const Input& input, Tick currentTick);
 
     // Renderer accessors.
-    const Terrain& terrain()     const { return activeGrid().terrain; }
+    const Terrain& terrain()     const { return activeField().terrain; }
     int            playerMana()  const;
     bool           isRecording() const { return recorder_.isRecording(); }
-    bool           inStudio()    const { return activeGridID_ == GRID_STUDIO; }
+    bool           inStudio()    const { return activeFieldID_ == FIELD_STUDIO; }
 
-    // Active grid bounds for renderer (0 = unbounded).
-    std::pair<int,int> activeGridBounds() const {
-        const Grid& g = activeGrid();
-        return { g.width, g.height };
+    // Active field bounds for renderer (0 = unbounded).
+    std::pair<int,int> activeFieldBounds() const {
+        const Field& f = activeField();
+        return { f.width, f.height };
     }
 
     // Player position for camera tracking.
-    TilePos playerPos()         const;
-    TilePos playerDestination() const;
-    float   playerMoveT()       const;
+    TilePos playerPos()            const;
+    TilePos playerDestination()    const;
+    float   playerMoveProgress()   const;
 
-    // Recordings panel.
-    std::vector<RecordingInfo> recordingList() const;
-    void renameRecording(size_t index, const std::string& name);
-    void deleteRecording(size_t index);
+    // Routines panel.
+    std::vector<RoutineInfo> routineList() const;
+    void renameRoutine(size_t index, const std::string& name);
+    void deleteRoutine(size_t index);
 
-    // Recording access (Phase 15).
-    size_t           recordingCount()      const { return recorder_.recordings.size(); }
-    const Recording& recording(size_t idx) const { return recorder_.recordings.at(idx); }
-    size_t           selectedRecordingIdx()const { return selectedRecording_; }
+    // Routine access (Phase 15).
+    size_t         routineCount()      const { return recorder_.routines.size(); }
+    const Routine& routine(size_t idx) const { return recorder_.routines.at(idx); }
+    size_t         selectedRoutineIdx()const { return selectedRoutine_; }
 
     // Instruction editing (Phase 15).
     void deleteInstruction(size_t recIdx, size_t instrIdx);
@@ -179,8 +208,8 @@ public:
     void save(const std::string& path) const;
     bool load(const std::string& path);
 
-    // Clears and returns the grid-switched flag (used for camera snap).
-    bool consumeGridSwitch() { bool v = gridJustSwitched_; gridJustSwitched_ = false; return v; }
+    // Clears and returns the field-switched flag (used for camera snap).
+    bool consumeFieldSwitch() { bool v = fieldJustSwitched_; fieldJustSwitched_ = false; return v; }
 
     // Drains all audio events accumulated since the last call. main.cpp plays
     // the corresponding SFX for each entry.
@@ -198,27 +227,27 @@ public:
         return v;
     }
 
-    // Entities in the active grid, sorted by layer.
+    // Entities in the active field, sorted by drawOrder.
     std::vector<const Entity*> drawOrder() const;
 
 private:
-    // ── Pending cross-grid transfer ───────────────────────────────────────────
+    // ── Pending cross-field transfer ──────────────────────────────────────────
     struct PendingTransfer {
         EntityID eid;
-        GridID   fromGrid;
-        GridID   toGrid;
+        FieldID  fromField;
+        FieldID  toField;
         TilePos  toPos;
     };
     std::vector<PendingTransfer> pendingTransfers_;
 
     // ── State ─────────────────────────────────────────────────────────────────
-    EntityRegistry                   registry_;
-    std::unordered_map<GridID, Grid> grids_;
-    GridID   activeGridID_   = GRID_WORLD;
-    GridID   nextGridID_     = GRID_DYN_START;
+    EntityRegistry                    registry_;
+    std::unordered_map<FieldID, Field> fields_;
+    FieldID  activeFieldID_  = FIELD_WORLD;
+    FieldID  nextFieldID_    = FIELD_DYN_START;
     EntityID playerID_       = INVALID_ENTITY;
     TilePos  playerWorldPos_ = {0, 0};
-    bool     gridJustSwitched_ = false;
+    bool     fieldJustSwitched_ = false;
 
     Recorder  recorder_;
     RoutineVM vm_;
@@ -226,10 +255,23 @@ private:
     std::vector<VisualEvent> visualEvents_;
     int                      playerPrevZ_ = 0;
     std::unordered_map<EntityID, AgentSlot> agentSlots_;
-    size_t selectedRecording_ = 0;
+    size_t selectedRoutine_ = 0;
 
     // ECS component stores (Phase 17+)
-    ComponentStore<FluidComponent> fluidComponents_;
+    ComponentStore<FluidComponent>    fluidComponents_;
+    ComponentStore<PrincipleProfile>  principleComponents_;
+
+    // Shared RNG for world simulation (LongGrass spread, etc.)
+    std::mt19937 worldRng_;
+
+    // Per-rabbit slot (keyed by EntityID).
+    std::unordered_map<EntityID, RabbitSlot> rabbitSlots_;
+
+    // Cooking: tick when each Meat entity first came adjacent to fire.
+    // Removed when meat moves away from fire or is converted.
+    std::unordered_map<EntityID, Tick> cookingStart_;
+    // Per-warren data (keyed by warren EntityID).
+    std::unordered_map<EntityID, WarrenData> warrenData_;
 
     // Action cycle state (Phase 18 extension)
     PlayerAction activeAction_ = PlayerAction::Summon;
@@ -239,24 +281,33 @@ private:
     bool    hasPendingClick_   = false;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-    Grid&       activeGrid()       { return grids_.at(activeGridID_); }
-    const Grid& activeGrid() const { return grids_.at(activeGridID_); }
+    Field&       activeField()       { return fields_.at(activeFieldID_); }
+    const Field& activeField() const { return fields_.at(activeFieldID_); }
 
-    void subscribeEvents(Grid& grid);
+    void subscribeEvents(Field& field);
     void applyPendingTransfer();
 
-    // Per-grid tick sub-systems (all grids run these each tick if not paused).
-    void tickScheduler(Grid& grid, Tick currentTick);
-    void tickGoblinWander(Grid& grid);
-    void tickVM(Grid& grid);
-    void tickMovement(Grid& grid);
+    // Per-field tick sub-systems (all fields run these each tick if not paused).
+    void tickScheduler(Field& field, Tick currentTick);
+    void tickGoblinAI(Field& field, Tick currentTick);
+    void tickRabbitAI(Field& field, Tick currentTick);
+    void tickRabbitBreeding(Field& field);
+    // Creates a warren interior field for the given warren entity.
+    // Called from generateChunk immediately after the warren is spawned.
+    FieldID createWarrenInterior(EntityID warrenEid, TilePos worldPos);
+    // Called when a rabbit entity is destroyed; handles warren cleanup.
+    void onRabbitDied(EntityID rabbitEid);
+    void tickVM(Field& field);
+    void tickMovement(Field& field);
+    void tickResponseMovement(Field& field, Tick currentTick);
+    void tickCooking(Field& field, Tick currentTick);
 
-    // Player input — only called for the active grid.
+    // Player input — only called for the active field.
     void tickPlayerInput(const Input& input);
 
     // Lazy world generation (Phase 18).
     // Generates any unvisited chunks within 2 chunks of playerPos.
-    void maybeGenerateChunks(Grid& grid, TilePos playerPos);
+    void maybeGenerateChunks(Field& field, TilePos playerPos);
     // Generates one chunk at chunk coordinates (cx, cy).
-    void generateChunk(Grid& grid, int cx, int cy);
+    void generateChunk(Field& field, int cx, int cy);
 };

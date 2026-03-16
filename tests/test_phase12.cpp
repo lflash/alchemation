@@ -86,8 +86,8 @@ TEST_CASE("resolveCollision: WoodGolem vs Goblin is Hit") {
     CHECK(resolveCollision(EntityType::WoodGolem, EntityType::Goblin) == CollisionResult::Hit);
 }
 
-TEST_CASE("resolveCollision: MudGolem vs Goblin is Block") {
-    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Goblin) == CollisionResult::Block);
+TEST_CASE("resolveCollision: MudGolem vs Goblin is Hit") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Goblin) == CollisionResult::Hit);
 }
 
 TEST_CASE("resolveCollision: Golem vs Player is Block") {
