@@ -43,15 +43,15 @@ void Recorder::recordPlant() {
     current_.instructions.push_back({ .op = OpCode::PLANT });
 }
 
-void Recorder::recordSummon(size_t targetRecIdx) {
+void Recorder::recordSummon(size_t targetRoutineIdx) {
     if (!recording_) return;
     if (ticksSinceLastMove_ > 0) {
         current_.instructions.push_back({ .op = OpCode::WAIT, .ticks = static_cast<uint16_t>(ticksSinceLastMove_) });
         ticksSinceLastMove_ = 0;
     }
-    // addr stores which recording index to assign to the summoned golem.
+    // addr stores which routine index to assign to the summoned golem.
     current_.instructions.push_back({ .op = OpCode::SUMMON,
-                                      .addr = static_cast<uint16_t>(targetRecIdx) });
+                                      .addr = static_cast<uint16_t>(targetRoutineIdx) });
 }
 
 void Recorder::recordScythe() {
@@ -72,11 +72,11 @@ void Recorder::recordMine() {
     current_.instructions.push_back({ .op = OpCode::MINE });
 }
 
-Recording Recorder::stop() {
+Routine Recorder::stop() {
     current_.instructions.push_back({ .op = OpCode::HALT });
-    current_.name = "Script " + std::to_string(recordings.size() + 1);
+    current_.name = "Script " + std::to_string(routines.size() + 1);
     recording_ = false;
-    recordings.push_back(current_);
+    routines.push_back(current_);
     current_ = {};
-    return recordings.back();
+    return routines.back();
 }

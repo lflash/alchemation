@@ -1,5 +1,5 @@
 #include "doctest.h"
-#include "grid.hpp"
+#include "field.hpp"
 #include "game.hpp"
 #include "input.hpp"
 #include <algorithm>
@@ -19,11 +19,11 @@ static SDL_Event makeKeyUp(SDL_Keycode key) {
     return e;
 }
 
-// ─── Grid::add / remove ───────────────────────────────────────────────────────
+// ─── Field::add / remove ──────────────────────────────────────────────────────
 
-TEST_CASE("Grid::add registers entity in spatial") {
+TEST_CASE("Field::add registers entity in spatial") {
     EntityRegistry reg;
-    Grid grid(1);
+    Field grid(1);
 
     EntityID id = reg.spawn(EntityType::Goblin, {3, 4});
     grid.add(id, *reg.get(id));
@@ -35,7 +35,7 @@ TEST_CASE("Grid::add registers entity in spatial") {
 
 TEST_CASE("Grid::remove unregisters entity from spatial and entity list") {
     EntityRegistry reg;
-    Grid grid(1);
+    Field grid(1);
 
     EntityID id = reg.spawn(EntityType::Goblin, {1, 1});
     grid.add(id, *reg.get(id));
@@ -47,7 +47,7 @@ TEST_CASE("Grid::remove unregisters entity from spatial and entity list") {
 
 TEST_CASE("Grid::remove cleans up mid-move dual registration") {
     EntityRegistry reg;
-    Grid grid(1);
+    Field grid(1);
 
     EntityID id = reg.spawn(EntityType::Goblin, {0, 0});
     Entity* e   = reg.get(id);
@@ -64,26 +64,31 @@ TEST_CASE("Grid::remove cleans up mid-move dual registration") {
 }
 
 TEST_CASE("Grid::hasEntity returns false for unknown entity") {
-    Grid grid(1);
+    Field grid(1);
     CHECK(!grid.hasEntity(42));
 }
 
 // ─── Independent terrain ──────────────────────────────────────────────────────
 
-TEST_CASE("terrain in grid A is independent from terrain in grid B") {
-    Grid a(1), b(2);
+TEST_CASE("spatial grids A and B are independent") {
+    EntityRegistry reg;
+    Field a(1), b(2);
 
-    a.terrain.dig({5, 5});
+    // Spawning a BareEarth entity into field A does not affect field B.
+    EntityID beid = reg.spawn(EntityType::BareEarth, {5, 5});
+    a.add(beid, *reg.get(beid));
 
-    CHECK(a.terrain.typeAt({5, 5}) == TileType::BareEarth);
-    CHECK(b.terrain.typeAt({5, 5}) == TileType::Grass);
+    CHECK( a.hasEntity(beid));
+    CHECK(!b.hasEntity(beid));
+    CHECK(!a.spatial.at({5, 5}).empty());
+    CHECK( b.spatial.at({5, 5}).empty());
 }
 
 // ─── Multiple entities ────────────────────────────────────────────────────────
 
 TEST_CASE("multiple entities can be added and removed independently") {
     EntityRegistry reg;
-    Grid grid(1);
+    Field grid(1);
 
     EntityID a = reg.spawn(EntityType::Player, {0, 0});
     EntityID b = reg.spawn(EntityType::Goblin, {1, 0});
@@ -102,7 +107,7 @@ TEST_CASE("multiple entities can be added and removed independently") {
 
 TEST_CASE("transferEntity: entity appears in destination, absent from source") {
     EntityRegistry reg;
-    Grid a(GRID_WORLD), b(GRID_STUDIO);
+    Field a(FIELD_WORLD), b(FIELD_STUDIO);
 
     EntityID id = reg.spawn(EntityType::Player, {2, 3});
     a.add(id, *reg.get(id));
@@ -121,7 +126,7 @@ TEST_CASE("transferEntity: entity appears in destination, absent from source") {
 
 TEST_CASE("transferEntity: entity position snaps to destination") {
     EntityRegistry reg;
-    Grid a(GRID_WORLD), b(GRID_STUDIO);
+    Field a(FIELD_WORLD), b(FIELD_STUDIO);
 
     EntityID id = reg.spawn(EntityType::Player, {0, 0});
     a.add(id, *reg.get(id));
@@ -131,12 +136,12 @@ TEST_CASE("transferEntity: entity position snaps to destination") {
     REQUIRE(e != nullptr);
     CHECK(e->pos         == TilePos{7, 3});
     CHECK(e->destination == TilePos{7, 3});
-    CHECK(e->moveT       == doctest::Approx(0.0f));
+    CHECK(e->moveProgress == doctest::Approx(0.0f));
 }
 
 TEST_CASE("transferEntity: mid-move entity has dual registration cleaned up") {
     EntityRegistry reg;
-    Grid a(GRID_WORLD), b(GRID_STUDIO);
+    Field a(FIELD_WORLD), b(FIELD_STUDIO);
 
     EntityID id = reg.spawn(EntityType::Goblin, {0, 0});
     Entity* e   = reg.get(id);
@@ -157,7 +162,7 @@ TEST_CASE("transferEntity: mid-move entity has dual registration cleaned up") {
 
 TEST_CASE("scheduler actions in an inactive grid do not affect entities in other grids") {
     EntityRegistry reg;
-    Grid a(GRID_WORLD), b(GRID_STUDIO);
+    Field a(FIELD_WORLD), b(FIELD_STUDIO);
 
     EntityID id = reg.spawn(EntityType::Goblin, {0, 0});
     a.add(id, *reg.get(id));
@@ -174,7 +179,7 @@ TEST_CASE("scheduler actions in an inactive grid do not affect entities in other
     CHECK(a.hasEntity(id));
 }
 
-// ─── Studio grid ─────────────────────────────────────────────────────────────
+// ─── Studio field ────────────────────────────────────────────────────────────
 
 TEST_CASE("Tab enters studio: only player visible, goblin absent") {
     Game  game;
@@ -189,9 +194,9 @@ TEST_CASE("Tab enters studio: only player visible, goblin absent") {
     input.handleEvent(makeKeyDown(SDLK_TAB));
     game.tick(input, 0);
 
-    // Studio has only the player
+    // Studio has the player + 3 medium entities (Mud, Stone, Clay)
     CHECK(game.inStudio());
-    CHECK(game.drawOrder().size() == 1);
+    CHECK(game.drawOrder().size() == 4);
 }
 
 TEST_CASE("Tab back to world restores goblin and player position") {
@@ -219,12 +224,14 @@ TEST_CASE("Tab back to world restores goblin and player position") {
     CHECK(game.drawOrder().size() >= 2);
 }
 
-TEST_CASE("studio terrain is independent from world terrain") {
-    // Already covered by the Grid-level test, but confirm via Game
-    Grid world(GRID_WORLD), studio(GRID_STUDIO);
-    world.terrain.dig({3, 3});
-    CHECK(world.terrain.typeAt({3, 3})  == TileType::BareEarth);
-    CHECK(studio.terrain.typeAt({3, 3}) == TileType::Grass);
+TEST_CASE("studio spatial is independent from world spatial") {
+    // Confirm world and studio fields have independent spatial grids.
+    EntityRegistry reg;
+    Field world(FIELD_WORLD), studio(FIELD_STUDIO);
+    EntityID beid = reg.spawn(EntityType::BareEarth, {3, 3});
+    world.add(beid, *reg.get(beid));
+    CHECK( world.hasEntity(beid));
+    CHECK(!studio.hasEntity(beid));
 }
 
 TEST_CASE("Action::SwitchGrid is recognised by Input") {

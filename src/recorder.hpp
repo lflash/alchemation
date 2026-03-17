@@ -10,7 +10,7 @@
 // Usage per tick:
 //   if (recorder.isRecording()) recorder.tick();
 //   if (player moved)           recorder.recordMove(delta, player.facing);
-//   if (r pressed)              toggle: start() or recordings.push_back(stop())
+//   if (r pressed)              toggle: start() or routines.push_back(stop())
 
 class Recorder {
 public:
@@ -32,7 +32,7 @@ public:
     void recordPlant();
 
     // Emit a WAIT (if any pause) then a SUMMON instruction.
-    void recordSummon(size_t targetRecIdx);
+    void recordSummon(size_t targetRoutineIdx);
 
     // Emit a WAIT (if any pause) then a SCYTHE instruction.
     void recordScythe();
@@ -40,16 +40,16 @@ public:
     // Emit a WAIT (if any pause) then a MINE instruction.
     void recordMine();
 
-    // Append HALT and return the completed Recording. Resets internal state.
-    Recording stop();
+    // Append HALT and return the completed Routine. Resets internal state.
+    Routine stop();
 
     bool isRecording() const { return recording_; }
 
-    // All completed recordings, oldest first.
-    std::deque<Recording> recordings;
+    // All completed routines, oldest first.
+    std::deque<Routine> routines;
 
 private:
     bool     recording_   = false;
     uint32_t ticksSinceLastMove_ = 0;
-    Recording current_;
+    Routine current_;
 };

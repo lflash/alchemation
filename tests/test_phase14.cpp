@@ -2,7 +2,7 @@
 #include "game.hpp"
 #include "input.hpp"
 #include "terrain.hpp"
-#include "grid.hpp"
+#include "field.hpp"
 #include "fluid.hpp"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -23,7 +23,7 @@ static void runTicks(Game& game, int n) {
 }
 
 // Add a Water entity + FluidComponent to a grid.
-static EntityID addWater(Grid& grid, EntityRegistry& reg,
+static EntityID addWater(Field& grid, EntityRegistry& reg,
                          ComponentStore<FluidComponent>& fluids,
                          TilePos pos, float h) {
     EntityID eid = reg.spawn(EntityType::Water, pos);
@@ -72,7 +72,7 @@ TEST_CASE("tickFluid: water with velocity spreads to adjacent tile over ticks") 
     }
     REQUIRE_MESSAGE(found, "could not find adjacent same-level tiles in scan");
 
-    Grid              grid{1};
+    Field             grid{1};
     EntityRegistry    reg;
     ComponentStore<FluidComponent> fluids;
     EntityID srcEid = addWater(grid, reg, fluids, src, 2.0f);
@@ -97,7 +97,7 @@ TEST_CASE("tickFluid: water with velocity spreads to adjacent tile over ticks") 
 }
 
 TEST_CASE("tickFluid: water entity with h well above threshold persists") {
-    Grid              grid{1};
+    Field             grid{1};
     EntityRegistry    reg;
     ComponentStore<FluidComponent> fluids;
     EntityID eid = addWater(grid, reg, fluids, {5,5,0}, 1.0f);
@@ -111,7 +111,7 @@ TEST_CASE("tickFluid: water entity with h well above threshold persists") {
 }
 
 TEST_CASE("tickFluid: water entity with very low h despawns") {
-    Grid              grid{1};
+    Field             grid{1};
     EntityRegistry    reg;
     ComponentStore<FluidComponent> fluids;
     EntityID eid = addWater(grid, reg, fluids, {5,5,0}, 0.001f);
@@ -127,21 +127,58 @@ TEST_CASE("tickFluid: water entity with very low h despawns") {
     // No crash is the primary assertion.
 }
 
+// Helper: spawn a Fire entity and register its expiry.
+static void addFire(Field& grid, EntityRegistry& reg, TilePos pos, Tick expiry = 99999) {
+    EntityID feid = reg.spawn(EntityType::Fire, pos);
+    grid.add(feid, *reg.get(feid));
+    grid.fireTileExpiry[pos] = expiry;
+}
+
+// Helper: check if a Fire entity exists at pos.
+static bool hasFire(Field& grid, EntityRegistry& reg, TilePos pos) {
+    for (EntityID eid : grid.spatial.at(pos)) {
+        const Entity* e = reg.get(eid);
+        if (e && e->type == EntityType::Fire) return true;
+    }
+    return false;
+}
+
+// Helper: check if a BareEarth entity exists at pos.
+static bool hasBareEarth(Field& grid, EntityRegistry& reg, TilePos pos) {
+    for (EntityID eid : grid.spatial.at(pos)) {
+        const Entity* e = reg.get(eid);
+        if (e && e->type == EntityType::BareEarth) return true;
+    }
+    return false;
+}
+
+// Helper: spawn a Portal entity at pos.
+static void addPortal(Field& grid, EntityRegistry& reg, TilePos pos) {
+    EntityID peid = reg.spawn(EntityType::Portal, pos);
+    grid.add(peid, *reg.get(peid));
+}
+
 TEST_CASE("tickFluid: water does not flow into Portal tiles") {
-    Grid              grid{1};
+    Field             grid{1};
     EntityRegistry    reg;
     ComponentStore<FluidComponent> fluids;
     TilePos waterPos  = {0, 0, 0};
     TilePos portalPos = {1, 0, 0};
-    grid.terrain.setType(portalPos, TileType::Portal);
+    addPortal(grid, reg, portalPos);
     EntityID eid = addWater(grid, reg, fluids, waterPos, 2.0f);
     fluids.get(eid)->vx = 1.0f;  // velocity toward portal
 
     for (int i = 0; i < 10; ++i)
         tickFluid(grid, fluids, reg);
 
-    // Portal tile should remain a portal.
-    CHECK(grid.terrain.typeAt(portalPos) == TileType::Portal);
+    // Portal entity should still be present.
+    bool hasPortal = false;
+    for (EntityID e2 : grid.entities) {
+        const Entity* e = reg.get(e2);
+        if (e && e->type == EntityType::Portal && e->pos == portalPos)
+            hasPortal = true;
+    }
+    CHECK(hasPortal);
     // No Water entity should occupy the portal tile.
     bool waterOnPortal = false;
     for (EntityID e2 : grid.entities) {
@@ -153,13 +190,12 @@ TEST_CASE("tickFluid: water does not flow into Portal tiles") {
 }
 
 TEST_CASE("tickFluid: water does not flow into Fire tiles") {
-    Grid              grid{1};
+    Field             grid{1};
     EntityRegistry    reg;
     ComponentStore<FluidComponent> fluids;
     TilePos waterPos = {0, 0, 0};
     TilePos firePos  = {1, 0, 0};
-    grid.terrain.setType(firePos, TileType::Fire);
-    grid.fireTileExpiry[firePos] = 99999;
+    addFire(grid, reg, firePos);
     EntityID eid = addWater(grid, reg, fluids, waterPos, 2.0f);
     fluids.get(eid)->vx = 1.0f;
 
@@ -167,7 +203,7 @@ TEST_CASE("tickFluid: water does not flow into Fire tiles") {
     for (int i = 0; i < 5; ++i)
         tickFluid(grid, fluids, reg);
 
-    // Fire should not have been overwritten by a Water entity.
+    // Fire entity should still be present (no Water should have flowed there).
     bool waterOnFire = false;
     for (EntityID e2 : grid.entities) {
         const Entity* e = reg.get(e2);
@@ -180,7 +216,7 @@ TEST_CASE("tickFluid: water does not flow into Fire tiles") {
 // ─── Fire × Water extinguish ─────────────────────────────────────────────────
 
 TEST_CASE("tickFire: Fire tile adjacent to Water entity is extinguished") {
-    Grid           grid{1};
+    Field          grid{1};
     EntityRegistry registry;
     ComponentStore<FluidComponent> fluids;
     Tick tick = 0;
@@ -188,33 +224,32 @@ TEST_CASE("tickFire: Fire tile adjacent to Water entity is extinguished") {
     TilePos fireTile  = {0, 0, 0};
     TilePos waterTile = {1, 0, 0};
 
-    grid.terrain.setType(fireTile, TileType::Fire);
-    grid.fireTileExpiry[fireTile] = 99999;
-
+    addFire(grid, registry, fireTile);
     addWater(grid, registry, fluids, waterTile, 1.0f);
 
     tickFire(grid, registry, tick);
 
-    CHECK(grid.terrain.typeAt(fireTile) == TileType::BareEarth);
+    // Fire should be gone; BareEarth entity should be in its place.
+    CHECK(!hasFire(grid, registry, fireTile));
+    CHECK(hasBareEarth(grid, registry, fireTile));
     CHECK(grid.fireTileExpiry.count(fireTile) == 0);
 }
 
 TEST_CASE("tickFire: Fire tile NOT adjacent to Water entity is not extinguished") {
-    Grid           grid{1};
+    Field          grid{1};
     EntityRegistry registry;
     ComponentStore<FluidComponent> fluids;
     Tick tick = 0;
 
     TilePos fireTile  = {0, 0, 0};
-    grid.terrain.setType(fireTile, TileType::Fire);
-    grid.fireTileExpiry[fireTile] = 99999;
+    addFire(grid, registry, fireTile);
 
     // Water is far away — not adjacent.
     addWater(grid, registry, fluids, {10, 10, 0}, 1.0f);
 
     tickFire(grid, registry, tick);
 
-    CHECK(grid.terrain.typeAt(fireTile) == TileType::Fire);
+    CHECK(hasFire(grid, registry, fireTile));
 }
 
 // ─── Mana floor ──────────────────────────────────────────────────────────────

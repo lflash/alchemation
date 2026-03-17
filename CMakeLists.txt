@@ -93,3 +93,12 @@ target_include_directories(tests PRIVATE src vendor)
 target_link_libraries(tests PRIVATE SDL2::SDL2)
 
 add_test(NAME phase1 COMMAND tests)
+
+# ─── play: turn-by-turn CLI driver for AI play sessions ──────────────────────
+
+add_executable(play play.cpp ${LOGIC_SOURCES})
+target_include_directories(play PRIVATE src vendor)
+target_link_libraries(play PRIVATE SDL2::SDL2)
+set_target_properties(play PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)

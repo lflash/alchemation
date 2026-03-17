@@ -1,6 +1,7 @@
 #include "doctest.h"
 #include "terminal_renderer.hpp"
 #include "terrain.hpp"
+#include "entity.hpp"
 
 #include <algorithm>
 #include <sstream>
@@ -35,32 +36,42 @@ static std::vector<std::string> renderFrame(
 
 // ─── charForTile ─────────────────────────────────────────────────────────────
 
-TEST_CASE("charForTile: BareEarth always returns '#'") {
-    CHECK(TerminalRenderer::charForTile(TileType::BareEarth, { 0,  0}) == '#');
-    CHECK(TerminalRenderer::charForTile(TileType::BareEarth, { 5,  3}) == '#');
-    CHECK(TerminalRenderer::charForTile(TileType::BareEarth, {-2, -7}) == '#');
+TEST_CASE("charForTile: always returns checkerboard ('.'/',')")  {
+    // Even (x+y) → '.'
+    CHECK(TerminalRenderer::charForTile({ 0,  0}) == '.');
+    CHECK(TerminalRenderer::charForTile({ 1,  1}) == '.');
+    CHECK(TerminalRenderer::charForTile({-1, -1}) == '.');
+    CHECK(TerminalRenderer::charForTile({ 2,  0}) == '.');
+    // Odd (x+y) → ','
+    CHECK(TerminalRenderer::charForTile({ 1,  0}) == ',');
+    CHECK(TerminalRenderer::charForTile({ 0,  1}) == ',');
+    CHECK(TerminalRenderer::charForTile({-1,  0}) == ',');
+    CHECK(TerminalRenderer::charForTile({ 0, -1}) == ',');
 }
 
-TEST_CASE("charForTile: Grass alternates '.' and ',' in checkerboard") {
-    // Even (x+y) → '.'
-    CHECK(TerminalRenderer::charForTile(TileType::Grass, { 0,  0}) == '.');
-    CHECK(TerminalRenderer::charForTile(TileType::Grass, { 1,  1}) == '.');
-    CHECK(TerminalRenderer::charForTile(TileType::Grass, {-1, -1}) == '.');
-    CHECK(TerminalRenderer::charForTile(TileType::Grass, { 2,  0}) == '.');
-    // Odd (x+y) → ','
-    CHECK(TerminalRenderer::charForTile(TileType::Grass, { 1,  0}) == ',');
-    CHECK(TerminalRenderer::charForTile(TileType::Grass, { 0,  1}) == ',');
-    CHECK(TerminalRenderer::charForTile(TileType::Grass, {-1,  0}) == ',');
-    CHECK(TerminalRenderer::charForTile(TileType::Grass, { 0, -1}) == ',');
+// ─── charForEntity — tile-state entities ─────────────────────────────────────
+
+TEST_CASE("charForEntity: tile-state entities") {
+    CHECK(TerminalRenderer::charForEntity(EntityType::BareEarth) == '#');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Fire)      == '^');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Puddle)    == '~');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Straw)     == '_');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Portal)    == 'O');
 }
 
 // ─── charForEntity ───────────────────────────────────────────────────────────
 
 TEST_CASE("charForEntity returns correct characters") {
-    CHECK(TerminalRenderer::charForEntity(EntityType::Player)   == '@');
-    CHECK(TerminalRenderer::charForEntity(EntityType::Goblin)   == 'g');
-    CHECK(TerminalRenderer::charForEntity(EntityType::Mushroom) == 'm');
-    CHECK(TerminalRenderer::charForEntity(EntityType::Poop)     == '*');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Player)    == '@');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Goblin)    == 'g');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Mushroom)  == 'm');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Rabbit)    == 'r');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Warren)    == 'W');
+    CHECK(TerminalRenderer::charForEntity(EntityType::LongGrass) == '+');
+    CHECK(TerminalRenderer::charForEntity(EntityType::MudGolem)  == 'G');
+    CHECK(TerminalRenderer::charForEntity(EntityType::IronGolem) == 'I');
+    CHECK(TerminalRenderer::charForEntity(EntityType::Meat)      == 'M');
+    CHECK(TerminalRenderer::charForEntity(EntityType::CookedMeat)== 'K');
 }
 
 // ─── Frame dimensions ────────────────────────────────────────────────────────
@@ -94,24 +105,26 @@ TEST_CASE("drawTerrain fills all tiles with non-space characters") {
             CHECK(c != ' ');
 }
 
-TEST_CASE("dug tile renders as '#'") {
+TEST_CASE("BareEarth entity renders as '#' on top of terrain") {
     std::ostringstream oss;
     TerminalRenderer r(oss);
     Terrain terrain;
-    terrain.dig({0, 0});
-    auto rows = renderFrame(r, terrain, oss);
-    // tile (0,0) → col = 0 + 10 = 10, row = 0 + 10 = 10
-    CHECK(rows[10][10] == '#');
+    // tile (0,0) → col = 0 + GRID_WIDTH/2 = 15, row = 0 + GRID_HEIGHT/2 = 10
+    oss.str("");
+    r.beginFrame();
+    r.drawTerrain(terrain);
+    r.drawSprite({0.0f, 0.0f}, 0.0f, EntityType::BareEarth, INVALID_ENTITY, 0.0f);
+    r.endFrame();
+    auto rows = parseFrame(oss.str());
+    CHECK(rows[10][15] == '#');
 }
 
-TEST_CASE("restored tile renders as grass again") {
+TEST_CASE("without BareEarth entity, tile renders as grass") {
     std::ostringstream oss;
     TerminalRenderer r(oss);
     Terrain terrain;
-    terrain.dig({0, 0});
-    terrain.restore({0, 0});
     auto rows = renderFrame(r, terrain, oss);
-    char c = rows[10][10];
+    char c = rows[10][15];
     CHECK((c == '.' || c == ','));
 }
 
@@ -129,7 +142,7 @@ TEST_CASE("drawSprite at tile (0,0) places char at buffer centre") {
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
-    CHECK(rows[10][10] == '@');
+    CHECK(rows[10][15] == '@');
 }
 
 TEST_CASE("drawSprite overwrites terrain char at same tile") {
@@ -144,7 +157,7 @@ TEST_CASE("drawSprite overwrites terrain char at same tile") {
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
-    CHECK(rows[10][10] == 'g');
+    CHECK(rows[10][15] == 'g');
 }
 
 TEST_CASE("drawSprite at non-origin tile maps to correct buffer position") {
@@ -159,8 +172,8 @@ TEST_CASE("drawSprite at non-origin tile maps to correct buffer position") {
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
-    // col = round(-5) + 10 = 5,  row = round(-3) + 10 = 7
-    CHECK(rows[7][5] == 'm');
+    // col = round(-5) + GRID_WIDTH/2 = 10,  row = round(-3) + GRID_HEIGHT/2 = 7
+    CHECK(rows[7][10] == 'm');
 }
 
 TEST_CASE("drawSprite with interpolated position rounds to nearest tile") {
@@ -171,12 +184,12 @@ TEST_CASE("drawSprite with interpolated position rounds to nearest tile") {
     oss.str("");
     r.beginFrame();
     r.drawTerrain(terrain);
-    // 0.4 rounds to 0 → col 10, row 10
-    r.drawSprite({0.4f, 0.4f}, 0.0f, EntityType::Poop, INVALID_ENTITY, 0.0f);
+    // 0.4 rounds to 0 → col 15, row 10
+    r.drawSprite({0.4f, 0.4f}, 0.0f, EntityType::MudGolem, INVALID_ENTITY, 0.0f);
     r.endFrame();
 
     auto rows = parseFrame(oss.str());
-    CHECK(rows[10][10] == '*');
+    CHECK(rows[10][15] == 'G');
 }
 
 TEST_CASE("out-of-bounds sprite is silently ignored") {

@@ -42,10 +42,10 @@ struct StudioState {
     static constexpr int ORIGIN_Y = ROOM_H / 2;
 
     void recompute(const Game& game) {
-        int n = (int)game.recordingCount();
+        int n = (int)game.routineCount();
         paths.resize(n);
         for (int i = 0; i < n; ++i)
-            paths[i] = routinePath(game.recording(i),
+            paths[i] = routinePath(game.routine(i),
                                    {ORIGIN_X, ORIGIN_Y, 0}, Direction::S);
         conflicts = studioConflicts(paths);
         pathLen = 0;
@@ -53,7 +53,7 @@ struct StudioState {
             if ((int)p.size() > pathLen) pathLen = (int)p.size();
         scrubTick = std::min(scrubTick, pathLen > 0 ? pathLen - 1 : 0);
         instrRow  = std::min(instrRow,  std::max(0,
-            n > 0 ? (int)game.recording(game.selectedRecordingIdx()).instructions.size() - 1 : 0));
+            n > 0 ? (int)game.routine(game.selectedRoutineIdx()).instructions.size() - 1 : 0));
     }
 
     void reset() {
@@ -124,7 +124,6 @@ static const char* entityTypeName(EntityType t) {
         case EntityType::Player:      return "Player";
         case EntityType::Goblin:      return "Goblin";
         case EntityType::Mushroom:    return "Mushroom";
-        case EntityType::Poop:        return "Agent";
         case EntityType::Campfire:    return "Campfire";
         case EntityType::TreeStump:   return "Tree Stump";
         case EntityType::Log:         return "Log";
@@ -148,7 +147,7 @@ static const char* entityTypeName(EntityType t) {
 // ─── Context menu helpers ─────────────────────────────────────────────────────
 
 static void openContextMenu(UIState& ui, TilePos tile, const Entity* ent,
-                             TileType ttype, int screenX, int screenY) {
+                             int screenX, int screenY) {
     constexpr int ITEM_H = 20;
     constexpr int PAD    = 8;
     constexpr int W      = 148;
@@ -157,7 +156,12 @@ static void openContextMenu(UIState& ui, TilePos tile, const Entity* ent,
     if (ent && ent->type != EntityType::Player)
         ui.contextMenu.items.push_back(entityTypeName(ent->type));
     ui.contextMenu.items.push_back("Move here");
-    if (ttype == TileType::Grass || ttype == TileType::BareEarth)
+    // Show "Dig" unless tile has a non-BareEarth tile-state entity.
+    bool hasTileState = ent && (ent->type == EntityType::Fire   ||
+                                ent->type == EntityType::Puddle ||
+                                ent->type == EntityType::Straw  ||
+                                ent->type == EntityType::Portal);
+    if (!hasTileState)
         ui.contextMenu.items.push_back("Dig");
 
     int H = PAD + (int)ui.contextMenu.items.size() * ITEM_H + PAD;
@@ -295,8 +299,7 @@ int main() {
                         TilePos tile = screenToTileAccurate(mx, my, camera, game.terrain(), &_v);
                         contextTile  = tile;
                         const Entity*  ent   = game.entityAtTile(tile);
-                        TileType       ttype = game.terrain().typeAt(tile);
-                        openContextMenu(ui, tile, ent, ttype, mx, my);
+                        openContextMenu(ui, tile, ent, mx, my);
                     }
                 }
 
@@ -322,9 +325,9 @@ int main() {
                 if (e.type == SDL_KEYDOWN) {
                     SDL_Keycode k = e.key.keysym.sym;
                     if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
-                        auto list = game.recordingList();
+                        auto list = game.routineList();
                         for (const auto& r : list)
-                            if (r.selected) { game.renameRecording(r.index, ui.renameBuffer); break; }
+                            if (r.selected) { game.renameRoutine(r.index, ui.renameBuffer); break; }
                         SDL_StopTextInput();
                         ui.renamingScript = false;
                     } else if (k == SDLK_ESCAPE) {
@@ -340,8 +343,8 @@ int main() {
             // ── Delete script from recordings panel ───────────────────────────
             if (ui.is(ActivePanel::Recordings) && !ui.renamingScript &&
                 e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_DELETE) {
-                size_t idx = game.selectedRecordingIdx();
-                game.deleteRecording(idx);
+                size_t idx = game.selectedRoutineIdx();
+                game.deleteRoutine(idx);
                 studio.recompute(game);
                 continue;
             }
@@ -376,7 +379,7 @@ int main() {
                 } else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
                     uint16_t ticks = studio.waitBuffer.empty()
                                      ? 1 : static_cast<uint16_t>(std::stoi(studio.waitBuffer));
-                    size_t selRec = game.selectedRecordingIdx();
+                    size_t selRec = game.selectedRoutineIdx();
                     game.insertWait(selRec, (size_t)studio.instrRow, ticks);
                     studio.instrRow++;
                     studio.insertingWait = false;
@@ -397,7 +400,7 @@ int main() {
                 else if (k == SDLK_LEFT)  studio.insertDir = RelDir::Left;
                 else if (k == SDLK_RIGHT) studio.insertDir = RelDir::Right;
                 else if (k == SDLK_RETURN || k == SDLK_KP_ENTER) {
-                    size_t selRec = game.selectedRecordingIdx();
+                    size_t selRec = game.selectedRoutineIdx();
                     game.insertMoveRel(selRec, (size_t)studio.instrRow, studio.insertDir);
                     studio.instrRow++;
                     studio.insertingMove = false;
@@ -411,9 +414,9 @@ int main() {
             // ── Studio panel-focused key nav ──────────────────────────────────
             if (game.inStudio() && studio.panelFocused && e.type == SDL_KEYDOWN) {
                 SDL_Keycode k  = e.key.keysym.sym;
-                size_t selRec  = game.selectedRecordingIdx();
-                int    instrN  = (selRec < game.recordingCount())
-                                 ? (int)game.recording(selRec).instructions.size() : 0;
+                size_t selRec  = game.selectedRoutineIdx();
+                int    instrN  = (selRec < game.routineCount())
+                                 ? (int)game.routine(selRec).instructions.size() : 0;
                 if (k == SDLK_UP && (SDL_GetModState() & KMOD_SHIFT)) {
                     if (studio.instrRow > 0) {
                         game.reorderInstruction(selRec, studio.instrRow, studio.instrRow - 1);
@@ -434,7 +437,7 @@ int main() {
                 if (k == SDLK_DOWN) { studio.instrRow = std::min(instrN - 1, studio.instrRow + 1); continue; }
                 if (k == SDLK_BACKSPACE && instrN > 0) {
                     game.deleteInstruction(selRec, (size_t)studio.instrRow);
-                    instrN = (int)game.recording(selRec).instructions.size();
+                    instrN = (int)game.routine(selRec).instructions.size();
                     if (studio.instrRow >= instrN) studio.instrRow = std::max(0, instrN - 1);
                     studio.recompute(game);
                     continue;
@@ -511,7 +514,7 @@ int main() {
         // Start rename when recordings panel is open and Enter pressed.
         if (ui.is(ActivePanel::Recordings) && !ui.renamingScript &&
             input.pressed(Action::Confirm)) {
-            auto list = game.recordingList();
+            auto list = game.routineList();
             for (const auto& r : list) {
                 if (r.selected) { ui.renameBuffer = r.name; break; }
             }
@@ -557,7 +560,7 @@ int main() {
         }
 
         // Snap camera instantly on grid switch.
-        if (game.consumeGridSwitch()) {
+        if (game.consumeFieldSwitch()) {
             Vec2f snap = toVec(game.playerPos());
             camera.pos     = snap;
             camera.target  = snap;
@@ -583,10 +586,10 @@ int main() {
 
         Vec2f playerRenderPos = lerp(toVec(game.playerPos()),
                                      toVec(game.playerDestination()),
-                                     game.playerMoveT());
+                                     game.playerMoveProgress());
         float playerRenderZ = lerp(static_cast<float>(game.playerPos().z),
                                    static_cast<float>(game.playerDestination().z),
-                                   game.playerMoveT());
+                                   game.playerMoveProgress());
         camera.target  = { playerRenderPos.x + camOffset.x,
                            playerRenderPos.y + camOffset.y };
         camera.targetZ = playerRenderZ;
@@ -606,7 +609,7 @@ int main() {
         // ── Render ───────────────────────────────────────────────────────────
         renderer.setCamera(camera);
         renderer.setStudioMode(game.inStudio());
-        auto [bW, bH] = game.activeGridBounds();
+        auto [bW, bH] = game.activeFieldBounds();
         renderer.setGridBounds(bW, bH);
         renderer.updateEffects(fdt);
         renderer.beginFrame();
@@ -619,11 +622,12 @@ int main() {
         if (hoveredValid) renderer.drawHoverHighlight(hoveredTile);
 
         for (const Entity* ent : game.drawOrder()) {
-            Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
+            Vec2f renderPos = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveProgress);
             float renderZ   = lerp(static_cast<float>(ent->pos.z),
-                                   static_cast<float>(ent->destination.z), ent->moveT);
+                                   static_cast<float>(ent->destination.z), ent->moveProgress);
+            if (ent->carriedBy != INVALID_ENTITY) renderZ += 1.5f;  // float above carrier
             renderer.drawShadow(renderPos, renderZ);
-            renderer.drawSprite(renderPos, renderZ, ent->type, ent->id, ent->moveT, ent->lit);
+            renderer.drawSprite(renderPos, renderZ, ent->type, ent->id, ent->moveProgress, ent->lit);
             renderer.drawEntityEffects(renderPos, renderZ, ent->burning, ent->electrified);
             if (ent->type != EntityType::Mushroom   &&
                 ent->type != EntityType::Campfire   &&
@@ -634,6 +638,8 @@ int main() {
                 ent->type != EntityType::Tree       &&
                 ent->type != EntityType::Rock       &&
                 ent->type != EntityType::Chest      &&
+                ent->type != EntityType::Meat       &&
+                ent->type != EntityType::CookedMeat &&
                 !isGolem(ent->type))
                 renderer.drawFacingIndicator(renderPos, renderZ, ent->facing);
         }
@@ -645,7 +651,7 @@ int main() {
             for (int i = 0; i < (int)studio.paths.size(); ++i) {
                 views.push_back({ &studio.paths[i], agentPaletteColor(i) });
             }
-            int selRec = (int)game.selectedRecordingIdx();
+            int selRec = (int)game.selectedRoutineIdx();
             renderer.drawStudioPaths(views, studio.conflicts,
                                      studio.scrubTick, selRec);
 
@@ -654,7 +660,7 @@ int main() {
                 const auto& selPath = studio.paths[selRec];
                 if (studio.scrubTick < (int)selPath.size()) {
                     const PathStep& gs = selPath[studio.scrubTick];
-                    renderer.drawGhostEntity(gs.pos, gs.facing, EntityType::Poop);
+                    renderer.drawGhostEntity(gs.pos, gs.facing, EntityType::MudGolem);
                 }
             }
         }
@@ -688,7 +694,7 @@ int main() {
                 case VisualEventType::PortalEnter:
                     renderer.triggerFade(0.0f, 2.0f);
                     break;
-                case VisualEventType::GridSwitch:
+                case VisualEventType::FieldSwitch:
                     renderer.triggerShake(8.0f);
                     break;
                 case VisualEventType::Summon:
@@ -702,7 +708,7 @@ int main() {
         static constexpr SFX eventToSFX[] = {
             SFX::Step, SFX::Dig, SFX::Plant, SFX::CollectMushroom,
             SFX::RecordStart, SFX::RecordStop, SFX::DeployAgent,
-            SFX::PortalCreate, SFX::PortalEnter, SFX::GridSwitch,
+            SFX::PortalCreate, SFX::PortalEnter, SFX::FieldSwitch,
             SFX::GoblinHit, SFX::AgentStep,
         };
         for (AudioEvent ev : game.drainAudioEvents())
@@ -716,13 +722,13 @@ int main() {
             int goblinCount = 0;
             for (const Entity* ent : game.drawOrder()) {
                 if (ent->type != EntityType::Goblin) continue;
-                Vec2f rp = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveT);
+                Vec2f rp = lerp(toVec(ent->pos), toVec(ent->destination), ent->moveProgress);
                 if (std::abs(rp.x - camera.pos.x) <= halfW + 2 &&
                     std::abs(rp.y - camera.pos.y) <= halfH + 2)
                     ++goblinCount;
             }
             bool inStudio = game.inStudio();
-            auto [gW, gH] = game.activeGridBounds();
+            auto [gW, gH] = game.activeFieldBounds();
             bool inRoom   = (gW > 0 && gH > 0 && !inStudio);
 
             audio.setLayerTarget(MusicLayer::WorldCalm,
@@ -740,17 +746,17 @@ int main() {
         renderer.drawSummonPreview(game.playerSummonPreview());
 
         if (ui.is(ActivePanel::Recordings))
-            renderer.drawRecordingsPanel(game.recordingList(), ui.renamingScript, ui.renameBuffer);
+            renderer.drawRecordingsPanel(game.routineList(), ui.renamingScript, ui.renameBuffer);
         else if (ui.is(ActivePanel::Controls))
             renderer.drawControlsMenu();
         else if (ui.is(ActivePanel::Rebind))
             renderer.drawRebindPanel(input.getMap(), ui.rebindRow, ui.rebindListening);
 
         // Studio instruction panel and timeline (hidden when any other menu is open).
-        if (game.inStudio() && game.recordingCount() > 0 && !ui.isOpen()) {
-            size_t selRec = game.selectedRecordingIdx();
-            if (selRec < game.recordingCount()) {
-                const Recording& selRecording = game.recording(selRec);
+        if (game.inStudio() && game.routineCount() > 0 && !ui.isOpen()) {
+            size_t selRec = game.selectedRoutineIdx();
+            if (selRec < game.routineCount()) {
+                const Routine& selRoutine = game.routine(selRec);
 
                 // Compute instruction index at current scrub position.
                 int scrubInstrIdx = -1;
@@ -772,13 +778,13 @@ int main() {
                     }
                 }
 
-                renderer.drawInstructionPanel(selRecording, studio.instrRow,
+                renderer.drawInstructionPanel(selRoutine, studio.instrRow,
                                               scrubInstrIdx,
                                               studio.insertingWait,
                                               studio.insertingMove,
                                               studio.waitBuffer,
                                               studio.insertDir);
-                renderer.drawTimeline(selRecording, scrubInstrIdx, conflictInstrs);
+                renderer.drawTimeline(selRoutine, scrubInstrIdx, conflictInstrs);
             }
         }
 

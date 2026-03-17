@@ -3,7 +3,7 @@
 #include "fluid.hpp"
 #include "entity.hpp"
 #include "game.hpp"
-#include "grid.hpp"
+#include "field.hpp"
 
 // ─── ComponentStore ───────────────────────────────────────────────────────────
 
@@ -75,7 +75,7 @@ TEST_CASE("FluidComponent present on Water entity after add") {
 // ─── tickFluid ────────────────────────────────────────────────────────────────
 
 // Helper: create a water entity in a grid and register its FluidComponent.
-static EntityID addWater(Grid& grid, EntityRegistry& reg,
+static EntityID addWater(Field& grid, EntityRegistry& reg,
                          ComponentStore<FluidComponent>& fluids,
                          TilePos pos, float h) {
     EntityID eid = reg.spawn(EntityType::Water, pos);
@@ -87,7 +87,7 @@ static EntityID addWater(Grid& grid, EntityRegistry& reg,
 
 TEST_CASE("tickFluid: water on flat terrain stays put when no velocity") {
     // A single water cell with h=1, vx=vy=0 — no gradient, should not spread.
-    Grid              grid(1);
+    Field             grid(1);
     EntityRegistry    reg;
     ComponentStore<FluidComponent> fluids;
 
@@ -102,7 +102,7 @@ TEST_CASE("tickFluid: water on flat terrain stays put when no velocity") {
 }
 
 TEST_CASE("tickFluid: water entity despawns when h reaches zero") {
-    Grid              grid(1);
+    Field             grid(1);
     EntityRegistry    reg;
     ComponentStore<FluidComponent> fluids;
 
@@ -149,19 +149,30 @@ TEST_CASE("fluidOverlay: returns water tiles for active grid") {
 
 TEST_CASE("tickFluid: fire adjacent to Water entity is extinguished next tick") {
     // Place a Fire tile adjacent to a Water entity.
-    Grid              grid(1);
+    Field             grid(1);
     EntityRegistry    reg;
     ComponentStore<FluidComponent> fluids;
 
     // Add water at (1,0,0).
     addWater(grid, reg, fluids, {1,0,0}, 1.0f);
 
-    // Set (0,0,0) to Fire with a far-future expiry.
-    grid.terrain.setType({0,0,0}, TileType::Fire);
+    // Add a Fire entity at (0,0,0) with a far-future expiry.
+    EntityID feid = reg.spawn(EntityType::Fire, {0,0,0});
+    grid.add(feid, *reg.get(feid));
     grid.fireTileExpiry[{0,0,0}] = 999999;
 
     // tickFire should extinguish (0,0,0) because (1,0,0) has a Water entity.
     tickFire(grid, reg, 0);
 
-    CHECK(grid.terrain.typeAt({0,0,0}) == TileType::BareEarth);
+    // Fire entity should be gone; BareEarth entity should be in its place.
+    bool fireGone = true, hasBE = false;
+    for (EntityID eid : grid.entities) {
+        const Entity* e = reg.get(eid);
+        if (e && e->pos == TilePos{0,0,0}) {
+            if (e->type == EntityType::Fire)     fireGone = false;
+            if (e->type == EntityType::BareEarth) hasBE   = true;
+        }
+    }
+    CHECK(fireGone);
+    CHECK(hasBE);
 }

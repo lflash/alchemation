@@ -73,8 +73,8 @@ TEST_CASE("drawOrder sorts entities by layer ascending") {
 
     auto ordered = reg.drawOrder();
     REQUIRE(ordered.size() == 3);
-    CHECK(ordered[0]->layer <= ordered[1]->layer);
-    CHECK(ordered[1]->layer <= ordered[2]->layer);
+    CHECK(ordered[0]->drawOrder <= ordered[1]->drawOrder);
+    CHECK(ordered[1]->drawOrder <= ordered[2]->drawOrder);
 }
 
 // ─── Entity defaults ─────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ TEST_CASE("spawned entity starts with correct position") {
     const Entity* e = reg.get(id);
     CHECK(e->pos         == TilePos{5, -3});
     CHECK(e->destination == TilePos{5, -3});
-    CHECK(e->moveT       == doctest::Approx(0.0f));
+    CHECK(e->moveProgress       == doctest::Approx(0.0f));
 }
 
 // ─── stepMovement ────────────────────────────────────────────────────────────
@@ -104,17 +104,17 @@ TEST_CASE("stepMovement does nothing when entity is idle") {
     bool arrived = stepMovement(*e);
     CHECK(!arrived);
     CHECK(e->isIdle());
-    CHECK(e->moveT == doctest::Approx(0.0f));
+    CHECK(e->moveProgress == doctest::Approx(0.0f));
 }
 
-TEST_CASE("stepMovement advances moveT each tick") {
+TEST_CASE("stepMovement advances moveProgress each tick") {
     EntityRegistry reg;
     EntityID id = reg.spawn(EntityType::Player, {0, 0});
     Entity* e = reg.get(id);
     e->destination = {1, 0};
 
     stepMovement(*e);
-    CHECK(e->moveT == doctest::Approx(e->speed));
+    CHECK(e->moveProgress == doctest::Approx(e->speed));
     CHECK(e->isMoving());
 }
 
@@ -135,7 +135,7 @@ TEST_CASE("stepMovement arrives after expected number of ticks") {
     CHECK(ticks <= 11);
     CHECK(e->isIdle());
     CHECK(e->pos == TilePos{1, 0});
-    CHECK(e->moveT == doctest::Approx(0.0f));
+    CHECK(e->moveProgress == doctest::Approx(0.0f));
 }
 
 TEST_CASE("stepMovement returns true exactly on arrival tick") {
@@ -145,9 +145,9 @@ TEST_CASE("stepMovement returns true exactly on arrival tick") {
     e->speed       = 0.5f;   // arrives in 2 ticks
     e->destination = {1, 0};
 
-    bool arrived = stepMovement(*e);  // tick 1: moveT = 0.5
+    bool arrived = stepMovement(*e);  // tick 1: moveProgress = 0.5
     CHECK(!arrived);
-    arrived = stepMovement(*e);       // tick 2: moveT >= 1.0 → arrived
+    arrived = stepMovement(*e);       // tick 2: moveProgress >= 1.0 → arrived
     CHECK(arrived);
     CHECK(e->isIdle());
 }

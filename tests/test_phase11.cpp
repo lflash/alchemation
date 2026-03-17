@@ -17,8 +17,8 @@ TEST_CASE("instrCost: MOVE_REL Right costs 1") {
     CHECK(instrCost(OpCode::MOVE_REL, RelDir::Right) == 1);
 }
 
-TEST_CASE("instrCost: MOVE_REL Back costs 2") {
-    CHECK(instrCost(OpCode::MOVE_REL, RelDir::Back) == 2);
+TEST_CASE("instrCost: MOVE_REL Back costs 1") {
+    CHECK(instrCost(OpCode::MOVE_REL, RelDir::Back) == 1);
 }
 
 TEST_CASE("instrCost: WAIT costs 0") {
@@ -29,12 +29,12 @@ TEST_CASE("instrCost: HALT costs 0") {
     CHECK(instrCost(OpCode::HALT) == 0);
 }
 
-TEST_CASE("instrCost: DIG costs 3") {
-    CHECK(instrCost(OpCode::DIG) == 3);
+TEST_CASE("instrCost: DIG costs 1") {
+    CHECK(instrCost(OpCode::DIG) == 1);
 }
 
-TEST_CASE("instrCost: PLANT costs 2") {
-    CHECK(instrCost(OpCode::PLANT) == 2);
+TEST_CASE("instrCost: PLANT costs 1") {
+    CHECK(instrCost(OpCode::PLANT) == 1);
 }
 
 TEST_CASE("instrCost: JUMP costs 0") {
@@ -53,21 +53,21 @@ TEST_CASE("instrCost: RET costs 0") {
     CHECK(instrCost(OpCode::RET) == 0);
 }
 
-// ─── Recording::manaCost ─────────────────────────────────────────────────────
+// ─── Routine::manaCost ───────────────────────────────────────────────────────
 
 TEST_CASE("manaCost: empty recording costs 0") {
-    Recording rec;
+    Routine rec;
     CHECK(rec.manaCost() == 0);
 }
 
 TEST_CASE("manaCost: HALT-only recording costs 0") {
-    Recording rec;
+    Routine rec;
     rec.instructions = { {.op = OpCode::HALT} };
     CHECK(rec.manaCost() == 0);
 }
 
 TEST_CASE("manaCost: one MOVE_REL Forward costs 1") {
-    Recording rec;
+    Routine rec;
     rec.instructions = {
         {.op = OpCode::MOVE_REL, .dir = RelDir::Forward},
         {.op = OpCode::HALT},
@@ -75,18 +75,18 @@ TEST_CASE("manaCost: one MOVE_REL Forward costs 1") {
     CHECK(rec.manaCost() == 1);
 }
 
-TEST_CASE("manaCost: one MOVE_REL Back costs 2") {
-    Recording rec;
+TEST_CASE("manaCost: one MOVE_REL Back costs 1") {
+    Routine rec;
     rec.instructions = {
         {.op = OpCode::MOVE_REL, .dir = RelDir::Back},
         {.op = OpCode::HALT},
     };
-    CHECK(rec.manaCost() == 2);
+    CHECK(rec.manaCost() == 1);
 }
 
 TEST_CASE("manaCost: mixed sequence sums correctly") {
-    // Forward(1) + Right(1) + Back(2) + WAIT(0) + HALT(0) = 4
-    Recording rec;
+    // Forward(1) + Right(1) + Back(1) + WAIT(0) + HALT(0) = 3
+    Routine rec;
     rec.instructions = {
         {.op = OpCode::MOVE_REL, .dir = RelDir::Forward},
         {.op = OpCode::MOVE_REL, .dir = RelDir::Right},
@@ -94,11 +94,11 @@ TEST_CASE("manaCost: mixed sequence sums correctly") {
         {.op = OpCode::WAIT, .ticks = 5},
         {.op = OpCode::HALT},
     };
-    CHECK(rec.manaCost() == 4);
+    CHECK(rec.manaCost() == 3);
 }
 
 TEST_CASE("manaCost: HALT not counted, WAIT not counted") {
-    Recording rec;
+    Routine rec;
     rec.instructions = {
         {.op = OpCode::WAIT, .ticks = 10},
         {.op = OpCode::WAIT, .ticks = 20},
@@ -163,11 +163,11 @@ TEST_CASE("deploy succeeds and deducts mana when mana >= cost") {
     pressKey(input, game, SDLK_w, tick++);
     idleTicks(input, game, 10, tick);    // wait for movement to complete
 
-    // Stop recording → creates Recording with MOVE_REL Forward + HALT, cost = 1
+    // Stop recording → creates Routine with MOVE_REL Forward + HALT, cost = 1
     pressKey(input, game, SDLK_r, tick++);
 
-    REQUIRE(!game.recordingList().empty());
-    CHECK(game.recordingList()[0].manaCost == 1);
+    REQUIRE(!game.routineList().empty());
+    CHECK(game.routineList()[0].manaCost == 1);
 
     // Deploy
     pressKey(input, game, SDLK_e, tick++);
@@ -191,8 +191,8 @@ TEST_CASE("deploy blocked and mana unchanged when mana insufficient") {
     }
     pressKey(input, game, SDLK_r, tick++);
 
-    REQUIRE(!game.recordingList().empty());
-    CHECK(game.recordingList()[0].manaCost == 3);
+    REQUIRE(!game.routineList().empty());
+    CHECK(game.routineList()[0].manaCost == 3);
 
     // Drain mana to near-zero by deploying once (cost 3, player has 3).
     // Mana floor keeps it at 1.

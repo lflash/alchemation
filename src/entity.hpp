@@ -15,6 +15,7 @@ enum Capability : uint32_t {
     CanFight          = 1u << 2,  // deals damage in combat interactions
     ImmuneFire        = 1u << 3,  // unaffected by fire stimulus
     ImmuneWet         = 1u << 4,  // unaffected by wet stimulus
+    Carriable         = 1u << 5,  // can be picked up and carried
 };
 
 // Default capability set for each entity type.
@@ -29,20 +30,22 @@ struct Entity {
     EntityID   id;
     EntityType type;
 
-    TilePos    pos;          // current logical tile
-    TilePos    destination;  // target tile (== pos when idle)
-    float      moveT;        // 0.0→1.0 progress toward destination
+    TilePos    pos;           // current logical tile
+    TilePos    destination;   // target tile (== pos when idle)
+    float      moveProgress;  // 0.0→1.0 progress toward destination
 
-    Vec2f      size;         // hitbox dimensions in tile units
-    float      speed;        // moveT units added per tick
+    Vec2f      size;          // hitbox dimensions in tile units
+    float      speed;         // moveProgress units added per tick
     Direction  facing;
-    int        layer;        // draw order (lower drawn first)
+    int        drawOrder;     // draw order (lower drawn first)
     int        mana;
     int        health;
     bool       lit          = false;  // Lightbulb: true when powered (≥1V on puddle tile)
     bool       burning      = false;  // TreeStump/Log: true while in entityBurnEnd
     bool       electrified  = false;  // Any entity: true while standing on a charged puddle
     uint32_t   capabilities = 0;      // bitfield of Capability flags
+    EntityID   carrying     = INVALID_ENTITY;  // entity this entity is carrying (or INVALID)
+    EntityID   carriedBy    = INVALID_ENTITY;  // entity carrying this one (or INVALID)
 
     bool isMoving()                const { return pos != destination; }
     bool isIdle()                  const { return pos == destination; }
@@ -56,16 +59,17 @@ struct Entity {
 struct EntityConfig {
     float speed;
     Vec2f size;
-    int   layer;
+    int   drawOrder;
     int   health;
+    int   mana = 0;
 };
 
 EntityConfig defaultConfig(EntityType type);
 
 // ─── Movement ────────────────────────────────────────────────────────────────
 
-// Advances moveT by entity speed. On arrival, snaps pos to destination and
-// resets moveT to 0. Returns true if the entity arrived this tick.
+// Advances moveProgress by entity speed. On arrival, snaps pos to destination and
+// resets moveProgress to 0. Returns true if the entity arrived this tick.
 bool stepMovement(Entity& e);
 
 // ─── EntityRegistry ──────────────────────────────────────────────────────────

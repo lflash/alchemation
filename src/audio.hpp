@@ -10,7 +10,7 @@
 enum class SFX {
     Step, Dig, Plant, CollectMushroom,
     RecordStart, RecordStop, DeployAgent,
-    PortalCreate, PortalEnter, GridSwitch,
+    PortalCreate, PortalEnter, FieldSwitch,
     GoblinHit, AgentStep,
 };
 

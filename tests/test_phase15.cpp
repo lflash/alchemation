@@ -2,10 +2,10 @@
 #include "studio.hpp"
 #include "routine.hpp"
 
-// ─── Helper: build a Recording from an instruction list ──────────────────────
+// ─── Helper: build a Routine from an instruction list ────────────────────────
 
-static Recording makeRec(std::initializer_list<Instruction> instrs) {
-    Recording r;
+static Routine makeRec(std::initializer_list<Instruction> instrs) {
+    Routine r;
     r.name = "test";
     r.instructions.assign(instrs.begin(), instrs.end());
     return r;
@@ -27,7 +27,7 @@ static Instruction jumpInstr(uint16_t addr) {
 // ─── routinePath: basic movement ─────────────────────────────────────────────
 
 TEST_CASE("routinePath: empty recording returns empty path") {
-    Recording rec;
+    Routine rec;
     auto path = routinePath(rec, {0, 0, 0}, Direction::S);
     CHECK(path.empty());
 }
@@ -191,7 +191,7 @@ TEST_CASE("studioConflicts: multiple conflict ticks") {
 TEST_CASE("deleteInstruction: removes correct instruction") {
     Game game;
     // Create a recording with 3 moves
-    Recording rec;
+    Routine rec;
     rec.name = "test";
     rec.instructions = { moveInstr(RelDir::Forward), moveInstr(RelDir::Right),
                          moveInstr(RelDir::Back), haltInstr() };
@@ -205,11 +205,11 @@ TEST_CASE("insertWait: inserts at correct position") {
     Game game;
     // No recordings yet — insertWait should be a no-op
     game.insertWait(0, 0, 5);
-    CHECK(game.recordingCount() == 0);   // still 0, no crash
+    CHECK(game.routineCount() == 0);   // still 0, no crash
 }
 
 TEST_CASE("insertMoveRel: no-op on empty recording list") {
     Game game;
     game.insertMoveRel(0, 0, RelDir::Forward);
-    CHECK(game.recordingCount() == 0);
+    CHECK(game.routineCount() == 0);
 }

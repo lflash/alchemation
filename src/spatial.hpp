@@ -61,11 +61,11 @@ enum class CollisionResult { Pass, Block, Collect, Combat, Hit };
 
 // Lookup table: (mover type, occupant type) → result.
 //
-//         │ Player   Goblin   Mushroom  Poop
-// ────────┼──────────────────────────────────
-// Player  │  —       Block*   Collect   Pass     *bump combat: push fires on block
-// Goblin  │ Combat   Block    Pass      Pass
-// Poop    │  Pass    Hit      Pass      Pass
+//         │ Player   Goblin   Mushroom
+// ────────┼─────────────────────────────────────────────────────
+// Player  │  —       Block*   Collect   *bump combat: push fires on block
+// Goblin  │ Combat   Block    Pass
+// MudGolem│  Block   Hit      Pass      (shares Hit with IronGolem, WoodGolem)
 CollisionResult resolveCollision(EntityType mover, EntityType occupant);
 
 // ─── Two-phase move resolution ────────────────────────────────────────────────

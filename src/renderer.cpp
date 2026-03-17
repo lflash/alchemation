@@ -16,7 +16,7 @@ static const std::unordered_map<EntityType, std::string> SPRITE_PATHS = {
     { EntityType::Player,      "assets/sprites/player.png"     },
     { EntityType::Goblin,      "assets/sprites/goblin.png"     },
     { EntityType::Mushroom,    "assets/sprites/mushroom.png"   },
-    { EntityType::Poop,        "assets/sprites/poop.png"       },
+
     { EntityType::Campfire,    "assets/sprites/campfire.png"   },
     { EntityType::TreeStump,   "assets/sprites/tree_stump.png" },
     { EntityType::Log,         "assets/sprites/logs.png"       },
@@ -36,12 +36,15 @@ static const std::unordered_map<EntityType, std::string> SPRITE_PATHS = {
     { EntityType::IronGolem,   "assets/sprites/golem.png"      },
     { EntityType::CopperGolem, "assets/sprites/golem.png"      },
     // Phase 18 world entities — placeholder sprites until art lands
-    { EntityType::Rabbit,      "assets/sprites/goblin.png"     },
+    { EntityType::Rabbit,      "assets/sprites/rabbit.png"     },
     { EntityType::Warren,      "assets/sprites/well.png"       },
     { EntityType::IronOre,     "assets/sprites/wall.png"       },
     { EntityType::CopperOre,   "assets/sprites/wall.png"       },
     { EntityType::CoalOre,     "assets/sprites/wall.png"       },
     { EntityType::SulphurOre,  "assets/sprites/wall.png"       },
+    { EntityType::LongGrass,   "assets/sprites/mushroom.png"   },  // placeholder
+    { EntityType::Meat,        "assets/sprites/golem.png"      },  // placeholder
+    { EntityType::CookedMeat,  "assets/sprites/campfire.png"   },  // placeholder
 };
 
 // ─── SpriteCache ─────────────────────────────────────────────────────────────
@@ -176,9 +179,8 @@ void Renderer::drawTerrain(const Terrain& terrain) {
             int       level = levelOf(x, y);
             float     lf    = static_cast<float>(level);
             float     h     = terrain.heightAt(p);
-            TileType  ttype = terrain.typeAt(p);
             Biome     biome = terrain.biomeAt(p);
-            SDL_Color color = tileColor(h, p, ttype, biome);
+            SDL_Color color = tileColor(h, p, biome);
             SDL_Color south = darken(color, 0.55f);
             SDL_Color side  = darken(color, 0.45f);
 
@@ -242,9 +244,10 @@ void Renderer::drawTerrain(const Terrain& terrain) {
                 SDL_RenderFillRect(sdl, &r);
             }
 
-            // ── Procedural tile detail ────────────────────────────────────────
-            if (ttype == TileType::Grass) {
-                // ~12 % of grass tiles get a small flower or stone dot.
+            // ── Procedural grass detail ───────────────────────────────────────
+            // ~12 % of grass tiles get a small flower or stone dot.
+            // Tile-state entities (BareEarth etc.) overdraw this in drawSprite.
+            {
                 uint32_t h = static_cast<uint32_t>(x) * 2654435761u
                            ^ static_cast<uint32_t>(y) * 2246822519u;
                 if ((h & 0xFF) < 30) {
@@ -263,17 +266,6 @@ void Renderer::drawTerrain(const Terrain& terrain) {
                     SDL_Rect dot = { sx + dx, sy + dy, 2, 2 };
                     SDL_SetRenderDrawColor(sdl, det.r, det.g, det.b, det.a);
                     SDL_RenderFillRect(sdl, &dot);
-                }
-            } else if (ttype == TileType::BareEarth) {
-                // ~8 % of bare-earth tiles get a short crack line.
-                uint32_t h = static_cast<uint32_t>(x) * 3456789013u
-                           ^ static_cast<uint32_t>(y) * 1234567891u;
-                if ((h & 0xFF) < 20) {
-                    int dx  = static_cast<int>((h >> 8)  & 0x1F) * sw / 32;
-                    int dy  = static_cast<int>((h >> 13) & 0x0F) * iH / 16;
-                    int dx2 = dx + 3 + static_cast<int>((h >> 18) & 0x3u);
-                    SDL_SetRenderDrawColor(sdl, 100, 65, 30, 255);
-                    SDL_RenderDrawLine(sdl, sx + dx, sy + dy, sx + dx2, sy + dy + 1);
                 }
             }
         }
@@ -311,7 +303,55 @@ void Renderer::drawShadow(Vec2f renderPos, float renderZ) {
 }
 
 void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type,
-                           EntityID eid, float moveT, bool lit) {
+                           EntityID eid, float moveProgress, bool lit) {
+    // Tile-state entities: draw as full-tile colored rectangles.
+    {
+        int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
+        int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
+        SDL_Rect tile = { toPixelX(renderPos.x, renderZ), toPixelY(renderPos.y, renderZ), iTs, iH };
+        float t = dayNightT_;
+        if (type == EntityType::BareEarth) {
+            float d = 0.85f + 0.15f * std::sin(t / 150.0f * static_cast<float>(M_PI));
+            SDL_SetRenderDrawColor(sdl, uint8_t(139*d), uint8_t(90*d), uint8_t(43*d), 255);
+            SDL_RenderFillRect(sdl, &tile);
+            // Crack detail.
+            uint32_t h = uint32_t(renderPos.x) * 3456789013u ^ uint32_t(renderPos.y) * 1234567891u;
+            if ((h & 0xFF) < 20) {
+                int dx  = int((h >> 8)  & 0x1F) * iTs / 32;
+                int dy  = int((h >> 13) & 0x0F) * iH  / 16;
+                int dx2 = dx + 3 + int((h >> 18) & 0x3u);
+                SDL_SetRenderDrawColor(sdl, 100, 65, 30, 255);
+                SDL_RenderDrawLine(sdl, tile.x+dx, tile.y+dy, tile.x+dx2, tile.y+dy+1);
+            }
+            return;
+        }
+        if (type == EntityType::Portal) {
+            float pulse = 0.7f + 0.3f * std::sin(t * 3.0f + renderPos.x * 0.7f + renderPos.y * 0.5f);
+            SDL_SetRenderDrawColor(sdl, uint8_t(160*pulse), uint8_t(60*pulse), uint8_t(220*pulse), 255);
+            SDL_RenderFillRect(sdl, &tile);
+            return;
+        }
+        if (type == EntityType::Fire) {
+            int   v = (int(renderPos.x)*13 + int(renderPos.y)*7) & 0x1F;
+            float f = 0.8f + 0.2f * std::sin(t * 20.0f + renderPos.x + renderPos.y * 1.3f);
+            SDL_SetRenderDrawColor(sdl, uint8_t((220+v/4)*f), uint8_t((80+v/2)*f), 0, 255);
+            SDL_RenderFillRect(sdl, &tile);
+            return;
+        }
+        if (type == EntityType::Puddle) {
+            float r = 0.85f + 0.15f * std::sin(t * 4.0f + renderPos.x * 0.9f + renderPos.y * 1.1f);
+            SDL_SetRenderDrawColor(sdl, uint8_t(60*r), uint8_t(100*r), uint8_t(200*r), 255);
+            SDL_RenderFillRect(sdl, &tile);
+            return;
+        }
+        if (type == EntityType::Straw) {
+            float d = 0.85f + 0.15f * std::sin(t / 150.0f * static_cast<float>(M_PI));
+            SDL_SetRenderDrawColor(sdl, uint8_t(210*d), uint8_t(180*d), uint8_t(80*d), 255);
+            SDL_RenderFillRect(sdl, &tile);
+            return;
+        }
+    }
+
     SDL_Texture* tex = sprites.get(type);
     if (!tex) return;
 
@@ -327,7 +367,7 @@ void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type,
     }
 
     // Walk bob: a small vertical hop at the mid-point of each step.
-    float bob = std::sin(moveT * static_cast<float>(M_PI)) * 2.0f * camera_.zoom;
+    float bob = std::sin(moveProgress * static_cast<float>(M_PI)) * 2.0f * camera_.zoom;
 
     int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
     int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
@@ -353,77 +393,9 @@ void Renderer::endFrame() {
     SDL_RenderPresent(sdl);
 }
 
-SDL_Color Renderer::tileColor(float height, TilePos pos, TileType type, Biome biome) const {
+SDL_Color Renderer::tileColor(float height, TilePos pos, Biome biome) const {
     // Slow day/night cycle: 300-second period, ±15% brightness.
     float dayFactor = 0.85f + 0.15f * std::sin(dayNightT_ / 150.0f * static_cast<float>(M_PI));
-
-    if (type == TileType::BareEarth)
-        return { static_cast<uint8_t>(139 * dayFactor),
-                 static_cast<uint8_t>(90  * dayFactor),
-                 static_cast<uint8_t>(43  * dayFactor), 255 };
-
-    if (type == TileType::Portal) {
-        // Shimmering purple pulse.
-        float pulse = 0.7f + 0.3f * std::sin(dayNightT_ * 3.0f
-                                              + pos.x * 0.7f + pos.y * 0.5f);
-        return { static_cast<uint8_t>(160 * pulse),
-                 static_cast<uint8_t>(60  * pulse),
-                 static_cast<uint8_t>(220 * pulse), 255 };
-    }
-
-    if (type == TileType::Fire) {
-        // Flickery orange-red: spatial hash + time-based flicker.
-        int   v       = (pos.x * 13 + pos.y * 7) & 0x1F;
-        float flicker = 0.8f + 0.2f * std::sin(dayNightT_ * 20.0f
-                                                + pos.x + pos.y * 1.3f);
-        return { static_cast<uint8_t>((220 + v / 4) * flicker),
-                 static_cast<uint8_t>((80  + v / 2) * flicker),
-                 0, 255 };
-    }
-
-    if (type == TileType::Puddle) {
-        // Gentle ripple.
-        float ripple = 0.85f + 0.15f * std::sin(dayNightT_ * 4.0f
-                                                 + pos.x * 0.9f + pos.y * 1.1f);
-        return { static_cast<uint8_t>(60  * ripple),
-                 static_cast<uint8_t>(100 * ripple),
-                 static_cast<uint8_t>(200 * ripple), 255 };
-    }
-
-    // Summoning medium tiles — each has a distinct flat colour with a day/night tint.
-    if (type == TileType::Mud)
-        return { static_cast<uint8_t>(101 * dayFactor),
-                 static_cast<uint8_t>( 67 * dayFactor),
-                 static_cast<uint8_t>( 33 * dayFactor), 255 };
-    if (type == TileType::Stone)
-        return { static_cast<uint8_t>(120 * dayFactor),
-                 static_cast<uint8_t>(120 * dayFactor),
-                 static_cast<uint8_t>(120 * dayFactor), 255 };
-    if (type == TileType::Clay)
-        return { static_cast<uint8_t>(180 * dayFactor),
-                 static_cast<uint8_t>( 90 * dayFactor),
-                 static_cast<uint8_t>( 60 * dayFactor), 255 };
-    if (type == TileType::Bush)
-        return { static_cast<uint8_t>( 30 * dayFactor),
-                 static_cast<uint8_t>(100 * dayFactor),
-                 static_cast<uint8_t>( 30 * dayFactor), 255 };
-    if (type == TileType::Wood)
-        return { static_cast<uint8_t>(130 * dayFactor),
-                 static_cast<uint8_t>( 80 * dayFactor),
-                 static_cast<uint8_t>( 30 * dayFactor), 255 };
-    if (type == TileType::Iron)
-        return { static_cast<uint8_t>( 80 * dayFactor),
-                 static_cast<uint8_t>( 85 * dayFactor),
-                 static_cast<uint8_t>( 95 * dayFactor), 255 };
-    if (type == TileType::Copper)
-        return { static_cast<uint8_t>(184 * dayFactor),
-                 static_cast<uint8_t>(115 * dayFactor),
-                 static_cast<uint8_t>( 51 * dayFactor), 255 };
-
-    if (type == TileType::Straw)
-        return { static_cast<uint8_t>(210 * dayFactor),
-                 static_cast<uint8_t>(180 * dayFactor),
-                 static_cast<uint8_t>( 80 * dayFactor), 255 };
 
     if (studioMode_) {
         // Muted blue-grey studio floor.
@@ -872,7 +844,7 @@ void Renderer::drawText(const std::string& text, int x, int y, SDL_Color col) co
     SDL_RenderCopy(sdl, tex, nullptr, &dst);
 }
 
-void Renderer::drawRecordingsPanel(const std::vector<RecordingInfo>& list,
+void Renderer::drawRecordingsPanel(const std::vector<RoutineInfo>& list,
                                    bool renaming, const std::string& renameBuffer) {
     constexpr int PAD         = 10;
     constexpr int W           = 310;
@@ -1299,7 +1271,7 @@ void Renderer::drawGhostEntity(TilePos pos, Direction facing, EntityType type) {
     SDL_SetTextureAlphaMod(tex, 255);
 }
 
-void Renderer::drawInstructionPanel(const Recording& rec, int selectedRow,
+void Renderer::drawInstructionPanel(const Routine& rec, int selectedRow,
                                      int scrubInstrIdx,
                                      bool insertingWait, bool insertingMove,
                                      const std::string& insertBuffer,
@@ -1387,7 +1359,7 @@ void Renderer::drawInstructionPanel(const Recording& rec, int selectedRow,
     }
 }
 
-void Renderer::drawTimeline(const Recording& rec, int scrubInstrIdx,
+void Renderer::drawTimeline(const Routine& rec, int scrubInstrIdx,
                              const std::vector<int>& conflictInstrs) {
     if (rec.instructions.empty()) return;
 

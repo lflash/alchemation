@@ -59,8 +59,8 @@ far in conversation, but the user may revise any of them.
 - **Multiple `Grid` instances** are independent simulation spaces (main world, studio,
   interiors, parallel universes). Not collision layers.
 - **Recordings are `Instruction` streams** (`MOVE_REL`, `WAIT`, `HALT`) executed by
-  the Routine VM. A deployed Poop is a routine agent — an autonomous robot — not a
-  projectile. All agent types share the same VM.
+  the Routine VM. Deployed agents are `MudGolem` (or any golem type) — autonomous robots,
+  not projectiles. All agent types share the same VM.
 - **Terrain type and stimuli** are fields on `Terrain` tiles, not entities.
 - **Scheduler is a min-heap** ordered by tick.
 - **One-point perspective projection**: `f = 1 + (tileZ - cam.z) / Z_PERSP` (Z_PERSP=30).

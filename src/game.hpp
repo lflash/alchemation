@@ -311,3 +311,11 @@ private:
     // Generates one chunk at chunk coordinates (cx, cy).
     void generateChunk(Field& field, int cx, int cy);
 };
+
+// ─── gameStateText ────────────────────────────────────────────────────────────
+//
+// Returns a structured text description of the current game state: player
+// stats, what's ahead, and nearby entities sorted by distance.
+// Intended for headless / AI play sessions.
+
+std::string gameStateText(const Game& g);

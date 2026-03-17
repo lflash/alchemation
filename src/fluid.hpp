@@ -4,7 +4,7 @@
 #include "types.hpp"
 #include <vector>
 
-class Grid;
+class Field;
 class EntityRegistry;
 
 // ─── FluidComponent ───────────────────────────────────────────────────────────
@@ -37,5 +37,5 @@ struct FluidOverlay {
 
 // ─── tickFluid ────────────────────────────────────────────────────────────────
 
-void tickFluid(Grid& grid, ComponentStore<FluidComponent>& fluids,
+void tickFluid(Field& grid, ComponentStore<FluidComponent>& fluids,
                EntityRegistry& registry);

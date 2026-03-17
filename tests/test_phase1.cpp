@@ -110,36 +110,17 @@ TEST_CASE("heightAt produces variation across tiles") {
     CHECK(anyDiffers);
 }
 
-TEST_CASE("typeAt returns Grass by default") {
-    Terrain t;
-    CHECK(t.typeAt({0,  0}) == TileType::Grass);
-    CHECK(t.typeAt({3, -5}) == TileType::Grass);
-}
+// ─── Tile-state entities (BareEarth, Fire, Puddle, Straw, Portal) ─────────────
+//
+// These tests confirm that tile state is tracked via entities in the spatial
+// grid now that TileType overrides have been removed from Terrain.
 
-TEST_CASE("typeAt returns BareEarth after dig") {
+TEST_CASE("terrain has no tile-state by default (heightAt + levelAt work)") {
     Terrain t;
-    t.dig({2, 3});
-    CHECK(t.typeAt({2, 3}) == TileType::BareEarth);
-}
-
-TEST_CASE("dig does not affect other tiles") {
-    Terrain t;
-    t.dig({2, 3});
-    CHECK(t.typeAt({2, 4}) == TileType::Grass);
-    CHECK(t.typeAt({3, 3}) == TileType::Grass);
-}
-
-TEST_CASE("restore reverts BareEarth to Grass") {
-    Terrain t;
-    t.dig({1, 1});
-    REQUIRE(t.typeAt({1, 1}) == TileType::BareEarth);
-    t.restore({1, 1});
-    CHECK(t.typeAt({1, 1}) == TileType::Grass);
-}
-
-TEST_CASE("restore on unmodified tile is a no-op") {
-    Terrain t;
-    t.restore({0, 0});   // should not throw or change anything
-    CHECK(t.typeAt({0, 0}) == TileType::Grass);
+    // Terrain still provides height; it no longer tracks tile type overrides.
+    // levelAt always returns a finite integer — just confirm it doesn't crash.
+    int lev = t.levelAt({0, 0});
+    CHECK(lev >= -4);
+    CHECK(lev <=  4);
 }
 

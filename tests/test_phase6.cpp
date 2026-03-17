@@ -213,7 +213,7 @@ TEST_CASE("moving goblin push redirects destination, not pos") {
 
     // Goblin mid-move: heading east from {1,0} to {2,0}
     g->destination = {2, 0};
-    g->moveT       = 0.5f;
+    g->moveProgress = 0.5f;
     spatial.add(gid, g->destination, g->size);  // dual-register
 
     p->mana   = 1;   // small damage, goblin survives

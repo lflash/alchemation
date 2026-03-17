@@ -93,6 +93,7 @@ void Game::tickGoblinAI(Field& grid, Tick currentTick) {
                 }
                 break;
             case EntityType::Campfire:
+            case EntityType::Fire:
                 firePositions.push_back(e->pos);
                 break;
             case EntityType::Player:
@@ -143,26 +144,13 @@ void Game::tickGoblinAI(Field& grid, Tick currentTick) {
         Entity* carriedEnt = loaded ? registry_.get(ent->carrying) : nullptr;
 
         // ── Find nearest fire ─────────────────────────────────────────────────
+        // firePositions already includes both Campfire and Fire entities.
         TilePos nearestFire = {0, 0, 0};
         bool    hasFire     = false;
-        // Check terrain fire tiles adjacent or nearby.
-        // Also check campfire entities collected above.
         int bestFireDist = INT_MAX;
         for (const auto& fp : firePositions) {
             int d = manhat(ent->pos, fp);
             if (d < bestFireDist) { bestFireDist = d; nearestFire = fp; hasFire = true; }
-        }
-        // Also check terrain fire tiles (scan nearby).
-        if (!grid.isBounded()) {
-            for (int dy = -DETECT_RADIUS; dy <= DETECT_RADIUS; ++dy) {
-                for (int dx = -DETECT_RADIUS; dx <= DETECT_RADIUS; ++dx) {
-                    TilePos tp = { ent->pos.x + dx, ent->pos.y + dy, 0 };
-                    if (grid.terrain.typeAt(tp) == TileType::Fire) {
-                        int d = std::abs(dx) + std::abs(dy);
-                        if (d < bestFireDist) { bestFireDist = d; nearestFire = tp; hasFire = true; }
-                    }
-                }
-            }
         }
 
         // ── Side-effect: eat carried food when adjacent to fire ───────────────

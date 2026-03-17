@@ -144,12 +144,12 @@ TEST_CASE("resolveCollision: goblin + goblin → Block") {
     CHECK(resolveCollision(EntityType::Goblin, EntityType::Goblin) == CollisionResult::Block);
 }
 
-TEST_CASE("resolveCollision: poop + goblin → Hit") {
-    CHECK(resolveCollision(EntityType::Poop, EntityType::Goblin) == CollisionResult::Hit);
+TEST_CASE("resolveCollision: mud golem + goblin → Hit") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Goblin) == CollisionResult::Hit);
 }
 
-TEST_CASE("resolveCollision: player + poop → Pass") {
-    CHECK(resolveCollision(EntityType::Player, EntityType::Poop) == CollisionResult::Pass);
+TEST_CASE("resolveCollision: player + mud golem → Block") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::MudGolem) == CollisionResult::Block);
 }
 
 TEST_CASE("resolveCollision: goblin + mushroom → Pass") {

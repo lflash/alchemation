@@ -1,8 +1,8 @@
 #include "routine_vm.hpp"
 
-VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
+VMResult RoutineVM::step(AgentExecState& state, const Routine& routine,
                          Direction agentFacing, const uint8_t* stimuli) const {
-    if (rec.empty() || state.pc >= rec.instructions.size())
+    if (routine.empty() || state.pc >= routine.instructions.size())
         return { .halt = true };
 
     // Count down an active WAIT before consuming a new instruction.
@@ -11,7 +11,7 @@ VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
         return {};
     }
 
-    const Instruction& instr = rec.instructions[state.pc];
+    const Instruction& instr = routine.instructions[state.pc];
 
     switch (instr.op) {
 
@@ -40,7 +40,7 @@ VMResult RoutineVM::step(AgentExecState& state, const Recording& rec,
 
         case OpCode::SUMMON:
             ++state.pc;
-            return { .wantSummon = true, .summonRecIdx = instr.addr };
+            return { .wantSummon = true, .summonRoutineIdx = instr.addr };
 
         case OpCode::SCYTHE:
             ++state.pc;

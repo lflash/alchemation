@@ -3,11 +3,11 @@
 
 // ─── routinePath ─────────────────────────────────────────────────────────────
 
-std::vector<PathStep> routinePath(const Recording& rec,
+std::vector<PathStep> routinePath(const Routine& routine,
                                   TilePos origin, Direction facing,
                                   int maxSteps) {
     std::vector<PathStep> path;
-    if (rec.instructions.empty()) return path;
+    if (routine.instructions.empty()) return path;
 
     TilePos   pos       = origin;
     Direction dir       = facing;
@@ -17,9 +17,9 @@ std::vector<PathStep> routinePath(const Recording& rec,
     int       callDepth = 0;
 
     while (steps < maxSteps) {
-        if (pc < 0 || pc >= (int)rec.instructions.size()) break;
+        if (pc < 0 || pc >= (int)routine.instructions.size()) break;
 
-        const Instruction& instr = rec.instructions[pc];
+        const Instruction& instr = routine.instructions[pc];
         int instrIdx = pc;
 
         switch (instr.op) {

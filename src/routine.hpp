@@ -18,7 +18,7 @@ enum class OpCode : uint8_t {
     JUMP_IF_NOT,    // jump if stimulus[cond] <= threshold; addr, cond, threshold
     CALL,           // push return addr, jump; addr = target PC
     RET,            // pop return addr, jump back
-    SUMMON,         // summon golem from medium tile ahead; new golem inherits agent's recording
+    SUMMON,         // summon golem from medium tile ahead; new golem inherits agent's routine
     SCYTHE,         // convert Grass tile ahead to Straw
     MINE,           // make ore entity ahead Pushable
 };
@@ -59,7 +59,7 @@ struct Instruction {
 struct AgentExecState {
     static constexpr int CALL_STACK_DEPTH = 8;
 
-    uint32_t pc        = 0;   // index into Recording::instructions
+    uint32_t pc        = 0;   // index into Routine::instructions
     uint32_t waitTicks = 0;   // remaining ticks on a WAIT
     uint16_t callStack[CALL_STACK_DEPTH] = {};   // CALL return addresses
     int      callDepth = 0;                      // current stack depth
@@ -75,9 +75,9 @@ struct AgentExecState {
 
 constexpr int instrCost(OpCode op, RelDir dir = RelDir::Forward) {
     switch (op) {
-        case OpCode::MOVE_REL: return (dir == RelDir::Back) ? 2 : 1;
-        case OpCode::DIG:      return 3;
-        case OpCode::PLANT:    return 2;
+        case OpCode::MOVE_REL: return 1;
+        case OpCode::DIG:      return 1;
+        case OpCode::PLANT:    return 1;
         case OpCode::SUMMON:   return 5;
         case OpCode::SCYTHE:   return 2;
         case OpCode::MINE:     return 3;
@@ -85,14 +85,14 @@ constexpr int instrCost(OpCode op, RelDir dir = RelDir::Forward) {
     }
 }
 
-// ─── Recording ───────────────────────────────────────────────────────────────
+// ─── Routine ─────────────────────────────────────────────────────────────────
 
-struct Recording {
+struct Routine {
     std::string              name;
     std::vector<Instruction> instructions;
     bool empty() const { return instructions.empty(); }
 
-    // Total mana cost to deploy this recording as an agent.
+    // Total mana cost to deploy this routine as an agent.
     int manaCost() const {
         int total = 0;
         for (const auto& ins : instructions)

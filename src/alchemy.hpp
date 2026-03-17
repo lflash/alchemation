@@ -2,6 +2,7 @@
 
 #include "types.hpp"
 #include <cstdint>
+#include <optional>
 
 // ─── PrincipleProfile ────────────────────────────────────────────────────────
 //
@@ -63,3 +64,11 @@ struct ResponseProfile {
 
 PrincipleProfile principleProfile(EntityType type);
 ResponseProfile  responseProfile(EntityType type, bool loaded = false);
+
+// ─── alchemyReact ─────────────────────────────────────────────────────────────
+//
+// Given a medium entity type, returns the golem type it produces when catalysed
+// by a Spark.  Returns nullopt if the entity type is not a summoning medium.
+// The Summon action defaults to MudGolem when no medium entity is present.
+
+std::optional<EntityType> alchemyReact(EntityType medium);

@@ -54,6 +54,39 @@ Specific falloff curves to be determined per field during implementation.
 
 ---
 
+## Response Profiles
+
+Entities that exhibit behaviour (movement, actions) have a **response profile** — a
+per-entity-type constant table defining how strongly the entity is attracted to or
+repelled by each principle field gradient.
+
+A response profile is a signed value per principle: positive means the entity moves
+toward higher field intensity, negative means it moves away. Zero means it ignores
+that field entirely.
+
+```
+ResponseProfile {
+    int8_t heat, cold, wet, dry;
+    int8_t life, death;
+    int8_t positive, negative;
+    int8_t adhesive, repellent;
+}
+```
+
+Each tick, a behaving entity samples the local field gradient in each direction,
+weights it by its response profile, and moves in the highest-scoring direction.
+This replaces hardcoded AI scoring equations — the response profile IS the AI.
+
+The combined profile of the entity and anything it is carrying is used when computing
+movement drives. A goblin carrying raw Meat (high Life, needs Heat) has a different
+effective response than an unloaded goblin — behavioural shifts emerge from changes
+in the carried entity's profile without any extra state.
+
+Response profiles are defined per entity type, not per instance. They are design
+constants, not runtime data.
+
+---
+
 ## Transformation
 
 A substance's principle profile shifts over time as it absorbs the local field.

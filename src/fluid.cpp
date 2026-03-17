@@ -1,5 +1,5 @@
 #include "fluid.hpp"
-#include "grid.hpp"
+#include "field.hpp"
 #include "entity.hpp"
 #include <algorithm>
 #include <unordered_map>
@@ -17,7 +17,7 @@
 //
 // Tiles blocked by Portal or Fire do not receive flow.
 
-void tickFluid(Grid& grid, ComponentStore<FluidComponent>& fluids,
+void tickFluid(Field& grid, ComponentStore<FluidComponent>& fluids,
                EntityRegistry& registry) {
     static const TilePos kDirs4[] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
     constexpr float H_MIN        = 0.02f;  // below this → despawn
@@ -41,8 +41,11 @@ void tickFluid(Grid& grid, ComponentStore<FluidComponent>& fluids,
     };
 
     auto canFlow = [&](TilePos from, TilePos to) -> bool {
-        TileType toType = grid.terrain.typeAt(to);
-        if (toType == TileType::Portal || toType == TileType::Fire) return false;
+        for (EntityID peid : grid.spatial.at(to)) {
+            const Entity* pe = registry.get(peid);
+            if (pe && (pe->type == EntityType::Portal || pe->type == EntityType::Fire))
+                return false;
+        }
         return std::abs(grid.terrain.levelAt(to) - grid.terrain.levelAt(from)) <= 1;
     };
 

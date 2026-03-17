@@ -1,23 +1,46 @@
 #include "doctest.h"
 #include "types.hpp"
-#include "terrain.hpp"
 #include "entity.hpp"
 #include "spatial.hpp"
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// Runs the plant action (Key::C logic) and returns the spawned EntityID,
+// Spawns a BareEarth entity at pos (simulates digging).
+static EntityID digTile(TilePos pos, EntityRegistry& registry, SpatialGrid& spatial) {
+    EntityID beid = registry.spawn(EntityType::BareEarth, pos);
+    Entity*  be   = registry.get(beid);
+    spatial.add(beid, be->pos, be->size);
+    return beid;
+}
+
+// True if a BareEarth entity is in the spatial at pos.
+static bool isBareEarth(TilePos pos, EntityRegistry& registry, SpatialGrid& spatial) {
+    for (EntityID cid : spatial.at(pos)) {
+        const Entity* ce = registry.get(cid);
+        if (ce && ce->type == EntityType::BareEarth) return true;
+    }
+    return false;
+}
+
+// Runs the plant action and returns the spawned EntityID,
 // or INVALID_ENTITY if the action was rejected.
-static EntityID doPlant(Entity& player, Terrain& terrain,
-                        EntityRegistry& registry, SpatialGrid& spatial) {
+static EntityID doPlant(Entity& player, EntityRegistry& registry, SpatialGrid& spatial) {
     TilePos ahead = player.pos + dirToDelta(player.facing);
-    if (terrain.typeAt(ahead) != TileType::BareEarth) return INVALID_ENTITY;
-    if (player.mana < 1)                               return INVALID_ENTITY;
+    // Find BareEarth entity at ahead.
+    EntityID bareID = INVALID_ENTITY;
+    for (EntityID cid : spatial.at(ahead)) {
+        const Entity* ce = registry.get(cid);
+        if (ce && ce->type == EntityType::BareEarth) { bareID = cid; break; }
+    }
+    if (bareID == INVALID_ENTITY) return INVALID_ENTITY;
+    if (player.mana < 1)         return INVALID_ENTITY;
 
     EntityID mid = registry.spawn(EntityType::Mushroom, ahead);
     Entity*  m   = registry.get(mid);
     spatial.add(mid, m->pos, m->size);
-    terrain.restore(ahead);
+    // Remove BareEarth entity (restore to Grass).
+    spatial.remove(bareID, ahead, registry.get(bareID)->size);
+    registry.destroy(bareID);
     player.mana--;
     return mid;
 }
@@ -68,15 +91,14 @@ TEST_CASE("dirToDelta is the inverse of toDirection for diagonal directions") {
 TEST_CASE("plant on Grass tile does nothing") {
     EntityRegistry registry;
     SpatialGrid    spatial;
-    Terrain        terrain;
 
     EntityID pid = registry.spawn(EntityType::Player, {0, 0});
     Entity*  p   = registry.get(pid);
     p->facing = Direction::E;
     p->mana   = 5;
 
-    // Tile ahead is Grass by default
-    EntityID mid = doPlant(*p, terrain, registry, spatial);
+    // No BareEarth entity ahead → doPlant rejects
+    EntityID mid = doPlant(*p, registry, spatial);
 
     CHECK(mid == INVALID_ENTITY);
     CHECK(p->mana == 5);  // mana unchanged
@@ -85,7 +107,6 @@ TEST_CASE("plant on Grass tile does nothing") {
 TEST_CASE("plant on BareEarth with 0 mana does nothing") {
     EntityRegistry registry;
     SpatialGrid    spatial;
-    Terrain        terrain;
 
     EntityID pid = registry.spawn(EntityType::Player, {0, 0});
     Entity*  p   = registry.get(pid);
@@ -93,19 +114,18 @@ TEST_CASE("plant on BareEarth with 0 mana does nothing") {
     p->mana   = 0;
 
     TilePos ahead = p->pos + dirToDelta(p->facing);
-    terrain.dig(ahead);
+    digTile(ahead, registry, spatial);
 
-    EntityID mid = doPlant(*p, terrain, registry, spatial);
+    EntityID mid = doPlant(*p, registry, spatial);
 
     CHECK(mid == INVALID_ENTITY);
-    CHECK(terrain.typeAt(ahead) == TileType::BareEarth);  // terrain unchanged
+    CHECK(isBareEarth(ahead, registry, spatial));  // BareEarth entity still present
     CHECK(p->mana == 0);
 }
 
-TEST_CASE("plant on BareEarth with mana >= 1 spawns mushroom, deducts 1 mana, restores terrain") {
+TEST_CASE("plant on BareEarth with mana >= 1 spawns mushroom, deducts 1 mana, restores tile") {
     EntityRegistry registry;
     SpatialGrid    spatial;
-    Terrain        terrain;
 
     EntityID pid = registry.spawn(EntityType::Player, {0, 0});
     Entity*  p   = registry.get(pid);
@@ -114,13 +134,13 @@ TEST_CASE("plant on BareEarth with mana >= 1 spawns mushroom, deducts 1 mana, re
     p->mana   = 3;
 
     TilePos ahead = p->pos + dirToDelta(p->facing);
-    terrain.dig(ahead);
+    digTile(ahead, registry, spatial);
 
-    EntityID mid = doPlant(*p, terrain, registry, spatial);
+    EntityID mid = doPlant(*p, registry, spatial);
 
     CHECK(mid != INVALID_ENTITY);
     CHECK(p->mana == 2);
-    CHECK(terrain.typeAt(ahead) == TileType::Grass);  // restored
+    CHECK(!isBareEarth(ahead, registry, spatial));  // BareEarth entity removed
 
     // Mushroom exists at the tile
     Entity* m = registry.get(mid);
@@ -132,7 +152,6 @@ TEST_CASE("plant on BareEarth with mana >= 1 spawns mushroom, deducts 1 mana, re
 TEST_CASE("planting twice with enough mana spawns two mushrooms") {
     EntityRegistry registry;
     SpatialGrid    spatial;
-    Terrain        terrain;
 
     EntityID pid = registry.spawn(EntityType::Player, {0, 0});
     Entity*  p   = registry.get(pid);
@@ -142,16 +161,16 @@ TEST_CASE("planting twice with enough mana spawns two mushrooms") {
 
     TilePos east  = {1, 0};
     TilePos north = {0, -1};
-    terrain.dig(east);
-    terrain.dig(north);
+    digTile(east,  registry, spatial);
+    digTile(north, registry, spatial);
 
-    doPlant(*p, terrain, registry, spatial);  // plants east
+    doPlant(*p, registry, spatial);  // plants east
     p->facing = Direction::N;
-    doPlant(*p, terrain, registry, spatial);  // plants north
+    doPlant(*p, registry, spatial);  // plants north
 
     CHECK(p->mana == 2);
-    CHECK(terrain.typeAt(east)  == TileType::Grass);
-    CHECK(terrain.typeAt(north) == TileType::Grass);
+    CHECK(!isBareEarth(east,  registry, spatial));
+    CHECK(!isBareEarth(north, registry, spatial));
 }
 
 // ─── Collect action ───────────────────────────────────────────────────────────

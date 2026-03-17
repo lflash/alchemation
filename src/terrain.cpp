@@ -1,14 +1,14 @@
 #include "terrain.hpp"
 #include "FastNoiseLite.h"
 
+#include <algorithm>
 #include <unordered_map>
 
 struct Terrain::Impl {
     FastNoiseLite noise;
     FastNoiseLite biomeNoise;
-    mutable std::unordered_map<TilePos, float,      TilePosHash> heightCache;
-    mutable std::unordered_map<TilePos, Biome,      TilePosHash> biomeCache;
-            std::unordered_map<TilePos, TileType,   TilePosHash> overrides;
+    mutable std::unordered_map<TilePos, float, TilePosHash> heightCache;
+    mutable std::unordered_map<TilePos, Biome, TilePosHash> biomeCache;
 };
 
 Terrain::Terrain() : impl(std::make_unique<Impl>()) {
@@ -37,43 +37,32 @@ float Terrain::heightAt(TilePos p) const {
     if (it != impl->heightCache.end())
         return it->second;
 
-    float h = impl->noise.GetNoise(static_cast<float>(p.x), static_cast<float>(p.y));
+    float base = impl->noise.GetNoise(static_cast<float>(p.x), static_cast<float>(p.y));
+    float bv   = impl->biomeNoise.GetNoise(static_cast<float>(p.x), static_cast<float>(p.y));
+
+    float h;
+    if (bv < -0.5f) {
+        // Lake: depressed and nearly flat
+        h = base * 0.2f - 0.3f;
+    } else if (bv < -0.1f) {
+        // Forest: moderately rough
+        h = base * 0.55f;
+    } else if (bv < 0.4f) {
+        // Grassland: very flat
+        h = base * 0.25f;
+    } else {
+        // Volcanic: dome profile — biome noise drives a central peak
+        float t = (bv - 0.4f) / 0.6f;  // 0 at edge, 1 at centre
+        h = base * 0.4f + t * 1.5f;
+    }
+    h = std::clamp(h, -1.0f, 1.0f);
+
     impl->heightCache[key] = h;
     return h;
 }
 
 int Terrain::levelAt(TilePos p) const {
     return static_cast<int>(std::round(heightAt(p) * 4));
-}
-
-TileType Terrain::typeAt(TilePos p) const {
-    auto it = impl->overrides.find(p);
-    if (it != impl->overrides.end())
-        return it->second;
-    return TileType::Grass;
-}
-
-void Terrain::dig(TilePos p) {
-    impl->overrides[p] = TileType::BareEarth;
-}
-
-void Terrain::restore(TilePos p) {
-    impl->overrides.erase(p);
-}
-
-void Terrain::setType(TilePos p, TileType t) {
-    if (t == TileType::Grass)
-        impl->overrides.erase(p);
-    else
-        impl->overrides[p] = t;
-}
-
-void Terrain::clearOverrides() {
-    impl->overrides.clear();
-}
-
-const std::unordered_map<TilePos, TileType, TilePosHash>& Terrain::overrides() const {
-    return impl->overrides;
 }
 
 Biome Terrain::biomeAt(TilePos p) const {

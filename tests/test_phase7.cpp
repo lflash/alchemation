@@ -9,7 +9,7 @@
 TEST_CASE("recording ends with HALT") {
     Recorder rec;
     rec.start();
-    Recording r = rec.stop();
+    Routine r = rec.stop();
     REQUIRE(!r.empty());
     CHECK(r.instructions.back().op == OpCode::HALT);
 }
@@ -18,7 +18,7 @@ TEST_CASE("move north while facing north emits MOVE_REL Forward") {
     Recorder rec;
     rec.start();
     rec.recordMove({0, -1}, Direction::N);
-    Recording r = rec.stop();
+    Routine r = rec.stop();
     REQUIRE(r.instructions.size() >= 2);
     CHECK(r.instructions[0].op  == OpCode::MOVE_REL);
     CHECK(static_cast<RelDir>(r.instructions[0].dir) == RelDir::Forward);
@@ -28,7 +28,7 @@ TEST_CASE("move east while facing north emits MOVE_REL Right") {
     Recorder rec;
     rec.start();
     rec.recordMove({1, 0}, Direction::N);
-    Recording r = rec.stop();
+    Routine r = rec.stop();
     REQUIRE(r.instructions.size() >= 2);
     CHECK(r.instructions[0].op  == OpCode::MOVE_REL);
     CHECK(static_cast<RelDir>(r.instructions[0].dir) == RelDir::Right);
@@ -38,7 +38,7 @@ TEST_CASE("move south while facing north emits MOVE_REL Back") {
     Recorder rec;
     rec.start();
     rec.recordMove({0, 1}, Direction::N);
-    Recording r = rec.stop();
+    Routine r = rec.stop();
     CHECK(static_cast<RelDir>(r.instructions[0].dir) == RelDir::Back);
 }
 
@@ -46,7 +46,7 @@ TEST_CASE("move west while facing north emits MOVE_REL Left") {
     Recorder rec;
     rec.start();
     rec.recordMove({-1, 0}, Direction::N);
-    Recording r = rec.stop();
+    Routine r = rec.stop();
     CHECK(static_cast<RelDir>(r.instructions[0].dir) == RelDir::Left);
 }
 
@@ -54,7 +54,7 @@ TEST_CASE("move forward while facing east emits MOVE_REL Forward") {
     Recorder rec;
     rec.start();
     rec.recordMove({1, 0}, Direction::E);
-    Recording r = rec.stop();
+    Routine r = rec.stop();
     CHECK(static_cast<RelDir>(r.instructions[0].dir) == RelDir::Forward);
 }
 
@@ -65,7 +65,7 @@ TEST_CASE("pause between moves emits WAIT with correct tick count") {
     rec.tick();  // tick 2
     rec.tick();  // tick 3
     rec.recordMove({0, -1}, Direction::N);
-    Recording r = rec.stop();
+    Routine r = rec.stop();
 
     REQUIRE(r.instructions.size() >= 3);
     CHECK(r.instructions[0].op  == OpCode::WAIT);
@@ -78,7 +78,7 @@ TEST_CASE("no WAIT emitted when move immediately follows start") {
     rec.start();
     // No tick() calls — move happens on the same tick as start
     rec.recordMove({0, -1}, Direction::N);
-    Recording r = rec.stop();
+    Routine r = rec.stop();
     CHECK(r.instructions[0].op == OpCode::MOVE_REL);
 }
 
@@ -89,7 +89,7 @@ TEST_CASE("two moves separated by a pause emit WAIT between them") {
     rec.tick();
     rec.tick();
     rec.recordMove({1, 0}, Direction::N);    // move after 2-tick pause
-    Recording r = rec.stop();
+    Routine r = rec.stop();
 
     // Expected: MOVE_REL, WAIT(2), MOVE_REL, HALT
     REQUIRE(r.instructions.size() == 4);
@@ -110,17 +110,17 @@ TEST_CASE("stop() saves recording and resets; second recording is independent") 
     rec.recordMove({1, 0}, Direction::E);
     rec.stop();
 
-    REQUIRE(rec.recordings.size() == 2);
+    REQUIRE(rec.routines.size() == 2);
     // First recording: MOVE_REL Forward (N facing N)
-    CHECK(rec.recordings[0].instructions[0].dir == RelDir::Forward);
+    CHECK(rec.routines[0].instructions[0].dir == RelDir::Forward);
     // Second recording: MOVE_REL Forward (E facing E)
-    CHECK(rec.recordings[1].instructions[0].dir == RelDir::Forward);
+    CHECK(rec.routines[1].instructions[0].dir == RelDir::Forward);
 }
 
 // ─── RoutineVM ───────────────────────────────────────────────────────────────
 
-static Recording makeRecording(std::vector<Instruction> instrs) {
-    Recording r;
+static Routine makeRecording(std::vector<Instruction> instrs) {
+    Routine r;
     r.instructions = std::move(instrs);
     return r;
 }
@@ -128,7 +128,7 @@ static Recording makeRecording(std::vector<Instruction> instrs) {
 TEST_CASE("VM: HALT on first instruction returns halt immediately") {
     RoutineVM vm;
     AgentExecState state;
-    Recording rec = makeRecording({ {.op = OpCode::HALT} });
+    Routine rec = makeRecording({ {.op = OpCode::HALT} });
     auto result = vm.step(state, rec, Direction::N);
     CHECK(result.halt);
     CHECK(!result.wantMove);
@@ -137,14 +137,14 @@ TEST_CASE("VM: HALT on first instruction returns halt immediately") {
 TEST_CASE("VM: empty recording returns halt") {
     RoutineVM vm;
     AgentExecState state;
-    Recording rec;
+    Routine rec;
     CHECK(vm.step(state, rec, Direction::N).halt);
 }
 
 TEST_CASE("VM: MOVE_REL Forward facing N moves north") {
     RoutineVM vm;
     AgentExecState state;
-    Recording rec = makeRecording({
+    Routine rec = makeRecording({
         {.op = OpCode::MOVE_REL, .dir = RelDir::Forward},
         {.op = OpCode::HALT},
     });
@@ -158,7 +158,7 @@ TEST_CASE("VM: MOVE_REL Forward facing N moves north") {
 TEST_CASE("VM: MOVE_REL Forward facing E moves east") {
     RoutineVM vm;
     AgentExecState state;
-    Recording rec = makeRecording({
+    Routine rec = makeRecording({
         {.op = OpCode::MOVE_REL, .dir = RelDir::Forward},
         {.op = OpCode::HALT},
     });
@@ -170,7 +170,7 @@ TEST_CASE("VM: MOVE_REL Forward facing E moves east") {
 TEST_CASE("VM: MOVE_REL Right facing N moves east") {
     RoutineVM vm;
     AgentExecState state;
-    Recording rec = makeRecording({
+    Routine rec = makeRecording({
         {.op = OpCode::MOVE_REL, .dir = RelDir::Right},
         {.op = OpCode::HALT},
     });
@@ -182,7 +182,7 @@ TEST_CASE("VM: MOVE_REL Right facing N moves east") {
 TEST_CASE("VM: WAIT holds for correct number of ticks then continues") {
     RoutineVM vm;
     AgentExecState state;
-    Recording rec = makeRecording({
+    Routine rec = makeRecording({
         {.op = OpCode::WAIT, .ticks = 3},
         {.op = OpCode::HALT},
     });
@@ -205,7 +205,7 @@ TEST_CASE("VM: WAIT holds for correct number of ticks then continues") {
 TEST_CASE("VM: pc advances correctly through a linear sequence") {
     RoutineVM vm;
     AgentExecState state;
-    Recording rec = makeRecording({
+    Routine rec = makeRecording({
         {.op = OpCode::MOVE_REL, .dir = RelDir::Forward},
         {.op = OpCode::MOVE_REL, .dir = RelDir::Right},
         {.op = OpCode::HALT},

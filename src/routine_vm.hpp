@@ -6,14 +6,14 @@
 // ─── RoutineVM ───────────────────────────────────────────────────────────────
 
 struct VMResult {
-    bool    halt       = false;   // agent should stop executing (despawn if Poop)
+    bool    halt       = false;   // agent should stop executing (despawn on HALT)
     bool    wantMove   = false;   // moveDelta is valid
     TilePos moveDelta  = {0, 0};
     bool    isStrafe   = false;   // true → don't update agent facing after move
     bool    wantDig    = false;   // dig tile in agent's facing direction
     bool    wantPlant  = false;   // plant mushroom in agent's facing direction
-    bool     wantSummon   = false;   // summon golem from medium tile in agent's facing direction
-    uint16_t summonRecIdx = 0;       // recording index to assign to the summoned golem
+    bool     wantSummon      = false;   // summon golem from medium tile in agent's facing direction
+    uint16_t summonRoutineIdx = 0;      // routine index to assign to the summoned golem
     bool     wantScythe   = false;   // convert Grass ahead to Straw
     bool     wantMine     = false;   // make ore entity ahead Pushable
 };
@@ -28,6 +28,6 @@ public:
     //          (condition false/true). Computed by the caller (game.cpp tickVM).
     //
     // Caller is responsible for updating agentFacing after a successful move.
-    VMResult step(AgentExecState& state, const Recording& rec, Direction agentFacing,
+    VMResult step(AgentExecState& state, const Routine& routine, Direction agentFacing,
                   const uint8_t* stimuli = nullptr) const;
 };

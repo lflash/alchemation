@@ -2,41 +2,16 @@
 #include "routine.hpp"
 #include "terrain.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <random>
+#include <sstream>
 
-// ─── Summon helpers ───────────────────────────────────────────────────────────
+// (Summon helpers replaced by alchemyReact in alchemy.cpp)
 
-struct GolemInfo {
-    EntityType  type;
-    const char* name;
-    int         manaCost;
-};
-
-static const GolemInfo GOLEM_TABLE[] = {
-    { EntityType::MudGolem,    "Mud Golem",    3 },
-    { EntityType::StoneGolem,  "Stone Golem",  5 },
-    { EntityType::ClayGolem,   "Clay Golem",   3 },
-    { EntityType::BushGolem,   "Bush Golem",   2 },
-    { EntityType::WoodGolem,   "Wood Golem",   4 },
-    { EntityType::IronGolem,   "Iron Golem",   6 },
-    { EntityType::CopperGolem, "Copper Golem", 4 },
-    // WaterGolem deferred to Phase 14 (requires Water tile type)
-};
-
-static const GolemInfo* golemForMedium(TileType t) {
-    switch (t) {
-        case TileType::Mud:    return &GOLEM_TABLE[0];
-        case TileType::Stone:  return &GOLEM_TABLE[1];
-        case TileType::Clay:   return &GOLEM_TABLE[2];
-        case TileType::Bush:   return &GOLEM_TABLE[3];
-        case TileType::Wood:   return &GOLEM_TABLE[4];
-        case TileType::Iron:   return &GOLEM_TABLE[5];
-        case TileType::Copper: return &GOLEM_TABLE[6];
-        default: return nullptr;
-    }
-}
+static const char* entityTypeName(EntityType t);  // defined in gameStateText section
 
 // ─── transferEntity ───────────────────────────────────────────────────────────
 
@@ -58,30 +33,33 @@ void transferEntity(EntityID eid, Field& from, Field& to,
 
 void Game::subscribeEvents(Field& field) {
     field.events.subscribe(EventType::Arrived, [this](const Event& ev) {
-        if (ev.subject != playerID_) return;
-        Entity* player = registry_.get(playerID_);
-        if (!player) return;
-        Field& g = activeField();
-        for (EntityID cid : g.spatial.at(player->pos)) {
-            if (cid == playerID_) continue;
+        Entity* ent = registry_.get(ev.subject);
+        if (!ent) return;
+        bool isPlayer = (ev.subject == playerID_);
+        bool isGol    = isGolem(ent->type);
+        if (!isPlayer && !isGol) return;
+
+        // Find the field the entity is in.
+        Field* gp = nullptr;
+        for (auto& [id, f] : fields_)
+            if (f.hasEntity(ev.subject)) { gp = &f; break; }
+        if (!gp) return;
+        Field& g = *gp;
+
+        for (EntityID cid : std::vector<EntityID>(g.spatial.at(ent->pos))) {
+            if (cid == ev.subject) continue;
             Entity* cand = registry_.get(cid);
             if (!cand) continue;
-            if (cand->type == EntityType::Mushroom) {
-                player->mana += 3;
-                visualEvents_.push_back({ VisualEventType::CollectMushroom,
-                                          toVec(cand->pos), static_cast<float>(cand->pos.z) });
+            if (cand->type == EntityType::Mushroom ||
+                (isPlayer && cand->type == EntityType::Chest)) {
+                ent->mana += cand->mana;
+                if (isPlayer) {
+                    visualEvents_.push_back({ VisualEventType::CollectMushroom,
+                                              toVec(cand->pos), static_cast<float>(cand->pos.z) });
+                    audioEvents_.push_back(AudioEvent::CollectMushroom);
+                }
                 g.remove(cid, *cand);
                 registry_.destroy(cid);
-                audioEvents_.push_back(AudioEvent::CollectMushroom);
-                break;
-            }
-            if (cand->type == EntityType::Chest) {
-                player->mana += 5;
-                visualEvents_.push_back({ VisualEventType::CollectMushroom,
-                                          toVec(cand->pos), static_cast<float>(cand->pos.z) });
-                g.remove(cid, *cand);
-                registry_.destroy(cid);
-                audioEvents_.push_back(AudioEvent::CollectMushroom);
                 break;
             }
         }
@@ -125,15 +103,15 @@ Game::Game() : worldRng_(std::random_device{}()) {
     spawnStatic(EntityType::TreeStump, 4,  2);   // east of campfire
     spawnStatic(EntityType::Log,       3,  3);   // south of campfire
 
-    // ── Phase 12 demo: medium tiles + terrain objects ─────────────────────────
+    // ── Phase 12 demo: medium entities + terrain objects ─────────────────────
     // A row of summoning mediums south of spawn so the player can test golems.
-    world.terrain.setType({-3,  4}, TileType::Mud);
-    world.terrain.setType({-2,  4}, TileType::Stone);
-    world.terrain.setType({-1,  4}, TileType::Clay);
-    world.terrain.setType({ 0,  4}, TileType::Bush);
-    world.terrain.setType({ 1,  4}, TileType::Wood);
-    world.terrain.setType({ 2,  4}, TileType::Iron);
-    world.terrain.setType({ 3,  4}, TileType::Copper);
+    spawnStatic(EntityType::Mud,    -3,  4);
+    spawnStatic(EntityType::Stone,  -2,  4);
+    spawnStatic(EntityType::Clay,   -1,  4);
+    spawnStatic(EntityType::Bush,    0,  4);
+    spawnStatic(EntityType::Wood,    1,  4);
+    spawnStatic(EntityType::Iron,    2,  4);
+    spawnStatic(EntityType::Copper,  3,  4);
 
     // A Tree, Rock and Chest near spawn (west side, off the north navigation corridor).
     spawnStatic(EntityType::Tree,  -5, -6);
@@ -146,18 +124,25 @@ Game::Game() : worldRng_(std::random_device{}()) {
     // Second lightbulb at {3,0} is on plain grass — unlit.
     spawnStatic(EntityType::Rock,      -5,  0);   // carriable stone beside battery
     spawnStatic(EntityType::Battery,   -4,  0);
-    world.terrain.setType({-3, 0}, TileType::Puddle);   // 4V
-    world.terrain.setType({-2, 0}, TileType::Puddle);   // 3V
-    world.terrain.setType({-1, 0}, TileType::Puddle);   // 2V
+    // Puddle chain — Puddle entities replace the old TileType::Puddle overrides.
+    for (int x : {-3, -2, -1}) {
+        EntityID peid = registry_.spawn(EntityType::Puddle, {x, 0, 0});
+        world.add(peid, *registry_.get(peid));
+    }
     spawnStatic(EntityType::Lightbulb, -1,  0);   // on puddle → lit
     spawnStatic(EntityType::Lightbulb,  3,  0);   // on grass  → unlit
 
-    // ── Studio: medium tiles for summon testing ───────────────────────────────
+    // ── Studio: medium entities for summon testing ────────────────────────────
     // Player enters studio at {0,0} facing S; place mediums one step south.
     Field& studio = fields_.at(FIELD_STUDIO);
-    studio.terrain.setType({ 0,  1}, TileType::Mud);
-    studio.terrain.setType({ 1,  1}, TileType::Stone);
-    studio.terrain.setType({-1,  1}, TileType::Clay);
+    auto spawnStudio = [&](EntityType et, int x, int y) {
+        TilePos p{x, y, 0};
+        EntityID eid = registry_.spawn(et, p);
+        studio.add(eid, *registry_.get(eid));
+    };
+    spawnStudio(EntityType::Mud,    0,  1);
+    spawnStudio(EntityType::Stone,  1,  1);
+    spawnStudio(EntityType::Clay,  -1,  1);
 
     // ── Phase 17 demo: water pool south-east of spawn ────────────────────────
     const TilePos waterDemo[] = {{20, 20}, {21, 20}, {20, 21}};
@@ -187,13 +172,19 @@ FieldID Game::createWarrenInterior(EntityID warrenEid, TilePos worldPos) {
 
     // Exit portal at centre of interior → world warren tile.
     TilePos centre = { WARREN_W / 2, WARREN_H / 2, 0 };
-    interior.terrain.setType(centre, TileType::Portal);
+    {
+        EntityID peid = registry_.spawn(EntityType::Portal, centre);
+        interior.add(peid, *registry_.get(peid));
+    }
     interior.portals[centre] = { FIELD_WORLD, worldPos };
 
     // Entry portal on the world side → interior (one step north of centre).
     TilePos entryInside = { WARREN_W / 2, WARREN_H / 2 - 1, 0 };
     Field& world = fields_.at(FIELD_WORLD);
-    world.terrain.setType(worldPos, TileType::Portal);
+    {
+        EntityID peid = registry_.spawn(EntityType::Portal, worldPos);
+        world.add(peid, *registry_.get(peid));
+    }
     world.portals[worldPos] = { fid, entryInside };
 
     warrenData_[warrenEid] = { fid, worldPos };
@@ -326,9 +317,20 @@ SummonPreview Game::playerSummonPreview() const {
     if (!player || !player->isIdle()) return {};
     const Field& grid = activeField();
     TilePos ahead = player->pos + dirToDelta(player->facing);
-    const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
-    if (!gi) return {};
-    return { true, gi->type, gi->name, gi->manaCost, player->mana >= gi->manaCost };
+
+    // Find medium entity (if any) at the facing tile.
+    EntityType golemType = EntityType::MudGolem;
+    for (EntityID cid : grid.spatial.at(ahead)) {
+        const Entity* cand = registry_.get(cid);
+        if (!cand) continue;
+        auto result = alchemyReact(cand->type);
+        if (result) { golemType = *result; break; }
+    }
+
+    bool hasRec = !recorder_.routines.empty() && selectedRoutine_ < recorder_.routines.size();
+    int cost = hasRec ? recorder_.routines[selectedRoutine_].manaCost() : 0;
+    const char* name = entityTypeName(golemType);
+    return { true, golemType, name, cost, player->mana >= cost };
 }
 
 void Game::renameRoutine(size_t index, const std::string& name) {
@@ -651,10 +653,20 @@ void Game::tickPlayerInput(const Input& input) {
 
     // ── Terrain / action verbs ────────────────────────────────────────────────
     TilePos ahead = player->pos + dirToDelta(player->facing);
+    if (!grid.isBounded()) ahead.z = grid.terrain.levelAt(ahead);
 
     // Action lambdas — shared between individual hotkeys and the E cycle system.
     auto doDig = [&] {
-        grid.terrain.dig(ahead);
+        // Spawn BareEarth entity only if none already present.
+        bool alreadyDug = false;
+        for (EntityID cid : grid.spatial.at(ahead)) {
+            const Entity* ce = registry_.get(cid);
+            if (ce && ce->type == EntityType::BareEarth) { alreadyDug = true; break; }
+        }
+        if (!alreadyDug) {
+            EntityID beid = registry_.spawn(EntityType::BareEarth, ahead);
+            grid.add(beid, *registry_.get(beid));
+        }
         recorder_.recordDig();
         audioEvents_.push_back(AudioEvent::Dig);
         visualEvents_.push_back({ VisualEventType::Dig,
@@ -662,10 +674,16 @@ void Game::tickPlayerInput(const Input& input) {
     };
 
     auto doPlant = [&] {
-        if (grid.terrain.typeAt(ahead) == TileType::BareEarth && (inStudio || player->mana >= 1)) {
+        EntityID bareID = INVALID_ENTITY;
+        for (EntityID cid : grid.spatial.at(ahead)) {
+            const Entity* ce = registry_.get(cid);
+            if (ce && ce->type == EntityType::BareEarth) { bareID = cid; break; }
+        }
+        if (bareID != INVALID_ENTITY && (inStudio || player->mana >= 1)) {
             EntityID mid = registry_.spawn(EntityType::Mushroom, ahead);
             grid.add(mid, *registry_.get(mid));
-            grid.terrain.restore(ahead);
+            Entity* be = registry_.get(bareID);
+            if (be) { grid.remove(bareID, *be); registry_.destroy(bareID); }
             if (!inStudio) { player->mana--; if (player->mana < 1) player->mana = 1; }
             recorder_.recordPlant();
             audioEvents_.push_back(AudioEvent::Plant);
@@ -673,8 +691,17 @@ void Game::tickPlayerInput(const Input& input) {
     };
 
     auto doScythe = [&] {
-        if (grid.terrain.typeAt(ahead) == TileType::Grass) {
-            grid.terrain.setType(ahead, TileType::Straw);
+        // Only scythe plain grass: no tile-state entities at the tile.
+        bool hasTileState = false;
+        for (EntityID cid : grid.spatial.at(ahead)) {
+            const Entity* ce = registry_.get(cid);
+            if (ce && (ce->type == EntityType::BareEarth || ce->type == EntityType::Fire ||
+                       ce->type == EntityType::Puddle    || ce->type == EntityType::Straw ||
+                       ce->type == EntityType::Portal)) { hasTileState = true; break; }
+        }
+        if (!hasTileState) {
+            EntityID seid = registry_.spawn(EntityType::Straw, ahead);
+            grid.add(seid, *registry_.get(seid));
             recorder_.recordScythe();
         }
     };
@@ -693,17 +720,34 @@ void Game::tickPlayerInput(const Input& input) {
 
     auto doSummon = [&] {
         recorder_.recordSummon(selectedRoutine_);
-        const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(ahead));
-        if (!gi) gi = &GOLEM_TABLE[0];
-        bool hasRec = !recorder_.routines.empty() && selectedRoutine_ < recorder_.routines.size();
-        int deployCost = hasRec ? recorder_.routines[selectedRoutine_].manaCost() : gi->manaCost;
+
+        // Find medium entity (if any) at the facing tile; default to MudGolem.
+        EntityType golemType = EntityType::MudGolem;
+        EntityID   mediumID  = INVALID_ENTITY;
+        for (EntityID cid : grid.spatial.at(ahead)) {
+            const Entity* cand = registry_.get(cid);
+            if (!cand) continue;
+            auto result = alchemyReact(cand->type);
+            if (result) { golemType = *result; mediumID = cid; break; }
+        }
+
+        bool hasRec     = !recorder_.routines.empty() && selectedRoutine_ < recorder_.routines.size();
+        int  deployCost = hasRec ? recorder_.routines[selectedRoutine_].manaCost() : 0;
         if (inStudio || player->mana >= deployCost) {
             if (!inStudio) { player->mana -= deployCost; if (player->mana < 1) player->mana = 1; }
-            EntityID gid = registry_.spawn(gi->type, ahead);
+
+            // Consume the medium entity (the Spark is implicit — spawned and
+            // reacted in the same instant, so it never persists in the world).
+            if (mediumID != INVALID_ENTITY) {
+                Entity* me = registry_.get(mediumID);
+                if (me) { grid.remove(mediumID, *me); registry_.destroy(mediumID); }
+            }
+
+            EntityID gid = registry_.spawn(golemType, ahead);
             Entity*  ge  = registry_.get(gid);
             ge->facing   = player->facing;
             grid.add(gid, *ge);
-            if (!recorder_.routines.empty() && selectedRoutine_ < recorder_.routines.size())
+            if (hasRec)
                 agentSlots_[gid] = { AgentExecState{}, recorder_.routines[selectedRoutine_] };
             audioEvents_.push_back(AudioEvent::Summon);
             visualEvents_.push_back({ VisualEventType::Summon,
@@ -713,16 +757,22 @@ void Game::tickPlayerInput(const Input& input) {
 
     auto doPortal = [&] {
         TilePos fwd = player->pos + dirToDelta(player->facing);
-        if (!grid.portals.count(fwd) && grid.terrain.typeAt(fwd) != TileType::Portal) {
+        if (!grid.portals.count(fwd)) {
             FieldID newID     = nextFieldID_++;
             TilePos roomEntry = { ROOM_W / 2, ROOM_H / 2 };
             fields_.try_emplace(newID, newID, ROOM_W, ROOM_H);
             Field& room = fields_.at(newID);
             subscribeEvents(room);
-            grid.terrain.setType(fwd, TileType::Portal);
+            {
+                EntityID peid = registry_.spawn(EntityType::Portal, fwd);
+                grid.add(peid, *registry_.get(peid));
+            }
             grid.portals[fwd] = { newID, roomEntry };
             audioEvents_.push_back(AudioEvent::PortalCreate);
-            room.terrain.setType(roomEntry, TileType::Portal);
+            {
+                EntityID peid = registry_.spawn(EntityType::Portal, roomEntry);
+                room.add(peid, *registry_.get(peid));
+            }
             room.portals[roomEntry] = { activeFieldID_, fwd };
         }
     };
@@ -835,15 +885,17 @@ void Game::tickVM(Field& grid) {
         // Build stimulus vector for conditional jumps.
         uint8_t stimuli[8] = {};
         {
-            TileType tileHere = grid.terrain.typeAt(ent->pos);
-            if (tileHere == TileType::Fire)
-                stimuli[static_cast<int>(Condition::Fire)] = 1;
-            bool hasFluid = false;
+            bool hasFire = false, hasPuddle = false, hasFluid = false;
             for (EntityID at : grid.spatial.at(ent->pos)) {
                 const Entity* ae = registry_.get(at);
-                if (ae && ae->type == EntityType::Water) { hasFluid = true; break; }
+                if (!ae) continue;
+                if (ae->type == EntityType::Fire)   hasFire   = true;
+                if (ae->type == EntityType::Puddle) hasPuddle = true;
+                if (ae->type == EntityType::Water)  hasFluid  = true;
             }
-            if (tileHere == TileType::Puddle || hasFluid)
+            if (hasFire)
+                stimuli[static_cast<int>(Condition::Fire)] = 1;
+            if (hasPuddle || hasFluid)
                 stimuli[static_cast<int>(Condition::Wet)] = 1;
 
             TilePos ahead = ent->pos + dirToDelta(ent->facing);
@@ -860,6 +912,14 @@ void Game::tickVM(Field& grid) {
         VMResult res = vm_.step(slot.state, slot.routine, ent->facing, stimuli);
 
         if (res.halt) {
+            // Drop a mushroom with leftover mana before despawning.
+            if (ent->mana > 0) {
+                TilePos dropPos = ent->pos;
+                EntityID mid = registry_.spawn(EntityType::Mushroom, dropPos);
+                Entity* me = registry_.get(mid);
+                if (me) me->mana = ent->mana;
+                grid.add(mid, *registry_.get(mid));
+            }
             // All routine agents despawn when their script ends.
             grid.remove(id, *ent);
             registry_.destroy(id);
@@ -881,22 +941,45 @@ void Game::tickVM(Field& grid) {
             }
         } else if (res.wantDig) {
             TilePos target = ent->pos + dirToDelta(ent->facing);
-            grid.terrain.dig(target);
+            bool alreadyDug = false;
+            for (EntityID cid : grid.spatial.at(target)) {
+                const Entity* ce = registry_.get(cid);
+                if (ce && ce->type == EntityType::BareEarth) { alreadyDug = true; break; }
+            }
+            if (!alreadyDug) {
+                EntityID beid = registry_.spawn(EntityType::BareEarth, target);
+                grid.add(beid, *registry_.get(beid));
+            }
             audioEvents_.push_back(AudioEvent::Dig);
             visualEvents_.push_back({ VisualEventType::Dig,
                                       toVec(target), static_cast<float>(target.z) });
         } else if (res.wantPlant) {
             TilePos target = ent->pos + dirToDelta(ent->facing);
-            if (grid.terrain.typeAt(target) == TileType::BareEarth) {
+            EntityID bareID = INVALID_ENTITY;
+            for (EntityID cid : grid.spatial.at(target)) {
+                const Entity* ce = registry_.get(cid);
+                if (ce && ce->type == EntityType::BareEarth) { bareID = cid; break; }
+            }
+            if (bareID != INVALID_ENTITY) {
                 EntityID mid = registry_.spawn(EntityType::Mushroom, target);
                 grid.add(mid, *registry_.get(mid));
-                grid.terrain.restore(target);
+                Entity* be = registry_.get(bareID);
+                if (be) { grid.remove(bareID, *be); registry_.destroy(bareID); }
                 audioEvents_.push_back(AudioEvent::Plant);
             }
         } else if (res.wantScythe) {
             TilePos target = ent->pos + dirToDelta(ent->facing);
-            if (grid.terrain.typeAt(target) == TileType::Grass)
-                grid.terrain.setType(target, TileType::Straw);
+            bool hasTileState = false;
+            for (EntityID cid : grid.spatial.at(target)) {
+                const Entity* ce = registry_.get(cid);
+                if (ce && (ce->type == EntityType::BareEarth || ce->type == EntityType::Fire ||
+                           ce->type == EntityType::Puddle    || ce->type == EntityType::Straw ||
+                           ce->type == EntityType::Portal)) { hasTileState = true; break; }
+            }
+            if (!hasTileState) {
+                EntityID seid = registry_.spawn(EntityType::Straw, target);
+                grid.add(seid, *registry_.get(seid));
+            }
         } else if (res.wantMine) {
             TilePos target = ent->pos + dirToDelta(ent->facing);
             for (EntityID cid : grid.spatial.at(target)) {
@@ -910,10 +993,21 @@ void Game::tickVM(Field& grid) {
             }
         } else if (res.wantSummon) {
             TilePos target = ent->pos + dirToDelta(ent->facing);
-            const GolemInfo* gi = golemForMedium(grid.terrain.typeAt(target));
-            if (!gi) gi = &GOLEM_TABLE[0];  // default: Mud Golem
+            // Alchemy: find medium entity at target (default MudGolem).
+            EntityType golemType = EntityType::MudGolem;
+            EntityID   mediumID  = INVALID_ENTITY;
+            for (EntityID cid : grid.spatial.at(target)) {
+                const Entity* cand = registry_.get(cid);
+                if (!cand) continue;
+                auto result = alchemyReact(cand->type);
+                if (result) { golemType = *result; mediumID = cid; break; }
+            }
+            if (mediumID != INVALID_ENTITY) {
+                Entity* me = registry_.get(mediumID);
+                if (me) { grid.remove(mediumID, *me); registry_.destroy(mediumID); }
+            }
             {
-                EntityID gid = registry_.spawn(gi->type, target);
+                EntityID gid = registry_.spawn(golemType, target);
                 Entity*  ge  = registry_.get(gid);
                 ge->facing   = ent->facing;
                 grid.add(gid, *ge);
@@ -954,13 +1048,17 @@ void Game::tickCooking(Field& grid, Tick currentTick) {
             continue;
         }
 
-        // Check 4-directional neighbours for a fire tile.
+        // Check 4-directional neighbours for a Fire entity or Campfire.
         bool nearFire = false;
         const TilePos dirs[4] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0}};
         for (const TilePos& d : dirs) {
-            if (grid.terrain.typeAt(ent->pos + d) == TileType::Fire) {
-                nearFire = true; break;
+            for (EntityID at : grid.spatial.at(ent->pos + d)) {
+                const Entity* ae = registry_.get(at);
+                if (ae && (ae->type == EntityType::Fire || ae->type == EntityType::Campfire)) {
+                    nearFire = true; break;
+                }
             }
+            if (nearFire) break;
         }
 
         if (!nearFire) {
@@ -1139,17 +1237,6 @@ namespace {
             wr<int32_t>(f, portal.targetPos.z);
         }
 
-        // Terrain overrides
-        const auto& ovr = grid.terrain.overrides();
-        wr<uint32_t>(f, static_cast<uint32_t>(ovr.size()));
-        for (const auto& [pos, type] : ovr) {
-            wr<int32_t>(f, pos.x);
-            wr<int32_t>(f, pos.y);
-            wr<int32_t>(f, pos.z);
-            wr<uint8_t>(f, static_cast<uint8_t>(type));
-        }
-
-
         // Entities (skip player)
         std::vector<EntityID> toSave;
         for (EntityID eid : grid.entities)
@@ -1191,7 +1278,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 11);   // version 11: generatedChunks per grid (Phase 18)
+    wr<uint8_t>(f, 13);   // version 13: TileType removed; tile-state entities (BareEarth, Fire, Puddle, Straw, Portal)
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -1243,7 +1330,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 11) return false;
+    if (version != 13) return false;
 
     // Clear all state
     for (auto& [id, field] : fields_) {
@@ -1252,7 +1339,6 @@ bool Game::load(const std::string& path) {
             if (e) field.remove(eid, *e);
             registry_.destroy(eid);
         }
-        field.terrain.clearOverrides();
         field.portals.clear();
         field.paused = false;
     }
@@ -1301,17 +1387,6 @@ bool Game::load(const std::string& path) {
             TilePos  tPos      = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
             grid.portals[pos]  = { tField, tPos };
         }
-
-        // Terrain overrides
-        uint32_t ovrCount = rd<uint32_t>(f);
-        for (uint32_t i = 0; i < ovrCount; ++i) {
-            TilePos  pos  = { rd<int32_t>(f), rd<int32_t>(f), rd<int32_t>(f) };
-            TileType type = static_cast<TileType>(rd<uint8_t>(f));
-            // Fire tiles without expiry entries would burn forever; clear on load.
-            if (type == TileType::Fire) type = TileType::BareEarth;
-            grid.terrain.setType(pos, type);
-        }
-
 
         // Entities
         uint32_t entCount = rd<uint32_t>(f);
@@ -1376,11 +1451,175 @@ bool Game::load(const std::string& path) {
     if (selectedRoutine_ >= recorder_.routines.size())
         selectedRoutine_ = 0;
 
-    // Re-apply static studio medium tiles (cleared by clearOverrides above).
+    // Re-populate studio medium entities (studio is never saved).
     Field& studio = fields_.at(FIELD_STUDIO);
-    if (!studio.terrain.overrides().count({ 0,  1})) studio.terrain.setType({ 0,  1}, TileType::Mud);
-    if (!studio.terrain.overrides().count({ 1,  1})) studio.terrain.setType({ 1,  1}, TileType::Stone);
-    if (!studio.terrain.overrides().count({-1,  1})) studio.terrain.setType({-1,  1}, TileType::Clay);
+    auto spawnStudioLoad = [&](EntityType et, int x, int y) {
+        TilePos p{x, y, 0};
+        EntityID eid = registry_.spawn(et, p);
+        studio.add(eid, *registry_.get(eid));
+    };
+    spawnStudioLoad(EntityType::Mud,    0,  1);
+    spawnStudioLoad(EntityType::Stone,  1,  1);
+    spawnStudioLoad(EntityType::Clay,  -1,  1);
 
     return true;
+}
+
+// ─── gameStateText ────────────────────────────────────────────────────────────
+
+static const char* entityTypeName(EntityType t) {
+    switch (t) {
+        case EntityType::Player:     return "Player";
+        case EntityType::Goblin:     return "Goblin";
+        case EntityType::Mushroom:   return "Mushroom";
+        case EntityType::Campfire:   return "Campfire";
+        case EntityType::TreeStump:  return "TreeStump";
+        case EntityType::Log:        return "Log";
+        case EntityType::Battery:    return "Battery";
+        case EntityType::Lightbulb:  return "Lightbulb";
+        case EntityType::Tree:       return "Tree";
+        case EntityType::Rock:       return "Rock";
+        case EntityType::Chest:      return "Chest";
+        case EntityType::MudGolem:   return "MudGolem";
+        case EntityType::StoneGolem: return "StoneGolem";
+        case EntityType::ClayGolem:  return "ClayGolem";
+        case EntityType::WaterGolem: return "WaterGolem";
+        case EntityType::BushGolem:  return "BushGolem";
+        case EntityType::WoodGolem:  return "WoodGolem";
+        case EntityType::IronGolem:  return "IronGolem";
+        case EntityType::CopperGolem:return "CopperGolem";
+        case EntityType::Water:      return "Water";
+        case EntityType::Rabbit:     return "Rabbit";
+        case EntityType::Warren:     return "Warren";
+        case EntityType::IronOre:    return "IronOre";
+        case EntityType::CopperOre:  return "CopperOre";
+        case EntityType::CoalOre:    return "CoalOre";
+        case EntityType::SulphurOre: return "SulphurOre";
+        case EntityType::LongGrass:  return "LongGrass";
+        case EntityType::Meat:       return "Meat";
+        case EntityType::CookedMeat: return "CookedMeat";
+        case EntityType::Spark:      return "Spark";
+        case EntityType::Mud:        return "Mud";
+        case EntityType::Stone:      return "Stone";
+        case EntityType::Clay:       return "Clay";
+        case EntityType::Bush:       return "Bush";
+        case EntityType::Wood:       return "Wood";
+        case EntityType::Iron:       return "Iron";
+        case EntityType::Copper:     return "Copper";
+        case EntityType::BareEarth:  return "BareEarth";
+        case EntityType::Fire:       return "Fire";
+        case EntityType::Puddle:     return "Puddle";
+        case EntityType::Straw:      return "Straw";
+        case EntityType::Portal:     return "Portal";
+    }
+    return "Unknown";
+}
+
+static const char* dirName(Direction d) {
+    switch (d) {
+        case Direction::N:  return "N";
+        case Direction::NE: return "NE";
+        case Direction::E:  return "E";
+        case Direction::SE: return "SE";
+        case Direction::S:  return "S";
+        case Direction::SW: return "SW";
+        case Direction::W:  return "W";
+        case Direction::NW: return "NW";
+    }
+    return "?";
+}
+
+// Compass direction label from 'from' toward 'to'.
+static const char* compassTo(TilePos from, TilePos to) {
+    int dx = to.x - from.x, dy = to.y - from.y;
+    // Use the dominant axis for ordinal labelling.
+    bool east  = dx > 0, west = dx < 0;
+    bool south = dy > 0, north = dy < 0;
+    if (north && east)  return "NE";
+    if (north && west)  return "NW";
+    if (south && east)  return "SE";
+    if (south && west)  return "SW";
+    if (north)          return "N";
+    if (south)          return "S";
+    if (east)           return "E";
+    if (west)           return "W";
+    return "here";
+}
+
+std::string gameStateText(const Game& g) {
+    auto entities  = g.drawOrder();
+    TilePos ppos   = g.playerPos();
+
+    // Locate the player entity for facing / carrying.
+    const Entity* player = nullptr;
+    for (const Entity* e : entities)
+        if (e->type == EntityType::Player) { player = e; break; }
+
+    std::ostringstream out;
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    out << "=== " << (g.inStudio() ? "STUDIO" : "WORLD")
+        << " | Mana " << g.playerMana() << " ===\n";
+
+    // ── Player line ───────────────────────────────────────────────────────────
+    if (player) {
+        out << "@ {" << ppos.x << "," << ppos.y << "}"
+            << " facing " << dirName(player->facing)
+            << " | Action: " << playerActionName(g.activePlayerAction());
+
+        if (player->carrying != INVALID_ENTITY) {
+            for (const Entity* e : entities)
+                if (e->id == player->carrying) {
+                    out << " | Carrying: " << entityTypeName(e->type);
+                    break;
+                }
+        } else {
+            out << " | Carrying: nothing";
+        }
+        out << '\n';
+
+        // ── Ahead tile ────────────────────────────────────────────────────────
+        TilePos ahead = ppos + dirToDelta(player->facing);
+        out << "Ahead (" << dirName(player->facing)
+            << " {" << ahead.x << "," << ahead.y << "})";
+        const Entity* aheadEnt = g.entityAtTile(ahead);
+        if (aheadEnt) out << ": " << entityTypeName(aheadEnt->type);
+        else          out << ": Grass";
+        out << '\n';
+    }
+
+    // ── Nearby entities ───────────────────────────────────────────────────────
+    struct Near { float dist; const char* name; int x, y; const char* note; };
+    std::vector<Near> nearby;
+
+    for (const Entity* e : entities) {
+        if (e->type == EntityType::Player) continue;
+        if (e->carriedBy != INVALID_ENTITY) continue;
+        float dx = float(e->pos.x - ppos.x), dy = float(e->pos.y - ppos.y);
+        float d  = std::sqrt(dx*dx + dy*dy);
+        if (d > 15.f) continue;
+        const char* note = "";
+        if (e->type == EntityType::Goblin)
+            note = (e->carrying != INVALID_ENTITY) ? " [loaded]" : " [hungry]";
+        nearby.push_back({ d, entityTypeName(e->type), e->pos.x, e->pos.y, note });
+    }
+    std::sort(nearby.begin(), nearby.end(),
+              [](const Near& a, const Near& b){ return a.dist < b.dist; });
+
+    out << "Nearby:\n";
+    if (nearby.empty()) {
+        out << "  (none within 15 tiles)\n";
+    } else {
+        int shown = 0;
+        for (const auto& n : nearby) {
+            if (shown++ >= 10) break;
+            out << "  " << std::fixed << std::setprecision(1) << n.dist
+                << " " << compassTo(ppos, {n.x, n.y, ppos.z})
+                << " " << n.name
+                << " {" << n.x << "," << n.y << "}"
+                << n.note << '\n';
+        }
+    }
+
+    return out.str();
 }

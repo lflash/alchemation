@@ -15,7 +15,7 @@
 struct PathStep {
     TilePos   pos;
     Direction facing;
-    int       instrIdx;  // index into Recording::instructions
+    int       instrIdx;  // index into Routine::instructions
     bool      isWait;    // true for WAIT ticks (dot, not arrow)
 };
 
@@ -27,10 +27,10 @@ struct PathStep {
 // JUMP_IF_NOT: null stimuli → 0 ≤ threshold → true  → taken.
 // Capped at maxSteps to handle infinite loops.
 
-std::vector<PathStep> routinePath(const Recording& rec,
-                                  TilePos           origin,
-                                  Direction         facing,
-                                  int               maxSteps = 512);
+std::vector<PathStep> routinePath(const Routine& routine,
+                                  TilePos        origin,
+                                  Direction      facing,
+                                  int            maxSteps = 512);
 
 // ─── AgentColor ───────────────────────────────────────────────────────────────
 

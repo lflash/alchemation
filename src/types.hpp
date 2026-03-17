@@ -44,8 +44,8 @@ struct Camera {
 // ─── ID types ────────────────────────────────────────────────────────────────
 
 using EntityID    = uint32_t;
-using GridID      = uint32_t;
-using RecordingID = uint32_t;
+using FieldID     = uint32_t;
+using RoutineID   = uint32_t;
 using Tick        = uint64_t;
 
 constexpr EntityID INVALID_ENTITY = 0;
@@ -54,12 +54,12 @@ constexpr EntityID INVALID_ENTITY = 0;
 
 enum class EntityType {
     // Core
-    Player, Goblin, Mushroom, Poop,
+    Player, Goblin, Mushroom,
     // Static stimulus sources
     Campfire, TreeStump, Log, Battery, Lightbulb,
     // Terrain objects (Phase 12)
     Tree, Rock, Chest,
-    // Golems — summoned from medium tiles (Phase 12)
+    // Golems — produced by alchemy reactions (Phase 12)
     MudGolem, StoneGolem, ClayGolem, WaterGolem,
     BushGolem, WoodGolem, IronGolem, CopperGolem,
     // Fluid (Phase 17) — one entity per wet tile; carries FluidComponent
@@ -67,6 +67,16 @@ enum class EntityType {
     // World entities (Phase 18) — spawned by biome world gen; AI deferred
     Rabbit, Warren,
     IronOre, CopperOre, CoalOre, SulphurOre,
+    // Vegetation — spreads through grassland; only burns if on fire
+    LongGrass,
+    // Loot drops
+    Meat,
+    CookedMeat,
+    // Alchemy — summoning mediums and catalyst (appended; preserves existing enum values)
+    Spark,
+    Mud, Stone, Clay, Bush, Wood, Iron, Copper,
+    // Tile-state entities — replace TileType overrides; passable markers
+    BareEarth, Fire, Puddle, Straw, Portal,
 };
 // ─── World generation ─────────────────────────────────────────────────────────
 
@@ -78,13 +88,6 @@ inline constexpr int CHUNK_SIZE = 16;
 enum class Direction  { N, NE, E, SE, S, SW, W, NW };
 enum class ActionType { Move, Spawn, Despawn, ChangeMana, Dig, Plant, Summon };
 enum class EventType  { Arrived, Collided, Despawned };
-enum class TileType {
-    Grass, BareEarth, Portal, Fire, Puddle,
-    // Summoning mediums — each yields one golem type (Phase 12)
-    Mud, Stone, Clay, Bush, Wood, Iron, Copper,
-    // Straw — scythed grass (Phase 18)
-    Straw,
-};
 
 
 // ─── Math helpers ────────────────────────────────────────────────────────────

@@ -93,7 +93,7 @@ public:
     // renderZ is the interpolated z (for oblique vertical offset).
     void drawShadow(Vec2f renderPos, float renderZ);
     void drawSprite(Vec2f renderPos, float renderZ, EntityType type,
-                    EntityID eid, float moveT, bool lit = true);
+                    EntityID eid, float moveProgress, bool lit = true);
 
     void endFrame();
 
@@ -143,7 +143,7 @@ public:
     void drawFacingIndicator(Vec2f renderPos, float renderZ, Direction facing);
 
     // Draws the recordings panel in the top-right corner (replaces controls when open).
-    void drawRecordingsPanel(const std::vector<RecordingInfo>& list,
+    void drawRecordingsPanel(const std::vector<RoutineInfo>& list,
                              bool renaming, const std::string& renameBuffer);
 
     // Draws the controls reference panel in the top-right corner.
@@ -171,14 +171,14 @@ public:
     void drawGhostEntity(TilePos pos, Direction facing, EntityType type);
 
     // Draw the instruction list panel on the right side of the screen.
-    void drawInstructionPanel(const Recording& rec, int selectedRow, int scrubInstrIdx,
+    void drawInstructionPanel(const Routine& routine, int selectedRow, int scrubInstrIdx,
                               bool insertingWait, bool insertingMove,
                               const std::string& insertBuffer, RelDir insertDir);
 
     // Draw the timeline bar at the bottom of the screen.
     // scrubInstrIdx: instruction index at the current scrub position (-1 = none).
     // conflictInstrs: instruction indices that have path conflicts.
-    void drawTimeline(const Recording& rec, int scrubInstrIdx,
+    void drawTimeline(const Routine& routine, int scrubInstrIdx,
                       const std::vector<int>& conflictInstrs);
 
     // ── Phase 16: Mouse interaction ───────────────────────────────────────────
@@ -257,7 +257,7 @@ private:
     float    lastFdt_     = 0.0f;
     int      rendererTick_ = 0;
 
-    SDL_Color tileColor(float height, TilePos pos, TileType type, Biome biome) const;
+    SDL_Color tileColor(float height, TilePos pos, Biome biome) const;
 
     // Convert world tile coordinates to screen pixels using one-point perspective.
     // Vertical world lines converge to a VP at (centre, Z_PERSP*Z_STEP px below centre).

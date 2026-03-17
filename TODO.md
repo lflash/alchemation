@@ -128,7 +128,7 @@ Tests are written alongside the system they cover.
 - [x] Camera snaps instantly on grid switch (no lerp artefact)
 
 ### Persistent State ✓
-- [x] Binary save format v7: all grids, portals, terrain overrides, entities (with z), recordings, flat Instruction layout
+- [x] Binary save format v13: all grids, portals, terrain overrides, entities (with z), recordings, flat Instruction layout, generated chunks, fluid components
 - [x] Auto-save on quit (Esc); auto-load on startup
 - [x] Version check: mismatch → fresh world
 
@@ -621,7 +621,7 @@ Introduces `ComponentStore<T>` as the first ECS scaffold, and replaces the old
 ## Post-Phase 18 — Ecosystem Foundations ✓
 
 Carry system, food chain, hit mechanic, and goblin AI overhaul. All features
-implemented without additional tests (covered by existing 365-test suite).
+implemented without additional tests (covered by existing 393-test suite).
 
 ### Carry system ✓
 - [x] `Entity::carrying` / `Entity::carriedBy` EntityID fields on Entity
@@ -657,6 +657,45 @@ implemented without additional tests (covered by existing 365-test suite).
 - [x] Carry: when loaded, scores toward nearest Campfire/Fire tile
 - [x] Eat: when adjacent to fire with carried food → `mana += food.mana`, destroy food
 - [x] Pack cohesion: pull toward centroid of all goblins (PACK_W = 0.6)
+
+---
+
+## Post-Phase 18 — TileType Removal & Golem Mana ✓
+
+Terrain is now height-only. All non-height tile state is entity-based. Golems
+collect and transport mana via mushrooms.
+
+### TileType removal ✓
+- [x] `BareEarth`, `Fire`, `Puddle`, `Straw`, `Portal` removed from `TileType` enum; now `EntityType` values
+- [x] Terrain stores height only; `typeAt()` / `setType()` removed
+- [x] All tile-effect rendering (fire flicker, portal shimmer, puddle ripple) updated to entity-based lookup
+- [x] All game logic (dig, plant, fire spread, water extinguish, portal teleport) updated to query entities at tile instead of tile type
+- [x] Save format bumped v11 → v13 (tile-type overrides field dropped; format change required fresh world)
+
+### `ahead.z` bug fix ✓
+- [x] `TilePos ahead = player->pos + dirToDelta(player->facing)` was using `player.pos.z` as the z of the ahead tile
+- [x] For sloped terrain the z-mismatch caused dig, plant, spawn, and entity-lookup at the wrong height
+- [x] Fix: `if (!grid.isBounded()) ahead.z = grid.terrain.levelAt(ahead);` applied after computing `ahead`
+
+### EntityConfig mana field ✓
+- [x] `int mana = 0` added to `EntityConfig`; `EntityRegistry::spawn` uses `cfg.mana` instead of hardcoded switch
+- [x] Player: mana=3, Mushroom: mana=5, Goblin: mana=5 in config table
+
+### Golem mana ✓
+- [x] `subscribeEvents` Arrived handler extended: golems collect Mushrooms (gain mana); only players get audio/visual on collection
+- [x] `tickVM` HALT handler: if golem has mana > 0, spawns a Mushroom entity at golem's final position with `mana = golem.mana`
+- [x] Enables mana farm loop: record [DIG, PLANT, MOVE_FORWARD]; golem farms mushroom for free; drops consolidated mushroom on HALT; player collects for net +2 mana per cycle
+
+### `play` CLI multi-step mode ✓
+- [x] Added `./play action:ticks action:ticks ...` multi-step syntax — all steps run in one invocation
+- [x] Required because recording state (`Recorder::recording_`) is not persisted in save file; multi-step keeps it live
+- [x] Added missing key bindings: `r` (Record), `o` (PlacePortal), `tab` (SwitchGrid)
+- [x] `runStep()` helper extracted; main distinguishes single-step vs multi-step by colon presence in `argv[1]`
+
+### Tests ✓ (28 new tests — 393 total)
+- [x] Mushroom spawns with mana 5; MudGolem spawns with mana 0
+- [x] Player gains mana by stepping on mushroom
+- [x] Golem drops mushroom on HALT if it has mana
 
 ---
 

@@ -17,7 +17,7 @@ static constexpr std::pair<SFX, const char*> SFX_FILES[] = {
     { SFX::DeployAgent,     "assets/sfx/deploy.wav"         },
     { SFX::PortalCreate,    "assets/sfx/portal_create.wav"  },
     { SFX::PortalEnter,     "assets/sfx/portal_enter.wav"   },
-    { SFX::GridSwitch,      "assets/sfx/grid_switch.wav"    },
+    { SFX::FieldSwitch,     "assets/sfx/grid_switch.wav"    },
     { SFX::GoblinHit,       "assets/sfx/goblin_hit.wav"     },
     { SFX::AgentStep,       "assets/sfx/agent_step.wav"     },
 };

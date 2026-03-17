@@ -20,9 +20,30 @@ PrincipleProfile principleProfile(EntityType type) {
         case EntityType::Player:     p.life =  50; p.repellent = 80; break;
         case EntityType::Water:      p.wet  = 100; break;
         case EntityType::Battery:    p.pos  = 100; break;
+        // Summoning mediums — inert until catalysed; emit no field so they
+        // don't influence AI movement.  Principle data lives in alchemyReact only.
+        // Spark likewise has no emission (it is consumed instantly on summon).
         default: break;
     }
     return p;
+}
+
+// ─── alchemyReact ────────────────────────────────────────────────────────────
+//
+// Spark + medium entity → golem type.  Returns nullopt if `medium` is not a
+// summoning medium; the caller defaults to MudGolem when no medium is present.
+
+std::optional<EntityType> alchemyReact(EntityType medium) {
+    switch (medium) {
+        case EntityType::Mud:    return EntityType::MudGolem;
+        case EntityType::Stone:  return EntityType::StoneGolem;
+        case EntityType::Clay:   return EntityType::ClayGolem;
+        case EntityType::Bush:   return EntityType::BushGolem;
+        case EntityType::Wood:   return EntityType::WoodGolem;
+        case EntityType::Iron:   return EntityType::IronGolem;
+        case EntityType::Copper: return EntityType::CopperGolem;
+        default:                 return std::nullopt;
+    }
 }
 
 // ─── responseProfile ─────────────────────────────────────────────────────────

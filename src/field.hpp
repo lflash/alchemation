@@ -13,29 +13,29 @@
 
 // ─── Portal ───────────────────────────────────────────────────────────────────
 //
-// Stored per-tile in Grid::portals. When an entity arrives on the tile,
-// it is transferred to targetGrid at targetPos.
+// Stored per-tile in Field::portals. When an entity arrives on the tile,
+// it is transferred to targetField at targetPos.
 
 struct Portal {
-    GridID  targetGrid;
+    FieldID targetField;
     TilePos targetPos;
 };
 
-// ─── Grid ────────────────────────────────────────────────────────────────────
+// ─── Field ────────────────────────────────────────────────────────────────────
 //
 // One independent simulation space. Owns the per-world systems (terrain,
 // spatial index, scheduler, event bus) and tracks which entities live here.
-// The EntityRegistry is shared across all grids and lives in Game.
+// The EntityRegistry is shared across all fields and lives in Game.
 //
-// width/height == 0 means unbounded (infinite). Otherwise the grid is
+// width/height == 0 means unbounded (infinite). Otherwise the field is
 // treated as an NxM room; tiles outside [0,width)×[0,height) are void.
 
-class Grid {
+class Field {
 public:
-    explicit Grid(GridID gid, int w = 0, int h = 0)
-        : id(gid), width(w), height(h) {}
+    explicit Field(FieldID fid, int w = 0, int h = 0)
+        : id(fid), width(w), height(h) {}
 
-    GridID id;
+    FieldID id;
     int    width  = 0;   // 0 = unbounded
     int    height = 0;
     bool   paused = false;
@@ -63,7 +63,7 @@ public:
     std::unordered_map<TilePos, int, TilePosHash>  voltage;
 
     // ── Lazy world generation (Phase 18) ──────────────────────────────────────
-    // Keyed by {chunkX, chunkY, 0}. Unbounded grids only.
+    // Keyed by {chunkX, chunkY, 0}. Unbounded fields only.
     std::unordered_set<TilePos, TilePosHash> generatedChunks;
 
     bool isBounded() const { return width > 0 && height > 0; }
@@ -72,7 +72,7 @@ public:
                                 p.y >= 0 && p.y < height);
     }
 
-    // Register an entity in this grid: adds to entity list and spatial index.
+    // Register an entity in this field: adds to entity list and spatial index.
     void add(EntityID eid, Entity& e) {
         entities.push_back(eid);
         spatial.add(eid, e.pos, e.size);
