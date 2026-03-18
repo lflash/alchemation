@@ -5,41 +5,41 @@
 
 EntityConfig defaultConfig(EntityType type) {
     switch (type) {
-        // Core
-        case EntityType::Player:    return { 0.1f,  {0.8f, 0.8f}, 0, 0, 3  };
-        case EntityType::Goblin:    return { 0.17f, {0.8f, 0.8f}, 1, 5, 5  };
-        case EntityType::Mushroom:  return { 0.0f,  {0.6f, 0.6f}, 2, 0, 5  };
+        // Core                                                speed   size         dO  hp  mp  ms  mc
+        case EntityType::Player:    return { 0.1f,  {0.8f, 0.8f}, 0,  0,  3, 1, 3 };
+        case EntityType::Goblin:    return { 0.17f, {0.8f, 0.8f}, 1,  5,  5, 1, 1 };
+        case EntityType::Mushroom:  return { 0.0f,  {0.6f, 0.6f}, 2,  0,  5, 1, 0 };
         // Static effectSpread sources
-        case EntityType::Campfire:  return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
-        case EntityType::TreeStump: return { 0.0f,  {0.8f, 0.8f}, 2, 5  };
-        case EntityType::Log:       return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
-        case EntityType::Battery:   return { 0.0f,  {0.6f, 0.6f}, 2, 0  };
-        case EntityType::Lightbulb: return { 0.0f,  {0.6f, 0.6f}, 2, 0  };
+        case EntityType::Campfire:  return { 0.0f,  {0.8f, 0.8f}, 2,  0,  0, 2, 0 };
+        case EntityType::TreeStump: return { 0.0f,  {0.8f, 0.8f}, 2,  5,  0, 2, 0 };
+        case EntityType::Log:       return { 0.0f,  {0.8f, 0.8f}, 2,  0,  0, 1, 0 };
+        case EntityType::Battery:   return { 0.0f,  {0.6f, 0.6f}, 2,  0,  0, 1, 0 };
+        case EntityType::Lightbulb: return { 0.0f,  {0.6f, 0.6f}, 2,  0,  0, 1, 0 };
         // Terrain objects
-        case EntityType::Tree:      return { 0.0f,  {0.9f, 0.9f}, 2, 5  };
-        case EntityType::Rock:      return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
-        case EntityType::Chest:     return { 0.0f,  {0.7f, 0.7f}, 2, 0  };
-        // Golems (speed, size, drawOrder, health)
-        case EntityType::MudGolem:    return { 0.07f, {0.8f, 0.8f}, 1, 8  };
-        case EntityType::StoneGolem:  return { 0.06f, {0.8f, 0.8f}, 1, 12 };
-        case EntityType::ClayGolem:   return { 0.08f, {0.8f, 0.8f}, 1, 6  };
-        case EntityType::WaterGolem:  return { 0.12f, {0.8f, 0.8f}, 1, 4  };
-        case EntityType::BushGolem:   return { 0.12f, {0.8f, 0.8f}, 1, 4  };
-        case EntityType::WoodGolem:   return { 0.08f, {0.8f, 0.8f}, 1, 6  };
-        case EntityType::IronGolem:   return { 0.06f, {0.8f, 0.8f}, 1, 10 };
-        case EntityType::CopperGolem: return { 0.12f, {0.8f, 0.8f}, 1, 4  };
+        case EntityType::Tree:      return { 0.0f,  {0.9f, 0.9f}, 2,  3,  0, 3, 0 };
+        case EntityType::Rock:      return { 0.0f,  {0.8f, 0.8f}, 2,  0,  0, 2, 0 };
+        case EntityType::Chest:     return { 0.0f,  {0.7f, 0.7f}, 2,  0,  0, 1, 0 };
+        // Golems (speed, size, drawOrder, health, mana, mass, maxCarryMass)
+        case EntityType::MudGolem:    return { 0.07f, {0.8f, 0.8f}, 1,  8,  0, 2, 2 };
+        case EntityType::StoneGolem:  return { 0.06f, {0.8f, 0.8f}, 1, 12,  0, 2, 4 };
+        case EntityType::ClayGolem:   return { 0.08f, {0.8f, 0.8f}, 1,  6,  0, 2, 2 };
+        case EntityType::WaterGolem:  return { 0.12f, {0.8f, 0.8f}, 1,  4,  0, 2, 2 };
+        case EntityType::BushGolem:   return { 0.12f, {0.8f, 0.8f}, 1,  4,  0, 2, 1 };
+        case EntityType::WoodGolem:   return { 0.08f, {0.8f, 0.8f}, 1,  6,  0, 2, 3 };
+        case EntityType::IronGolem:   return { 0.06f, {0.8f, 0.8f}, 1, 10,  0, 2, 5 };
+        case EntityType::CopperGolem: return { 0.12f, {0.8f, 0.8f}, 1,  4,  0, 2, 3 };
         // Fluid
-        case EntityType::Water:       return { 0.0f,  {1.0f, 1.0f}, -1, 0 };
+        case EntityType::Water:       return { 0.0f,  {1.0f, 1.0f}, -1, 0,  0, 1, 0 };
         // World entities (Phase 18)
-        case EntityType::Rabbit:      return { 0.15f, {0.6f, 0.6f}, 1, 2  };
-        case EntityType::Warren:      return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
-        case EntityType::IronOre:     return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
-        case EntityType::CopperOre:   return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
-        case EntityType::CoalOre:     return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
-        case EntityType::SulphurOre:  return { 0.0f,  {0.8f, 0.8f}, 2, 0  };
-        case EntityType::LongGrass:   return { 0.0f,  {0.9f, 0.9f}, 0, 0  };
-        case EntityType::Meat:        return { 0.0f,  {0.6f, 0.6f}, 0, 0  };
-        case EntityType::CookedMeat:  return { 0.0f,  {0.6f, 0.6f}, 0, 0  };
+        case EntityType::Rabbit:      return { 0.15f, {0.6f, 0.6f}, 1,  2,  0, 1, 0 };
+        case EntityType::Warren:      return { 0.0f,  {0.8f, 0.8f}, 2,  0,  0, 2, 0 };
+        case EntityType::IronOre:     return { 0.0f,  {0.8f, 0.8f}, 2,  0,  0, 3, 0 };
+        case EntityType::CopperOre:   return { 0.0f,  {0.8f, 0.8f}, 2,  0,  0, 3, 0 };
+        case EntityType::CoalOre:     return { 0.0f,  {0.8f, 0.8f}, 2,  0,  0, 3, 0 };
+        case EntityType::SulphurOre:  return { 0.0f,  {0.8f, 0.8f}, 2,  0,  0, 2, 0 };
+        case EntityType::LongGrass:   return { 0.0f,  {0.9f, 0.9f}, 0,  0,  0, 1, 0 };
+        case EntityType::Meat:        return { 0.0f,  {0.6f, 0.6f}, 0,  0,  0, 1, 0 };
+        case EntityType::CookedMeat:  return { 0.0f,  {0.6f, 0.6f}, 0,  0,  0, 1, 0 };
     }
     return { 0.1f, {0.8f, 0.8f}, 0, 0 };
 }
@@ -119,6 +119,8 @@ EntityID EntityRegistry::spawn(EntityType type, TilePos pos) {
         .mana         = cfg.mana,
         .health       = cfg.health,
         .capabilities = entityCaps(type),
+        .mass         = cfg.mass,
+        .maxCarryMass = cfg.maxCarryMass,
     };
     return id;
 }

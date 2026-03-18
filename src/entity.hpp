@@ -46,6 +46,13 @@ struct Entity {
     uint32_t   capabilities = 0;      // bitfield of Capability flags
     EntityID   carrying     = INVALID_ENTITY;  // entity this entity is carrying (or INVALID)
     EntityID   carriedBy    = INVALID_ENTITY;  // entity carrying this one (or INVALID)
+    int        mass         = 1;
+    int        maxCarryMass = 0;
+    TilePos    extraTiles[2] = {};  // tiles beyond pos; valid for indices 0..tileCount-2
+    int        tileCount    = 1;    // 1 = normal; 2–3 = multi-tile (e.g. fallen log)
+
+    // Return the i-th occupied tile (0 = pos, 1..tileCount-1 = extraTiles[i-1]).
+    TilePos tileAt(int i) const { return i == 0 ? pos : extraTiles[i - 1]; }
 
     bool isMoving()                const { return pos != destination; }
     bool isIdle()                  const { return pos == destination; }
@@ -61,7 +68,9 @@ struct EntityConfig {
     Vec2f size;
     int   drawOrder;
     int   health;
-    int   mana = 0;
+    int   mana         = 0;
+    int   mass         = 1;
+    int   maxCarryMass = 0;  // 0 = cannot carry anything
 };
 
 EntityConfig defaultConfig(EntityType type);

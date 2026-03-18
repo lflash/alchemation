@@ -230,6 +230,10 @@ public:
     // Entities in the active field, sorted by drawOrder.
     std::vector<const Entity*> drawOrder() const;
 
+    // Test helper: spawn an entity directly into the world field at a given tile.
+    // z is resolved from terrain. mana overrides the default if > 0.
+    EntityID injectEntity(EntityType type, int x, int y, int mana = 0);
+
 private:
     // ── Pending cross-field transfer ──────────────────────────────────────────
     struct PendingTransfer {
@@ -286,6 +290,7 @@ private:
 
     void subscribeEvents(Field& field);
     void applyPendingTransfer();
+    void chopTree(Field& field, EntityID treeID, Entity* tree, Direction facing, Tick t);
 
     // Per-field tick sub-systems (all fields run these each tick if not paused).
     void tickScheduler(Field& field, Tick currentTick);

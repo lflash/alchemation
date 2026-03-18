@@ -367,6 +367,19 @@ std::vector<const Entity*> Game::drawOrder() const {
     return result;
 }
 
+// ─── Test helpers ─────────────────────────────────────────────────────────────
+
+EntityID Game::injectEntity(EntityType type, int x, int y, int mana) {
+    Field& field = fields_.at(FIELD_WORLD);
+    int z = field.terrain.levelAt({x, y, 0});
+    EntityID eid = registry_.spawn(type, {x, y, z});
+    Entity* e = registry_.get(eid);
+    if (!e) return INVALID_ENTITY;
+    if (mana > 0) e->mana = mana;
+    field.add(eid, *e);
+    return eid;
+}
+
 // ─── Mouse interaction (Phase 16) ─────────────────────────────────────────────
 
 const Entity* Game::entityAtTile(TilePos tile) const {
@@ -638,11 +651,33 @@ void Game::tickPlayerInput(const Input& input) {
                         pushDest.x = std::clamp(pushDest.x, 0, grid.width  - 1);
                         pushDest.y = std::clamp(pushDest.y, 0, grid.height - 1);
                     }
-                    std::vector<MoveIntention> push = {{
-                        cid, cand->pos, pushDest, cand->type, cand->size
-                    }};
-                    auto pushAllowed = resolveMoves(push, grid.spatial, registry_);
-                    if (pushAllowed.count(cid)) cand->destination = pushDest;
+
+                    // For multi-tile entities, also verify extra tile destinations are clear.
+                    bool extraBlocked = false;
+                    if (cand->tileCount > 1) {
+                        for (int i = 1; i < cand->tileCount && !extraBlocked; ++i) {
+                            TilePos extraDest = { cand->extraTiles[i-1].x + delta.x,
+                                                  cand->extraTiles[i-1].y + delta.y,
+                                                  cand->extraTiles[i-1].z };
+                            if (!grid.isBounded())
+                                extraDest.z = grid.terrain.levelAt(extraDest);
+                            for (EntityID oid : std::vector<EntityID>(grid.spatial.at(extraDest))) {
+                                if (oid == cid) continue;
+                                const Entity* occ = registry_.get(oid);
+                                if (!occ) continue;
+                                if (resolveCollision(cand->type, occ->type) == CollisionResult::Block)
+                                    extraBlocked = true;
+                            }
+                        }
+                    }
+
+                    if (!extraBlocked) {
+                        std::vector<MoveIntention> push = {{
+                            cid, cand->pos, pushDest, cand->type, cand->size
+                        }};
+                        auto pushAllowed = resolveMoves(push, grid.spatial, registry_);
+                        if (pushAllowed.count(cid)) cand->destination = pushDest;
+                    }
                     break;
                 }
             }
@@ -795,7 +830,11 @@ void Game::tickPlayerInput(const Input& input) {
                 Entity* cand = registry_.get(cid);
                 if (!cand || cid == playerID_) continue;
                 if (!cand->hasCapability(Capability::Carriable)) continue;
+                if (cand->mass > player->maxCarryMass) continue;   // too heavy
+                // Remove from spatial at all occupied tiles.
                 grid.spatial.remove(cid, cand->pos, cand->size);
+                for (int i = 1; i < cand->tileCount; ++i)
+                    grid.spatial.remove(cid, cand->extraTiles[i - 1], cand->size);
                 cand->carriedBy = playerID_;
                 player->carrying = cid;
                 return;
@@ -808,23 +847,49 @@ void Game::tickPlayerInput(const Input& input) {
         Entity* carried = registry_.get(player->carrying);
         if (!carried) { player->carrying = INVALID_ENTITY; return; }
         TilePos dropPos = aheadAt();
-        Bounds dropBounds = boundsAt(dropPos, carried->size);
-        bool blocked = false;
-        for (EntityID oid : grid.spatial.at(dropPos)) {
-            const Entity* occ = registry_.get(oid);
-            if (!occ || oid == playerID_) continue;
-            if (overlaps(dropBounds, boundsAt(occ->pos, occ->size))) {
-                if (resolveCollision(carried->type, occ->type) == CollisionResult::Block) {
-                    blocked = true; break;
-                }
+
+        // Compute all tile positions the dropped entity will occupy.
+        std::vector<TilePos> dropTiles;
+        dropTiles.reserve(carried->tileCount);
+        dropTiles.push_back(dropPos);
+        if (carried->tileCount > 1) {
+            TilePos d = dirToDelta(carried->facing);
+            for (int i = 1; i < carried->tileCount; ++i) {
+                TilePos extra = { dropPos.x + d.x * i,
+                                  dropPos.y + d.y * i,
+                                  dropPos.z };
+                if (!grid.isBounded())
+                    extra.z = grid.terrain.levelAt(extra);
+                dropTiles.push_back(extra);
             }
         }
+
+        // Check every drop tile for blocking occupants.
+        bool blocked = false;
+        for (const TilePos& tile : dropTiles) {
+            Bounds dropBounds = boundsAt(tile, carried->size);
+            for (EntityID oid : grid.spatial.at(tile)) {
+                const Entity* occ = registry_.get(oid);
+                if (!occ || oid == playerID_) continue;
+                if (overlaps(dropBounds, boundsAt(occ->pos, occ->size))) {
+                    if (resolveCollision(carried->type, occ->type) == CollisionResult::Block) {
+                        blocked = true; break;
+                    }
+                }
+            }
+            if (blocked) break;
+        }
+
         if (!blocked) {
-            carried->pos         = dropPos;
-            carried->destination = dropPos;
+            carried->pos          = dropTiles[0];
+            carried->destination  = dropTiles[0];
             carried->moveProgress = 0.0f;
-            carried->carriedBy   = INVALID_ENTITY;
-            grid.spatial.add(player->carrying, dropPos, carried->size);
+            carried->carriedBy    = INVALID_ENTITY;
+            grid.spatial.add(player->carrying, dropTiles[0], carried->size);
+            for (int i = 1; i < carried->tileCount; ++i) {
+                carried->extraTiles[i - 1] = dropTiles[i];
+                grid.spatial.add(player->carrying, dropTiles[i], carried->size);
+            }
             player->carrying = INVALID_ENTITY;
         }
     };
@@ -834,7 +899,14 @@ void Game::tickPlayerInput(const Input& input) {
             for (EntityID cid : grid.spatial.at(aheadAt(dz))) {
                 Entity* cand = registry_.get(cid);
                 if (!cand || cid == playerID_) continue;
-                if (cand->mana > 0) --cand->mana;
+                if (cand->type == EntityType::Tree) {
+                    if (cand->health > 0) --cand->health;
+                    if (cand->health == 0) {
+                        chopTree(grid, cid, cand, player->facing, 0);
+                    }
+                } else {
+                    if (cand->mana > 0) --cand->mana;
+                }
                 return;
             }
         }
@@ -869,6 +941,39 @@ void Game::tickPlayerInput(const Input& input) {
             case PlayerAction::Hit:         doHit();      break;
         }
     }
+}
+
+// ─── chopTree ────────────────────────────────────────────────────────────────
+
+void Game::chopTree(Field& field, EntityID treeID, Entity* tree, Direction facing, Tick) {
+    TilePos rootPos = tree->pos;
+    int     logLen  = tree->mass;   // tree mass = tree height = log tile count (1–3)
+    TilePos delta   = dirToDelta(facing);
+
+    // Despawn tree.
+    field.remove(treeID, *tree);
+    registry_.destroy(treeID);
+
+    // Spawn log.
+    EntityID lid = registry_.spawn(EntityType::Log, rootPos);
+    Entity*  log = registry_.get(lid);
+    log->mass      = logLen;
+    log->tileCount = logLen;
+    log->facing    = facing;   // store fall direction for drop orientation
+    // Extra tile positions (fall in facing direction from root).
+    for (int i = 1; i < logLen; ++i) {
+        TilePos extra = { rootPos.x + delta.x * i,
+                          rootPos.y + delta.y * i,
+                          rootPos.z };
+        if (!field.isBounded())
+            extra.z = field.terrain.levelAt(extra);
+        log->extraTiles[i - 1] = extra;
+    }
+    field.add(lid, *log);
+
+    audioEvents_.push_back(AudioEvent::Dig);
+    visualEvents_.push_back({ VisualEventType::Dig,
+                               toVec(rootPos), static_cast<float>(rootPos.z) });
 }
 
 // ─── Routine VM ──────────────────────────────────────────────────────────────
@@ -1254,6 +1359,13 @@ namespace {
             wr<uint8_t>(f, static_cast<uint8_t>(e->facing));
             wr<int32_t>(f, e->mana);
             wr<int32_t>(f, e->health);
+            wr<int32_t>(f, e->mass);
+            wr<uint8_t>(f, static_cast<uint8_t>(e->tileCount));
+            for (int i = 1; i < e->tileCount; ++i) {
+                wr<int32_t>(f, e->extraTiles[i-1].x);
+                wr<int32_t>(f, e->extraTiles[i-1].y);
+                wr<int32_t>(f, e->extraTiles[i-1].z);
+            }
             // Water entities carry extra FluidComponent data.
             if (e->type == EntityType::Water) {
                 const FluidComponent* fc = fluids.get(eid);
@@ -1278,7 +1390,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 13);   // version 13: TileType removed; tile-state entities (BareEarth, Fire, Puddle, Straw, Portal)
+    wr<uint8_t>(f, 14);   // version 14: added mass, tileCount, extraTiles per entity
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -1330,7 +1442,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 13) return false;
+    if (version != 14) return false;
 
     // Clear all state
     for (auto& [id, field] : fields_) {
@@ -1396,10 +1508,22 @@ bool Game::load(const std::string& path) {
             Direction  facing = static_cast<Direction>(rd<uint8_t>(f));
             int        mana   = rd<int32_t>(f);
             int        health = rd<int32_t>(f);
+            int        mass   = rd<int32_t>(f);
+            int        tileCount = rd<uint8_t>(f);
+            TilePos    extraTiles[2] = {};
+            for (int i = 1; i < tileCount && i <= 2; ++i) {
+                extraTiles[i-1].x = rd<int32_t>(f);
+                extraTiles[i-1].y = rd<int32_t>(f);
+                extraTiles[i-1].z = rd<int32_t>(f);
+            }
 
             EntityID eid = registry_.spawn(et, pos);
             Entity*  e   = registry_.get(eid);
             e->facing = facing; e->mana = mana; e->health = health;
+            e->mass = mass;
+            e->tileCount = tileCount;
+            for (int i = 1; i < tileCount && i <= 2; ++i)
+                e->extraTiles[i-1] = extraTiles[i-1];
             grid.add(eid, *e);
             if (et == EntityType::Water) {
                 float h  = rd<float>(f);

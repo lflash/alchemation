@@ -76,6 +76,8 @@ public:
     void add(EntityID eid, Entity& e) {
         entities.push_back(eid);
         spatial.add(eid, e.pos, e.size);
+        for (int i = 1; i < e.tileCount; ++i)
+            spatial.add(eid, e.extraTiles[i - 1], e.size);
     }
 
     // Unregister an entity: removes from entity list and spatial index.
@@ -84,6 +86,8 @@ public:
         spatial.remove(eid, e.pos, e.size);
         if (e.isMoving())
             spatial.remove(eid, e.destination, e.size);
+        for (int i = 1; i < e.tileCount; ++i)
+            spatial.remove(eid, e.extraTiles[i - 1], e.size);
         entities.erase(std::remove(entities.begin(), entities.end(), eid),
                        entities.end());
     }

@@ -33,8 +33,9 @@ static bool resolveDestHeight(TilePos& dest, const TilePos& from, const Field& f
 // Side-effects (per idle tick):
 //   - Hit adjacent Rabbit → -1 mana; destroy if mana==0, drop Meat
 //   - Pick up adjacent loose Meat (or steal from adjacent player)
-//   - Eat carried Meat when adjacent to Campfire: mana += meat.mana, destroy meat
-//   - Drop Meat beside (but not on) fire when loaded and at fire
+//   - Drop raw Meat beside fire when adjacent: let tickCooking convert it (150 ticks → CookedMeat, 4× mana)
+//   - Eat CookedMeat immediately when adjacent to fire: mana += meat.mana, destroy meat
+//   - Don't pick up raw Meat while within 2 tiles of fire (leave it to cook)
 //
 // Mana decays every DECAY_RATE ticks; hunger drives prey-seeking.
 
@@ -153,14 +154,24 @@ void Game::tickGoblinAI(Field& grid, Tick currentTick) {
             if (d < bestFireDist) { bestFireDist = d; nearestFire = fp; hasFire = true; }
         }
 
-        // ── Side-effect: eat carried food when adjacent to fire ───────────────
+        // ── Side-effect: cook or eat carried food when adjacent to fire ──────
         if (loaded && carriedEnt && hasFire && manhat(ent->pos, nearestFire) <= 1) {
-            ent->mana = std::min(ent->mana + carriedEnt->mana, MANA_MAX);
-            grid.remove(ent->carrying, *carriedEnt);
-            registry_.destroy(ent->carrying);
-            ent->carrying = INVALID_ENTITY;
-            loaded = false;
-            carriedEnt = nullptr;
+            if (carriedEnt->type == EntityType::Meat) {
+                // Drop raw meat beside the fire to let tickCooking convert it.
+                carriedEnt->carriedBy = INVALID_ENTITY;
+                grid.spatial.add(ent->carrying, carriedEnt->pos, carriedEnt->size);
+                ent->carrying = INVALID_ENTITY;
+                loaded = false;
+                carriedEnt = nullptr;
+            } else {
+                // CookedMeat: eat immediately.
+                ent->mana = std::min(ent->mana + carriedEnt->mana, MANA_MAX);
+                grid.remove(ent->carrying, *carriedEnt);
+                registry_.destroy(ent->carrying);
+                ent->carrying = INVALID_ENTITY;
+                loaded = false;
+                carriedEnt = nullptr;
+            }
         }
 
 
@@ -201,6 +212,8 @@ void Game::tickGoblinAI(Field& grid, Tick currentTick) {
                     if (!cand) continue;
                     if (cand->type != EntityType::Meat && cand->type != EntityType::CookedMeat) continue;
                     if (cand->carriedBy != INVALID_ENTITY) continue;
+                    // Don't pick up raw Meat while near fire — leave it to cook.
+                    if (cand->type == EntityType::Meat && hasFire && manhat(ent->pos, nearestFire) <= 2) continue;
                     // Pick it up.
                     grid.spatial.remove(cid, cand->pos, cand->size);
                     cand->carriedBy = eid;
@@ -449,6 +462,22 @@ void Game::tickMovement(Field& grid) {
         bool    arrived = stepMovement(*ent);
         if (arrived) {
             grid.spatial.move(eid, oldPos, ent->pos, ent->size);
+
+            // For multi-tile entities, update extra tile spatial registrations on arrival.
+            if (ent->tileCount > 1) {
+                TilePos moveDelta = { ent->pos.x - oldPos.x, ent->pos.y - oldPos.y, 0 };
+                for (int i = 1; i < ent->tileCount; ++i) {
+                    TilePos oldExtra = ent->extraTiles[i - 1];
+                    TilePos newExtra = { oldExtra.x + moveDelta.x,
+                                        oldExtra.y + moveDelta.y,
+                                        oldExtra.z };
+                    if (!grid.isBounded())
+                        newExtra.z = grid.terrain.levelAt(newExtra);
+                    grid.spatial.remove(eid, oldExtra, ent->size);
+                    grid.spatial.add(eid, newExtra, ent->size);
+                    ent->extraTiles[i - 1] = newExtra;
+                }
+            }
 
             // Water slows movement: half speed while standing on a Water entity tile.
             if (ent->speed > 0.0f) {

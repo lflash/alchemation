@@ -67,8 +67,11 @@ static void printState(Game& g) {
     r.setCamera(g.playerPos());
     r.beginFrame();
     r.drawTerrain(g.terrain());
-    for (const Entity* e : g.drawOrder())
+    for (const Entity* e : g.drawOrder()) {
         r.drawSprite(toVec(e->pos), 0.f, e->type, e->id, e->moveProgress);
+        for (int i = 1; i < e->tileCount; ++i)
+            r.drawSprite(toVec(e->extraTiles[i-1]), 0.f, e->type, e->id, e->moveProgress);
+    }
     r.endFrame();
     std::cout << grid.str() << '\n' << gameStateText(g) << '\n';
 }

@@ -163,9 +163,11 @@ TEST_CASE("TreeStump adjacent to campfire starts burning at tick 250") {
     for (Tick t = 0; t < 250; ++t)
         tickFire(grid, reg, t);
 
-    // Ignition fires on the 250th call (t=249); burnEnd = 249 + 500.
+    // Ignition fires on the 250th call (t=249); burnEnd = 249 + 500 * mass.
+    // TreeStump has mass=2, so burnEnd = 249 + 1000 = 1249.
     CHECK(grid.entityBurnEnd.count(stump));
-    CHECK(grid.entityBurnEnd[stump] == 249 + 500);
+    EntityConfig cfg = defaultConfig(EntityType::TreeStump);
+    CHECK(grid.entityBurnEnd[stump] == 249 + 500 * cfg.mass);
 }
 
 TEST_CASE("Log adjacent to campfire starts burning at tick 250") {

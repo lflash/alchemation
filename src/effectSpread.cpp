@@ -80,7 +80,11 @@ void tickFire(Field& field, EntityRegistry& registry, Tick currentTick) {
         std::vector<EntityID> cold;
         for (const auto& [eid, _] : field.entityFireExp) {
             const Entity* e = registry.get(eid);
-            if (!e || !heated.count(e->pos)) cold.push_back(eid);
+            if (!e) { cold.push_back(eid); continue; }
+            bool anyHeated = heated.count(e->pos) > 0;
+            for (int i = 1; i < e->tileCount && !anyHeated; ++i)
+                anyHeated = heated.count(e->extraTiles[i - 1]) > 0;
+            if (!anyHeated) cold.push_back(eid);
         }
         for (EntityID eid : cold) field.entityFireExp.erase(eid);
     }
@@ -115,9 +119,13 @@ void tickFire(Field& field, EntityRegistry& registry, Tick currentTick) {
         Entity* e = registry.get(eid);
         if (!e) continue;
         if (e->type != EntityType::TreeStump && e->type != EntityType::Log) continue;
-        if (!heated.count(e->pos)) continue;
+        // Check all occupied tiles for heat (multi-tile support).
+        bool anyHeated = heated.count(e->pos) > 0;
+        for (int i = 1; i < e->tileCount && !anyHeated; ++i)
+            anyHeated = heated.count(e->extraTiles[i - 1]) > 0;
+        if (!anyHeated) continue;
         if (++field.entityFireExp[eid] >= 250) {
-            field.entityBurnEnd[eid] = currentTick + 500;
+            field.entityBurnEnd[eid] = currentTick + 500 * e->mass;
             field.entityFireExp.erase(eid);
             e->burning = true;
         }
