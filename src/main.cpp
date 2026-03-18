@@ -626,8 +626,16 @@ int main() {
             float renderZ   = lerp(static_cast<float>(ent->pos.z),
                                    static_cast<float>(ent->destination.z), ent->moveProgress);
             if (ent->carriedBy != INVALID_ENTITY) renderZ += 1.5f;  // float above carrier
+            int zHeight = (ent->type == EntityType::Tree) ? ent->mass : 1;
             renderer.drawShadow(renderPos, renderZ);
-            renderer.drawSprite(renderPos, renderZ, ent->type, ent->id, ent->moveProgress, ent->lit);
+            renderer.drawSprite(renderPos, renderZ, ent->type, ent->id, ent->moveProgress, ent->lit, zHeight);
+            // Multi-tile entities (e.g. logs): draw extra tile positions too.
+            for (int i = 1; i < ent->tileCount; ++i) {
+                Vec2f ePos = toVec(ent->extraTiles[i - 1]);
+                float eZ   = static_cast<float>(ent->extraTiles[i - 1].z);
+                renderer.drawShadow(ePos, eZ);
+                renderer.drawSprite(ePos, eZ, ent->type, ent->id, ent->moveProgress, ent->lit);
+            }
             renderer.drawEntityEffects(renderPos, renderZ, ent->burning, ent->electrified);
             if (ent->type != EntityType::Mushroom   &&
                 ent->type != EntityType::Campfire   &&

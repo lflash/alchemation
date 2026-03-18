@@ -31,7 +31,8 @@ public:
     void beginFrame()                                override;
     void drawTerrain(const Terrain& terrain)         override;
     void drawSprite(Vec2f renderPos, float renderZ, EntityType type,
-                    EntityID eid, float moveProgress, bool lit = true) override;
+                    EntityID eid, float moveProgress, bool lit = true,
+                    int zHeight = 1) override;
     void endFrame()                                  override;
 
     // Pure functions — exposed for unit testing.

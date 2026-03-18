@@ -93,7 +93,8 @@ public:
     // renderZ is the interpolated z (for oblique vertical offset).
     void drawShadow(Vec2f renderPos, float renderZ);
     void drawSprite(Vec2f renderPos, float renderZ, EntityType type,
-                    EntityID eid, float moveProgress, bool lit = true);
+                    EntityID eid, float moveProgress, bool lit = true,
+                    int zHeight = 1);  // zHeight > 1: sprite is taller (trees)
 
     void endFrame();
 

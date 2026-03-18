@@ -303,7 +303,7 @@ void Renderer::drawShadow(Vec2f renderPos, float renderZ) {
 }
 
 void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type,
-                           EntityID eid, float moveProgress, bool lit) {
+                           EntityID eid, float moveProgress, bool lit, int zHeight) {
     // Tile-state entities: draw as full-tile colored rectangles.
     {
         int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
@@ -371,11 +371,14 @@ void Renderer::drawSprite(Vec2f renderPos, float renderZ, EntityType type,
 
     int iTs = static_cast<int>(std::ceil(TILE_SIZE * camera_.zoom));
     int iH  = static_cast<int>(std::ceil(TILE_H    * camera_.zoom));
+    // Taller sprites (e.g. trees) extend upward by Z_STEP per additional z-level.
+    int zExtra  = (zHeight > 1) ? static_cast<int>(std::round((zHeight - 1) * Z_STEP * camera_.zoom)) : 0;
+    int spriteH = iTs + zExtra;
     SDL_Rect dst = {
         toPixelX(renderPos.x, renderZ),
-        toPixelY(renderPos.y, renderZ) + iH / 2 - iTs - static_cast<int>(bob),
+        toPixelY(renderPos.y, renderZ) + iH / 2 - spriteH - static_cast<int>(bob),
         iTs,
-        iTs
+        spriteH
     };
     SDL_RenderCopy(sdl, tex, nullptr, &dst);
 }
