@@ -120,6 +120,7 @@ add_executable(tests
     tests/test_phase17.cpp
     tests/test_phase18.cpp
     tests/test_alchemy.cpp
+    tests/test_extra.cpp
     ${LOGIC_SOURCES}
 )
 
