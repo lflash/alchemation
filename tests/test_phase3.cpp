@@ -130,6 +130,55 @@ TEST_CASE("AABB: separated boxes return false") {
     CHECK(!overlaps(a, b));
 }
 
+// ─── SpatialGrid::atAnyZ ─────────────────────────────────────────────────────
+
+TEST_CASE("atAnyZ: finds entity at z=0") {
+    SpatialGrid spatial;
+    spatial.add(1, {3, 4, 0}, {0.8f, 0.8f});
+    CHECK(contains(spatial.atAnyZ(3, 4), 1));
+}
+
+TEST_CASE("atAnyZ: finds entity at z=2") {
+    SpatialGrid spatial;
+    spatial.add(1, {3, 4, 2}, {0.8f, 0.8f});
+    CHECK(contains(spatial.atAnyZ(3, 4), 1));
+}
+
+TEST_CASE("atAnyZ: returns entities across multiple z levels") {
+    SpatialGrid spatial;
+    spatial.add(1, {5, 5, 0}, {0.8f, 0.8f});
+    spatial.add(2, {5, 5, 1}, {0.8f, 0.8f});
+    spatial.add(3, {5, 5, 3}, {0.8f, 0.8f});
+    auto result = spatial.atAnyZ(5, 5);
+    CHECK(contains(result, 1));
+    CHECK(contains(result, 2));
+    CHECK(contains(result, 3));
+}
+
+TEST_CASE("atAnyZ: empty when no entity at (x,y)") {
+    SpatialGrid spatial;
+    spatial.add(1, {0, 0, 0}, {0.8f, 0.8f});
+    CHECK(spatial.atAnyZ(9, 9).empty());
+}
+
+TEST_CASE("atAnyZ: does not return entities at different xy") {
+    SpatialGrid spatial;
+    spatial.add(1, {1, 0, 0}, {0.8f, 0.8f});
+    spatial.add(2, {0, 1, 0}, {0.8f, 0.8f});
+    auto result = spatial.atAnyZ(0, 0);
+    CHECK(!contains(result, 1));
+    CHECK(!contains(result, 2));
+}
+
+TEST_CASE("atAnyZ: no duplicates for multi-tile entity spanning two z-matching cells") {
+    SpatialGrid spatial;
+    // 2-wide entity at z=0: registers in (0,0,0) and (1,0,0)
+    spatial.add(1, {0, 0, 0}, {2.0f, 1.0f});
+    auto result = spatial.atAnyZ(0, 0);
+    int count = static_cast<int>(std::count(result.begin(), result.end(), 1));
+    CHECK(count == 1);
+}
+
 // ─── Collision resolution table ──────────────────────────────────────────────
 
 TEST_CASE("resolveCollision: player + mushroom → Collect") {
@@ -235,4 +284,99 @@ TEST_CASE("resolveMoves: player not blocked by mushroom") {
 
     auto allowed = resolveMoves(intentions, spatial, registry);
     CHECK(allowed.count(player));
+}
+
+// ─── Extended collision table coverage ───────────────────────────────────────
+
+// Player mover
+TEST_CASE("resolveCollision: player + water → Pass") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Water) == CollisionResult::Pass);
+}
+TEST_CASE("resolveCollision: player + warren → Pass (enter via portal)") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Warren) == CollisionResult::Pass);
+}
+TEST_CASE("resolveCollision: player + log → Block (bump-push)") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Log) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: player + rabbit → Block") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Rabbit) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: player + chest → Collect") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Chest) == CollisionResult::Collect);
+}
+TEST_CASE("resolveCollision: player + tree → Block (static)") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Tree) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: player + campfire → Block (static)") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Campfire) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: player + fire → Pass") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::Fire) == CollisionResult::Pass);
+}
+TEST_CASE("resolveCollision: player + bare earth → Pass") {
+    CHECK(resolveCollision(EntityType::Player, EntityType::BareEarth) == CollisionResult::Pass);
+}
+
+// Goblin mover
+TEST_CASE("resolveCollision: goblin + player → Combat") {
+    CHECK(resolveCollision(EntityType::Goblin, EntityType::Player) == CollisionResult::Combat);
+}
+TEST_CASE("resolveCollision: goblin + tree → Block (static)") {
+    CHECK(resolveCollision(EntityType::Goblin, EntityType::Tree) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: goblin + mud golem → Block") {
+    CHECK(resolveCollision(EntityType::Goblin, EntityType::MudGolem) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: goblin + water → Pass") {
+    CHECK(resolveCollision(EntityType::Goblin, EntityType::Water) == CollisionResult::Pass);
+}
+
+// Golem movers — fighting vs non-fighting
+TEST_CASE("resolveCollision: iron golem + goblin → Hit") {
+    CHECK(resolveCollision(EntityType::IronGolem, EntityType::Goblin) == CollisionResult::Hit);
+}
+TEST_CASE("resolveCollision: wood golem + goblin → Hit") {
+    CHECK(resolveCollision(EntityType::WoodGolem, EntityType::Goblin) == CollisionResult::Hit);
+}
+TEST_CASE("resolveCollision: mud golem + goblin → Hit") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Goblin) == CollisionResult::Hit);
+}
+TEST_CASE("resolveCollision: stone golem + goblin → Block (non-fighting)") {
+    CHECK(resolveCollision(EntityType::StoneGolem, EntityType::Goblin) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: clay golem + goblin → Block (non-fighting)") {
+    CHECK(resolveCollision(EntityType::ClayGolem, EntityType::Goblin) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: mud golem + player → Block") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Player) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: iron golem + player → Block") {
+    CHECK(resolveCollision(EntityType::IronGolem, EntityType::Player) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: mud golem + mushroom → Pass") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Mushroom) == CollisionResult::Pass);
+}
+TEST_CASE("resolveCollision: mud golem + log → Block") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Log) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: mud golem + campfire → Block (static)") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Campfire) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: mud golem + iron golem → Block (golem occupant)") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::IronGolem) == CollisionResult::Block);
+}
+TEST_CASE("resolveCollision: mud golem + water → Pass") {
+    CHECK(resolveCollision(EntityType::MudGolem, EntityType::Water) == CollisionResult::Pass);
+}
+
+// Passive / inert movers
+TEST_CASE("resolveCollision: mushroom mover → always Pass") {
+    CHECK(resolveCollision(EntityType::Mushroom, EntityType::Player)  == CollisionResult::Pass);
+    CHECK(resolveCollision(EntityType::Mushroom, EntityType::Goblin)  == CollisionResult::Pass);
+    CHECK(resolveCollision(EntityType::Mushroom, EntityType::Tree)    == CollisionResult::Pass);
+}
+TEST_CASE("resolveCollision: non-mover type → always Pass") {
+    // Meat, LongGrass etc. are never movers; table should return Pass
+    CHECK(resolveCollision(EntityType::Meat,      EntityType::Player) == CollisionResult::Pass);
+    CHECK(resolveCollision(EntityType::LongGrass, EntityType::Tree)   == CollisionResult::Pass);
 }

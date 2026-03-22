@@ -130,6 +130,17 @@ target_link_libraries(tests PRIVATE SDL2::SDL2)
 
 add_test(NAME phase1 COMMAND tests)
 
+# GPU smoke test — requires Vulkan device and VK_LAYER_PATH set for validation layers.
+# Run with: ctest -R gpu_smoke or VK_LAYER_PATH=... ctest -R gpu_smoke
+add_test(NAME gpu_smoke
+    COMMAND gpu_smoke_test
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(gpu_smoke PROPERTIES
+    ENVIRONMENT "VK_LAYER_PATH=${CMAKE_PREFIX_PATH}/bin"
+    LABELS "gpu"
+)
+
 # ─── gpu_smoke_test: Phase 25a GPU pipeline verification ─────────────────────
 
 add_executable(gpu_smoke_test src/vk/smoke_test_main.cpp ${GPU_SOURCES})

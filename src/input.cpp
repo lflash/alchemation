@@ -86,8 +86,8 @@ void InputMap::save(const std::string& path) const {
         Action a = static_cast<Action>(i);
         SDL_Keycode code = get(a);
         if (code == SDLK_UNKNOWN) code = def.get(a);
-        const char* keyName = SDL_GetKeyName(code);
-        f << ACTION_NAMES[i] << '=' << keyName << '\n';
+        // Store as decimal integer — avoids SDL_GetKeyName which requires SDL_Init.
+        f << ACTION_NAMES[i] << '=' << static_cast<int>(code) << '\n';
     }
 }
 
@@ -105,7 +105,16 @@ InputMap InputMap::load(const std::string& path) {
         std::string keyStr = line.substr(eq + 1);
         Action a;
         if (!actionFromString(name, a)) continue;
-        SDL_Keycode code = SDL_GetKeyFromName(keyStr.c_str());
+
+        // Try decimal integer first (current format), fall back to SDL key name
+        // for backwards compatibility with older settings files.
+        SDL_Keycode code = SDLK_UNKNOWN;
+        try {
+            int val = std::stoi(keyStr);
+            code = static_cast<SDL_Keycode>(val);
+        } catch (...) {
+            code = SDL_GetKeyFromName(keyStr.c_str());
+        }
         if (code == SDLK_UNKNOWN) continue;
         result.set(a, code);
     }

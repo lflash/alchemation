@@ -1,6 +1,7 @@
 #include "doctest.h"
 #include "input.hpp"
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -8,7 +9,7 @@
 
 // Write text to a temp file; returns path. Caller should remove() it.
 static std::string writeTmp(const char* name, const std::string& content) {
-    std::string path = std::string("/tmp/") + name;
+    std::string path = (std::filesystem::temp_directory_path() / name).string();
     std::ofstream f(path);
     f << content;
     return path;
@@ -75,20 +76,21 @@ TEST_CASE("InputMap load returns defaults when file is absent") {
 
 TEST_CASE("InputMap load falls back to default for missing actions") {
     // File only rebinds MoveUp; all others should stay at defaults.
-    std::string path = writeTmp("inputmap_partial.dat", "MoveUp=Up\n");
+    std::string content = "MoveUp=" + std::to_string(SDLK_UP) + "\n";
+    std::string path = writeTmp("inputmap_partial.dat", content);
     InputMap loaded  = InputMap::load(path);
     InputMap def     = InputMap::defaults();
     std::remove(path.c_str());
 
-    CHECK(loaded.get(Action::MoveUp) == SDLK_UP);
+    CHECK(loaded.get(Action::MoveUp)    == SDLK_UP);
     CHECK(loaded.get(Action::MoveDown)  == def.get(Action::MoveDown));
     CHECK(loaded.get(Action::MoveLeft)  == def.get(Action::MoveLeft));
     CHECK(loaded.get(Action::MoveRight) == def.get(Action::MoveRight));
 }
 
 TEST_CASE("InputMap load ignores unrecognised action names") {
-    std::string path = writeTmp("inputmap_badaction.dat",
-        "NonExistentAction=A\nMoveDown=Down\n");
+    std::string content = "NonExistentAction=65\nMoveDown=" + std::to_string(SDLK_DOWN) + "\n";
+    std::string path = writeTmp("inputmap_badaction.dat", content);
     InputMap loaded = InputMap::load(path);
     std::remove(path.c_str());
 
@@ -102,13 +104,17 @@ TEST_CASE("InputMap load ignores lines with unrecognised key names") {
     InputMap loaded = InputMap::load(path);
     std::remove(path.c_str());
 
-    // Bad key name → binding should fall back to default
+    // Bad value (not an integer, not a valid SDL key name) → fall back to default
     CHECK(loaded.get(Action::MoveUp) == def.get(Action::MoveUp));
 }
 
 TEST_CASE("InputMap load ignores comment lines") {
-    std::string path = writeTmp("inputmap_comments.dat",
-        "# this is a comment\nMoveUp=Up\n# another comment\nMoveDown=Down\n");
+    std::string content =
+        "# this is a comment\n"
+        "MoveUp="   + std::to_string(SDLK_UP)   + "\n"
+        "# another comment\n"
+        "MoveDown=" + std::to_string(SDLK_DOWN)  + "\n";
+    std::string path = writeTmp("inputmap_comments.dat", content);
     InputMap loaded = InputMap::load(path);
     std::remove(path.c_str());
 
@@ -118,14 +124,15 @@ TEST_CASE("InputMap load ignores comment lines") {
 
 TEST_CASE("InputMap load ignores malformed lines (no '=')") {
     InputMap def  = InputMap::defaults();
-    std::string path = writeTmp("inputmap_malformed.dat",
-        "this line has no equals sign\nMoveUp=Up\n");
+    std::string content =
+        "this line has no equals sign\n"
+        "MoveUp=" + std::to_string(SDLK_UP) + "\n";
+    std::string path = writeTmp("inputmap_malformed.dat", content);
     InputMap loaded = InputMap::load(path);
     std::remove(path.c_str());
 
     CHECK(loaded.get(Action::MoveUp) == SDLK_UP);
-    // All others fall back to defaults
-    CHECK(loaded.get(Action::Dig) == def.get(Action::Dig));
+    CHECK(loaded.get(Action::Dig)    == def.get(Action::Dig));
 }
 
 // ─── Input class integration ──────────────────────────────────────────────────
