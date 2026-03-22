@@ -13,6 +13,37 @@ find_package(SDL2_image REQUIRED)
 find_package(PkgConfig  REQUIRED)
 pkg_check_modules(SDL2_TTF   REQUIRED IMPORTED_TARGET SDL2_ttf)
 pkg_check_modules(SDL2_MIXER REQUIRED IMPORTED_TARGET SDL2_mixer)
+find_package(Vulkan REQUIRED)
+
+# ─── Shader compilation (glslc → SPIR-V) ─────────────────────────────────────
+
+find_program(GLSLC glslc HINTS "${CMAKE_PREFIX_PATH}/bin" REQUIRED)
+file(GLOB SHADER_SOURCES "${CMAKE_SOURCE_DIR}/shaders/*.comp")
+set(SHADER_SPV_DIR "${CMAKE_SOURCE_DIR}/shaders/spv")
+file(MAKE_DIRECTORY "${SHADER_SPV_DIR}")
+
+set(SHADER_SPV_FILES "")
+foreach(SHADER ${SHADER_SOURCES})
+    get_filename_component(SHADER_NAME "${SHADER}" NAME)
+    set(SPV "${SHADER_SPV_DIR}/${SHADER_NAME}.spv")
+    add_custom_command(
+        OUTPUT  "${SPV}"
+        COMMAND "${GLSLC}" "${SHADER}" -o "${SPV}"
+        DEPENDS "${SHADER}"
+        COMMENT "Compiling shader ${SHADER_NAME}"
+    )
+    list(APPEND SHADER_SPV_FILES "${SPV}")
+endforeach()
+
+add_custom_target(shaders ALL DEPENDS ${SHADER_SPV_FILES})
+
+# ─── GPU compute sources (Vulkan) ─────────────────────────────────────────────
+
+set(GPU_SOURCES
+    src/vk/vk_context.cpp
+    src/vk/gpu_runner.cpp
+    src/vk/compute_pipeline.cpp
+)
 
 # ─── Logic sources: no display required, safe to link into tests ─────────────
 
@@ -47,10 +78,15 @@ add_executable(grid_game
     src/main.cpp
     ${LOGIC_SOURCES}
     ${RENDER_SOURCES}
+    ${GPU_SOURCES}
 )
 
+add_dependencies(grid_game shaders)
 target_include_directories(grid_game PRIVATE src vendor)
-target_link_libraries(grid_game PRIVATE SDL2::SDL2 SDL2_image::SDL2_image PkgConfig::SDL2_TTF PkgConfig::SDL2_MIXER)
+target_link_libraries(grid_game PRIVATE
+    SDL2::SDL2 SDL2_image::SDL2_image PkgConfig::SDL2_TTF PkgConfig::SDL2_MIXER
+    Vulkan::Vulkan
+)
 
 # Run from the project root so asset paths resolve correctly
 set_target_properties(grid_game PROPERTIES
@@ -93,6 +129,16 @@ target_include_directories(tests PRIVATE src vendor)
 target_link_libraries(tests PRIVATE SDL2::SDL2)
 
 add_test(NAME phase1 COMMAND tests)
+
+# ─── gpu_smoke_test: Phase 25a GPU pipeline verification ─────────────────────
+
+add_executable(gpu_smoke_test src/vk/smoke_test_main.cpp ${GPU_SOURCES})
+add_dependencies(gpu_smoke_test shaders)
+target_include_directories(gpu_smoke_test PRIVATE src src/vk vendor)
+target_link_libraries(gpu_smoke_test PRIVATE Vulkan::Vulkan)
+set_target_properties(gpu_smoke_test PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
 
 # ─── play: turn-by-turn CLI driver for AI play sessions ──────────────────────
 
