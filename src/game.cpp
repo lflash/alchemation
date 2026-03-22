@@ -1390,7 +1390,7 @@ void Game::save(const std::string& path) const {
     if (!f) return;
 
     f.write("GRID", 4);
-    wr<uint8_t>(f, 14);   // version 14: added mass, tileCount, extraTiles per entity
+    wr<uint8_t>(f, SAVE_FORMAT_VERSION);
 
     // Player
     const Entity* player = registry_.get(playerID_);
@@ -1442,7 +1442,7 @@ bool Game::load(const std::string& path) {
     f.read(magic, 4);
     if (std::strncmp(magic, "GRID", 4) != 0) return false;
     uint8_t version = rd<uint8_t>(f);
-    if (version != 14) return false;
+    if (version != SAVE_FORMAT_VERSION) return false;
 
     // Clear all state
     for (auto& [id, field] : fields_) {

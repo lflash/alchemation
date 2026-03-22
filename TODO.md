@@ -298,10 +298,10 @@ Pre-Phase 14:
 
 Deferred / as needed:
 - [ ] **ECS migration** — target architecture is ECS. Introduce `ComponentStore<T>` (wraps `unordered_map<EntityID, T>`) as the component store primitive. `FluidComponent { float h, vx, vy }` is the first instance (Phase 18). Migrate other type-specific state (burn timers, voltage, lit flag) to components incrementally. Core `Entity` struct retains identity fields only.
-- [ ] **Collision resolution hardcoded** — `resolveCollision()` is a nested `switch`. When entity types expand in Phase 12, convert to a 2D lookup table `constexpr CollisionResult COLLISION_TABLE[ET_COUNT][ET_COUNT]` (MEDIUM)
-- [ ] **Save format versioning policy** — bump version on every layout change; mismatch = fresh world (no migration). Document what changed in a comment next to the version constant. Current: v7. (Policy decided — just needs discipline per phase)
+- [x] **Collision resolution hardcoded** — converted `resolveCollision()` from nested switch to a static 2D `std::array<std::array<CR,N>,N>` lookup table initialised once at startup. Adding a new entity type requires only adding it to the relevant `statics[]`/`golems[]` array or a `set()` call. Also removed unreachable duplicate `Goblin` check in the original golem branch.
+- [x] **Save format versioning policy** — extracted magic `14` to `constexpr uint8_t SAVE_FORMAT_VERSION = 14` in `game.hpp`; added version-history comment. Both `save()` and `load()` now reference the constant.
 - [ ] **Entity pointer instability** — `EntityRegistry` stores entities in `unordered_map`; pointers/references invalidate on rehash. Callers that cache `Entity*` across ticks may see stale pointers. Audit usages; switch to ID-only access pattern or use a slot-map (MEDIUM)
-- [ ] **Z-level queries unchecked** — a few `SpatialGrid::at()` calls pass a `TilePos` with `z=0` when the intent is "any z". Add a `atAnyZ(x,y)` helper or audit call sites (LOW)
+- [x] **Z-level queries unchecked** — added `SpatialGrid::atAnyZ(int x, int y)` helper. Iterates all cells matching (x,y) regardless of z; use this when intent is truly "any z" rather than silently passing a two-field `TilePos` literal.
 - [ ] **Entity placeholder audit** — all current `EntityType` names (`Goblin`, `Mushroom`, `Campfire`, `TreeStump`, `Log`, `Battery`, `Lightbulb`) are temporary placeholders. Before Phase 12, update `ENTITIES.md` with final names and rename throughout the codebase. (See `DESIGN.md § Entity Placeholders`)
 
 ---
@@ -826,3 +826,68 @@ before this phase begins. See `DESIGN.md § Combat`.
 - [ ] Touchscreen input layer — all actions accessible via touch, co-equal with keyboard and gamepad
 - [ ] Port to additional platforms per `DESIGN.md § Platform` (order TBD)
 - [ ] Split-screen multiplayer — design must be settled before implementation
+
+---
+
+## Phase 25 — Vulkan GPU Compute (active)
+
+Full rewrite of the simulation layer targeting Vulkan compute shaders. The CPU
+prototype (Phases 1–24) is the reference implementation and stays intact. The GPU
+layer replaces the per-tick simulation logic; the SDL2 rendering and input paths
+are unchanged.
+
+**Hardware target:** NVIDIA RTX 3070 (8 GB VRAM). API: Vulkan 1.3 compute.
+
+### Architecture decisions (settled)
+- **SoA entity buffers** — each field of `Entity` becomes a separate GPU storage buffer;
+  one element per entity slot. Matches `ComponentStore<T>` concept from CPU prototype.
+- **One thread per entity** — each compute shader invocation handles one entity.
+- **Systems as compute passes** — one `vkCmdDispatch` per simulation system per tick
+  (movement, goblin AI, rabbit AI, fire, voltage, fluid, routine VM).
+- **Tick orchestration on CPU** — the CPU submits command buffers, handles
+  input, and drives SDL2 rendering. Entity spawn/despawn (rare) goes through a
+  CPU-side staging buffer that is uploaded once per tick.
+- **No incremental migration** — the CPU `Game::tick()` is replaced wholesale once
+  the GPU layer is feature-complete. Until then both run side by side for verification.
+
+### Phase 25a — Vulkan infrastructure
+- [ ] `vk/` directory: `VulkanContext` (instance, device, compute queue, memory allocator)
+- [ ] `GpuBuffer<T>` — typed wrapper: allocate, map, upload, download
+- [ ] `ComputePipeline` — load SPIR-V, create pipeline + descriptor set layout
+- [ ] Shader build step in CMakeLists: `glslc *.comp → *.spv`
+- [ ] Smoke-test: dispatch a shader that writes `42` into a buffer; read back on CPU
+
+### Phase 25b — Entity SoA buffers
+- [ ] `EntityBuffers` — one `GpuBuffer` per entity field (`pos_x`, `pos_y`, `pos_z`,
+  `dest_x`, `dest_y`, `dest_z`, `type`, `moveProgress`, `speed`, `health`, `mana`,
+  `capabilities`, `facing`, `carrying`, `carriedBy`, `burning`, `lit`, `electrified`)
+- [ ] `EntityBuffers::upload(EntityRegistry&)` — CPU→GPU copy each tick
+- [ ] `EntityBuffers::download(EntityRegistry&)` — GPU→CPU copy after all passes
+
+### Phase 25c — Movement kernel
+- [ ] `movement.comp` — advances `moveProgress` by `speed`; on arrival snaps `pos` to `dest`
+- [ ] Height blocking in shader (read terrain heightmap texture)
+- [ ] Swap detection across all intentions (atomics or two-pass)
+- [ ] Verify output matches CPU `tickMovement()` for the same input
+
+### Phase 25d — Stimulus kernels
+- [ ] `fire.comp` — timer-based spread; extinguish on water adjacency
+- [ ] `voltage.comp` — BFS from Battery entities via Puddle tiles (workgroup BFS)
+- [ ] `fluid.comp` — flux-based equalisation (same algorithm as CPU `tickFluid`)
+
+### Phase 25e — AI kernels
+- [ ] `goblin_ai.comp` — scoring equation, hunt/carry/eat behaviour; one thread per goblin
+- [ ] `rabbit_ai.comp` — hunger decay, emerge/return, breeding
+
+### Phase 25f — Routine VM kernel
+- [ ] `routine_vm.comp` — interpreter loop; `AgentExecState` (PC, wait counter) in SoA buffers
+- [ ] All opcodes: MOVE_REL, WAIT, HALT, DIG, PLANT, SCYTHE, MINE, SUMMON, conditional branches
+- [ ] Stimulus vector computed per-agent from entity + terrain buffers
+
+### Phase 25g — Integration & verification
+- [ ] Replace `Game::tick()` with GPU dispatch + readback
+- [ ] Run CPU and GPU tick in parallel for N frames; assert entity states match
+- [ ] Remove CPU simulation path once verified
+
+### Phase 25h — Remaining phases on GPU
+- [ ] Phase 19–24 features implemented directly as compute kernels (no CPU detour)

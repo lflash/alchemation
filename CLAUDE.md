@@ -28,15 +28,35 @@ approach. Do not treat any design as fixed without checking with the user first.
 
 ## Build
 
+**On Windows with MSYS2 (ucrt64):**
+
+Install SDL2 dev packages via pacman if not already present:
+```bash
+pacman -S mingw-w64-ucrt-x86_64-SDL2 mingw-w64-ucrt-x86_64-SDL2_image \
+          mingw-w64-ucrt-x86_64-SDL2_ttf mingw-w64-ucrt-x86_64-SDL2_mixer
+```
+
+Configure and build (pass `CMAKE_PREFIX_PATH` so CMake finds the MSYS2 SDL2):
+```bash
+cmake -B build -S . -DCMAKE_PREFIX_PATH=/c/msys64/ucrt64
+cmake --build build
+./grid_game.exe      # run game (from project root — asset paths are relative)
+cmake --build build --target tests
+build/tests.exe      # full doctest output
+```
+
+**On Linux:**
+
+Dependencies: `libsdl2-dev`, `libsdl2-image-dev`, `libsdl2-ttf-dev`, `libsdl2-mixer-dev`, `cmake`
 ```bash
 cmake -B build -S .
 cmake --build build
-./grid_game          # run game (from project root — asset paths are relative)
-cd build && ctest    # run tests (run the binary directly for full doctest output)
+./grid_game
+cd build && ctest
 build/tests
 ```
 
-Dependencies: `libsdl2-dev`, `libsdl2-image-dev`, `cmake`
+**Note:** `main.cpp` uses `int main(int, char**)` (required by SDL2's Windows entry-point wrapper).
 
 ## Current Architecture Thinking
 

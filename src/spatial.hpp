@@ -26,6 +26,11 @@ public:
     // Entities registered at a specific tile.
     std::vector<EntityID> at(TilePos pos) const;
 
+    // All entities at (x, y) across every z level.
+    // Use this when the caller genuinely wants any-z semantics rather than
+    // silently passing z=0 via a two-field TilePos literal.
+    std::vector<EntityID> atAnyZ(int x, int y) const;
+
     // Broad phase: all unique EntityIDs in any cell overlapping the given bounds
     // at the specified z level. Defaults to z=0 for backward compatibility.
     std::vector<EntityID> query(Bounds bounds, int z = 0) const;

@@ -65,6 +65,17 @@ std::vector<EntityID> SpatialGrid::at(TilePos pos) const {
     return it->second;
 }
 
+std::vector<EntityID> SpatialGrid::atAnyZ(int x, int y) const {
+    std::vector<EntityID> result;
+    for (const auto& [pos, ids] : cells) {
+        if (pos.x != x || pos.y != y) continue;
+        for (EntityID id : ids)
+            if (std::find(result.begin(), result.end(), id) == result.end())
+                result.push_back(id);
+    }
+    return result;
+}
+
 std::vector<EntityID> SpatialGrid::query(Bounds bounds, int z) const {
     int x0 = static_cast<int>(std::floor(bounds.min.x));
     int y0 = static_cast<int>(std::floor(bounds.min.y));
@@ -87,62 +98,88 @@ std::vector<EntityID> SpatialGrid::query(Bounds bounds, int z) const {
 
 // ─── Collision resolution ─────────────────────────────────────────────────────
 
-CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
-    using ET = EntityType;
+// (mover, occupant) → CollisionResult lookup table.
+// Initialised once; resolveCollision() is a single array lookup.
+//
+// Row (mover) / column (occupant) layout mirrors the comment in spatial.hpp:
+//
+//         │ Player  Goblin  Mushroom  Golem  Static  Log   ...
+// ────────┼──────────────────────────────────────────────────────
+// Player  │  —      Block   Collect   Block  Block   Block  Pass
+// Goblin  │ Combat  Block    Pass     Block  Block   Pass   Pass
+// Golem   │ Block   Hit/Blk  Pass     Block  Block   Block  Pass
+// other   │  Pass   Pass     Pass      Pass   Pass   Pass   Pass
+
+namespace {
+    constexpr int ET_COUNT = static_cast<int>(EntityType::Portal) + 1;
+
     using CR = CollisionResult;
+    using ET = EntityType;
 
-    // Water entities are always passable — movers walk through water.
-    if (occupant == ET::Water) return CR::Pass;
+    std::array<std::array<CR, ET_COUNT>, ET_COUNT> buildCollisionTable() {
+        std::array<std::array<CR, ET_COUNT>, ET_COUNT> t{};
+        for (auto& row : t) row.fill(CR::Pass);
 
-    // Static terrain objects — always block movers that reach them.
-    auto isStatic = [](ET t) {
-        return t == ET::Tree || t == ET::Rock || t == ET::Campfire ||
-               t == ET::TreeStump || t == ET::Battery || t == ET::Lightbulb ||
-               t == ET::Warren ||
-               t == ET::IronOre || t == ET::CopperOre ||
-               t == ET::CoalOre || t == ET::SulphurOre;
-    };
+        auto idx = [](ET e) { return static_cast<int>(e); };
+        auto set = [&](ET m, ET o, CR r) { t[idx(m)][idx(o)] = r; };
 
-    switch (mover) {
-        case ET::Player:
-            if (occupant == ET::Goblin)   return CR::Block;    // bump → combat
-            if (occupant == ET::Mushroom) return CR::Collect;
-            if (occupant == ET::Chest)    return CR::Collect;
-            if (occupant == ET::Rabbit)   return CR::Block;
-            if (occupant == ET::Warren)   return CR::Pass;     // enter warren via portal
-            if (occupant == ET::Log)      return CR::Block;    // bump → push
-            if (occupant == ET::Rock)     return CR::Block;    // bump → push
-            if (isGolem(occupant))        return CR::Block;
-            if (isStatic(occupant))       return CR::Block;
-            return CR::Pass;
+        // Static occupants block all active movers.
+        const ET statics[] = {
+            ET::Tree, ET::Rock, ET::Campfire, ET::TreeStump,
+            ET::Battery, ET::Lightbulb, ET::Warren,
+            ET::IronOre, ET::CopperOre, ET::CoalOre, ET::SulphurOre,
+        };
+        const ET golems[] = {
+            ET::MudGolem, ET::StoneGolem, ET::ClayGolem, ET::WaterGolem,
+            ET::BushGolem, ET::WoodGolem, ET::IronGolem, ET::CopperGolem,
+        };
+        // Movers that interact with the world (Mushroom and inert types always pass).
+        const ET activeMovers[] = {
+            ET::Player, ET::Goblin,
+            ET::MudGolem, ET::StoneGolem, ET::ClayGolem, ET::WaterGolem,
+            ET::BushGolem, ET::WoodGolem, ET::IronGolem, ET::CopperGolem,
+        };
 
-        case ET::Goblin:
-            if (occupant == ET::Player)   return CR::Combat;
-            if (occupant == ET::Goblin)   return CR::Block;
-            if (isGolem(occupant))        return CR::Block;
-            if (isStatic(occupant))       return CR::Block;
-            return CR::Pass;
+        for (ET m : activeMovers) {
+            for (ET o : statics) set(m, o, CR::Block);
+            for (ET o : golems)  set(m, o, CR::Block);
+        }
 
-        case ET::Mushroom:
-            return CR::Pass;
+        // Player specifics (some override the blocks set above).
+        set(ET::Player, ET::Goblin,   CR::Block);    // bump → combat event
+        set(ET::Player, ET::Mushroom, CR::Collect);
+        set(ET::Player, ET::Chest,    CR::Collect);
+        set(ET::Player, ET::Rabbit,   CR::Block);
+        set(ET::Player, ET::Warren,   CR::Pass);     // enter warren via portal
+        set(ET::Player, ET::Log,      CR::Block);    // bump → push
 
-        // Golems
-        default:
-            if (!isGolem(mover)) return CR::Pass;
-            if (occupant == ET::Player)   return CR::Block;
-            if (occupant == ET::Goblin) {
-                // Fighting golems strike goblins; others are blocked
-                if (mover == ET::MudGolem || mover == ET::IronGolem || mover == ET::WoodGolem)
-                    return CR::Hit;
-                return CR::Block;
-            }
-            if (occupant == ET::Mushroom) return CR::Pass;
-            if (occupant == ET::Goblin)   return CR::Block;
-            if (isGolem(occupant))        return CR::Block;
-            if (isStatic(occupant))       return CR::Block;
-            if (occupant == ET::Log || occupant == ET::Rock) return CR::Block;
-            return CR::Pass;
+        // Goblin specifics.
+        set(ET::Goblin, ET::Player, CR::Combat);
+        set(ET::Goblin, ET::Goblin, CR::Block);
+
+        // Golem specifics.
+        for (ET m : golems) {
+            set(m, ET::Player,   CR::Block);
+            set(m, ET::Goblin,   CR::Block);   // default; fighting golems override below
+            set(m, ET::Mushroom, CR::Pass);
+            set(m, ET::Log,      CR::Block);
+        }
+        // Fighting golems strike goblins instead of blocking.
+        for (ET m : {ET::MudGolem, ET::IronGolem, ET::WoodGolem})
+            set(m, ET::Goblin, CR::Hit);
+
+        return t;
     }
+
+    const auto kCollisionTable = buildCollisionTable();
+} // namespace
+
+CollisionResult resolveCollision(EntityType mover, EntityType occupant) {
+    int mi = static_cast<int>(mover);
+    int oi = static_cast<int>(occupant);
+    if (mi < 0 || mi >= ET_COUNT || oi < 0 || oi >= ET_COUNT)
+        return CollisionResult::Pass;
+    return kCollisionTable[mi][oi];
 }
 
 // ─── Two-phase move resolution ────────────────────────────────────────────────

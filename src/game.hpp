@@ -130,6 +130,17 @@ struct AgentSlot {
     Routine        routine;
 };
 
+// ─── Save format version ─────────────────────────────────────────────────────
+//
+// Bump when the binary layout changes. load() rejects files with a different
+// version and the player gets a fresh world.
+//
+// History:
+//   14  added mass, tileCount, extraTiles per entity
+//   13  (prior; exact change not recorded)
+//   11  (prior; exact change not recorded)
+constexpr uint8_t SAVE_FORMAT_VERSION = 14;
+
 // ─── Field ID constants ───────────────────────────────────────────────────────
 
 constexpr FieldID FIELD_WORLD     = 1;

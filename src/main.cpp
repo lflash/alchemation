@@ -174,7 +174,7 @@ static void openContextMenu(UIState& ui, TilePos tile, const Entity* ent,
     (void)tile; // tile stored implicitly via game.queueClickMove called on selection
 }
 
-int main() {
+int main(int, char**) {
     std::srand(static_cast<unsigned>(std::time(nullptr)));
 
     Renderer    renderer;

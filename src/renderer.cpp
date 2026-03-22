@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES
 #include "renderer.hpp"
 #include "terrain.hpp"
 #include "routine.hpp"
